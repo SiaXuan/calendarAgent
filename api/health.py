@@ -19,6 +19,19 @@ class HealthInput(BaseModel):
     active_minutes: int | None = None
 
 
+@router.get("/health/{date}", response_model=HealthSnapshot)
+async def get_health(date: str):
+    from datetime import date as date_type
+    try:
+        d = date_type.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+    snapshot = orchestrator.health_store.get(d)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="No health data for this date.")
+    return snapshot
+
+
 @router.post("/health", response_model=HealthSnapshot)
 async def receive_health(payload: HealthInput):
     from datetime import date as date_type
@@ -46,5 +59,6 @@ async def receive_health(payload: HealthInput):
     orchestrator.health_store[d] = snapshot
     # Invalidate cached health for this date so it's recomputed next time
     orchestrator._health_cache.pop(d, None)
+    orchestrator.save_health_store()
 
     return snapshot

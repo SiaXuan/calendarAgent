@@ -1,8 +1,20 @@
 """
-Health Agent — converts a HealthSnapshot into a 24-hour energy curve and a plain-text summary.
-Energy curve is pure rule-based logic. Health summary uses Claude for non-English languages.
+Health Agent — converts a HealthSnapshot into a 24-hour energy curve and summary.
+Energy curve is pure rule-based logic. Health summary uses Claude for non-English locales.
+
+Chronotype model
+────────────────
+Bedtime is used to infer the user's circadian rhythm:
+  - "Early bird"  (bed ≤ 22:00) → two peaks: midday + mid-afternoon, early wind-down
+  - "Normal"      (bed 22–23:59) → standard two-peak curve
+  - "Night owl"   (bed ≥ 00:00) → adds a third evening Gaussian centred 2 h before bed;
+                                   wind-down is delayed accordingly
+
+All three peak Gaussians are evaluated on an extended hour axis (h_ext) anchored at
+wake_hour, so the arithmetic stays monotone across midnight.
 """
 import json
+import math
 import os
 from datetime import date
 
@@ -12,110 +24,122 @@ from models.health import HealthSnapshot
 from models.schedule import FreeWindow
 from models.user import Language
 
+_HRV_BASELINE = 40.0   # ms — population median used when no personal history exists
 
-# Typical HRV baseline used when no personal history is available
-_HRV_BASELINE = 40.0
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────────────────
 
 def compute_energy_curve(snapshot: HealthSnapshot) -> list[float]:
     """
-    Return a list of 24 floats indexed by hour (0 = midnight).
-    All values clamped to [0.0, 1.0].
+    Return a list of 24 floats (index = hour 0–23, midnight = 0).
+    All values are clamped to [0.0, 1.0].
     """
-    sleep_end_hour = snapshot.sleep.sleep_end.hour + snapshot.sleep.sleep_end.minute / 60
-    sleep_start_hour = snapshot.sleep.sleep_start.hour + snapshot.sleep.sleep_start.minute / 60
+    sleep_end_h   = _frac_hour(snapshot.sleep.sleep_end)
+    sleep_start_h = _frac_hour(snapshot.sleep.sleep_start)
 
-    # Normalise sleep_start so that a 23:00 bedtime → 23.0 and midnight+ stays as-is
-    # (sleep_start could be previous calendar day but we work with hour values only)
-    if sleep_start_hour < sleep_end_hour:
-        # e.g. nap: started at 13:00, ended 14:30 — treat as staying-up edge case
-        sleep_start_hour += 24
+    # Normalise to extended scale so sleep_start > sleep_end (overnight)
+    if sleep_start_h < sleep_end_h:
+        sleep_start_h += 24   # e.g. 2:00 am → 26.0
 
-    duration = snapshot.sleep.duration_hours
-    wake_hour = sleep_end_hour
+    duration  = snapshot.sleep.duration_hours
+    wake_hour = sleep_end_h
 
-    # --- Build baseline Gaussian-ish curve centred on peak hours ---
-    peak_hour = wake_hour + 3.0   # primary peak 3h after waking
-    afternoon_peak = wake_hour + 8.0   # secondary peak (mid-afternoon)
+    # ── Peak locations ────────────────────────────────────────────────────────
+    primary_peak   = wake_hour + 3.0   # sharp morning/midday peak
+    afternoon_peak = wake_hour + 8.0   # softer secondary peak
 
-    curve: list[float] = []
+    # ── Chronotype (night-owl coefficient 0–1) ────────────────────────────────
+    # Re-express bedtime on a 22–30 axis so linear interpolation is clean:
+    #   bed at 22:00 → 22   (chronotype = 0.00)
+    #   bed at 23:00 → 23   (chronotype = 0.25)
+    #   bed at 00:00 → 24   (chronotype = 0.50)
+    #   bed at 02:00 → 26   (chronotype = 1.00)
+    bedtime_norm = sleep_start_h   # already in 24+ range for post-midnight sleepers;
+    # for pre-midnight sleepers sleep_start_h < 24, which is correct
+    chronotype = max(0.0, min(1.0, (bedtime_norm - 22.0) / 4.0))
+
+    # Evening Gaussian: centred 2 h before sleep_start
+    evening_peak = sleep_start_h - 2.0
+
+    # ── Build curve ───────────────────────────────────────────────────────────
+    raw: list[float] = []
     for h in range(24):
-        # Primary morning peak contribution
-        morning = _gaussian(h, peak_hour, sigma=2.5)
-        # Secondary afternoon peak
-        afternoon = _gaussian(h, afternoon_peak, sigma=2.0) * 0.7
-        value = max(morning, afternoon)
+        # Extended axis: pre-wake hours shift to +24 so all three Gaussians
+        # are evaluated with sensible distances from the peaks.
+        h_ext = h if h >= wake_hour else h + 24
 
-        # Post-lunch dip: hours 13–14 always lose 20%
+        v_morning   = _gauss(h_ext, primary_peak,   sigma=2.5)
+        v_afternoon = _gauss(h_ext, afternoon_peak, sigma=2.0) * 0.7
+        v_evening   = _gauss(h_ext, evening_peak,   sigma=1.8) * chronotype * 0.9
+
+        value = max(v_morning, v_afternoon, v_evening)
+
+        # Post-lunch dip
         if 13 <= h < 15:
             value *= 0.8
 
-        # Last 2h before sleep: cap at 0.2
-        if sleep_start_hour <= 24:
-            wind_down_start = sleep_start_hour - 2
-            if h >= wind_down_start % 24:
-                value = min(value, 0.2)
+        # Gradual wind-down in the last 1.5 h before sleep (linear fade to ~0)
+        wind_start = sleep_start_h - 1.5
+        if h_ext >= wind_start:
+            fade = max(0.0, (sleep_start_h - h_ext) / 1.5)   # 1→0 over 1.5 h
+            value = min(value, fade * 0.55 + 0.05)
 
-        # Sleep hours: energy = 0
-        asleep = _is_asleep(h, sleep_end_hour, sleep_start_hour)
-        if asleep:
+        # Zero out sleep hours
+        if _is_asleep(h, sleep_end_h, sleep_start_h):
             value = 0.0
 
-        curve.append(round(value, 3))
+        raw.append(round(value, 3))
 
-    # --- Apply sleep-quality modifiers ---
+    # ── Sleep-quality modifiers ───────────────────────────────────────────────
     if duration < 5:
-        curve = _scale_peak_hours(curve, wake_hour, factor=0.50)
+        raw = _scale_peak(raw, wake_hour, 0.50)
     elif duration < 6:
-        curve = _scale_peak_hours(curve, wake_hour, factor=0.70)
+        raw = _scale_peak(raw, wake_hour, 0.70)
 
-    # HRV boost: if above baseline, +10% on peak hours
+    # HRV boost (above-baseline recovery → better peak hours)
     if snapshot.hrv is not None and snapshot.hrv > _HRV_BASELINE:
-        curve = _scale_peak_hours(curve, wake_hour, factor=1.10)
+        raw = _scale_peak(raw, wake_hour, 1.10)
 
-    # Activity boost: if > 30 active minutes before noon, light +15% 1h after
-    if (
-        snapshot.active_minutes is not None
-        and snapshot.active_minutes > 30
-        and wake_hour < 12
-    ):
-        boost_hour = int(wake_hour + snapshot.active_minutes / 60 + 1)
-        if 0 <= boost_hour < 24:
-            curve[boost_hour] = min(1.0, curve[boost_hour] * 1.15)
+    # Activity boost (≥ 30 active min before noon → lift 1 h after activity)
+    if snapshot.active_minutes and snapshot.active_minutes > 30 and wake_hour < 12:
+        boost_h = int(wake_hour + snapshot.active_minutes / 60 + 1)
+        if 0 <= boost_h < 24:
+            raw[boost_h] = min(1.0, raw[boost_h] * 1.15)
 
-    return [round(min(1.0, max(0.0, v)), 3) for v in curve]
+    return [round(min(1.0, max(0.0, v)), 3) for v in raw]
 
 
 def score_windows(windows: list[FreeWindow], curve: list[float]) -> list[FreeWindow]:
-    """Attach average energy score to each FreeWindow from the curve."""
-    scored = []
+    """Attach average energy score to each FreeWindow."""
+    result = []
     for w in windows:
         hours = list(range(w.start_hour, min(w.end_hour, 24)))
         if not hours:
-            scored.append(w.model_copy(update={"energy_score": 0.0}))
+            result.append(w.model_copy(update={"energy_score": 0.0}))
             continue
         avg = sum(curve[h] for h in hours) / len(hours)
-        scored.append(w.model_copy(update={"energy_score": round(avg, 3)}))
-    return scored
+        result.append(w.model_copy(update={"energy_score": round(avg, 3)}))
+    return result
 
 
 async def get_health_summary(
     snapshot: HealthSnapshot,
     language: Language = Language.en,
 ) -> str:
-    """
-    Return a 1–2 sentence health summary for the schedule header.
-    English: rule-based (no LLM). Other languages: rule-based English base
-    translated via a small Claude call.
-    """
-    english_summary = _build_english_summary(snapshot)
+    """1–2 sentence summary. English is rule-based; other locales use Claude."""
+    english = _build_english_summary(snapshot)
     if language == Language.en:
-        return english_summary
-    return await _translate_summary(english_summary, language)
+        return english
+    return await _translate_summary(english, language)
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Summary builder
+# ──────────────────────────────────────────────────────────────────────────────
 
 def _build_english_summary(snapshot: HealthSnapshot) -> str:
-    """Rule-based English summary — no LLM."""
     parts: list[str] = []
     d = snapshot.sleep.duration_hours
 
@@ -127,6 +151,17 @@ def _build_english_summary(snapshot: HealthSnapshot) -> str:
         parts.append(f"Below-average sleep ({d:.1f}h) — avoid back-to-back deep-work blocks.")
     else:
         parts.append(f"Good sleep ({d:.1f}h).")
+
+    # Chronotype annotation
+    sleep_start_h = _frac_hour(snapshot.sleep.sleep_start)
+    sleep_end_h   = _frac_hour(snapshot.sleep.sleep_end)
+    if sleep_start_h < sleep_end_h:
+        sleep_start_h += 24
+    chronotype = max(0.0, min(1.0, (sleep_start_h - 22.0) / 4.0))
+    if chronotype >= 0.75:
+        parts.append("Night-owl schedule detected — late-evening energy peak included.")
+    elif chronotype >= 0.4:
+        parts.append("Late-night schedule — evening energy boost applied.")
 
     if snapshot.hrv is not None:
         if snapshot.hrv < _HRV_BASELINE * 0.8:
@@ -141,7 +176,6 @@ def _build_english_summary(snapshot: HealthSnapshot) -> str:
 
 
 async def _translate_summary(english: str, language: Language) -> str:
-    """Translate an English health summary into the target language via Claude."""
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
@@ -156,36 +190,33 @@ async def _translate_summary(english: str, language: Language) -> str:
         )
         return response.content[0].text.strip()
     except Exception:
-        return english  # fall back to English on error
+        return english
 
 
-# ──────────────────────────────────────────────
-# Internal helpers
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
 
-def _gaussian(x: float, mu: float, sigma: float) -> float:
-    import math
+def _frac_hour(dt) -> float:
+    """Convert a datetime to a fractional hour (e.g. 09:30 → 9.5)."""
+    return dt.hour + dt.minute / 60
+
+
+def _gauss(x: float, mu: float, sigma: float) -> float:
     return math.exp(-0.5 * ((x - mu) / sigma) ** 2)
 
 
 def _is_asleep(hour: int, wake_hour: float, sleep_start_hour: float) -> bool:
-    """Return True if `hour` falls inside the sleep window."""
-    # Sleep window: [sleep_start_hour % 24 .. wake_hour)
-    sleep_start_mod = sleep_start_hour % 24
-    if sleep_start_mod > wake_hour:
-        # Crosses midnight: asleep if h >= sleep_start_mod OR h < wake_hour
-        return hour >= sleep_start_mod or hour < wake_hour
-    else:
-        return sleep_start_mod <= hour < wake_hour
+    """True if `hour` falls inside the sleep window [sleep_start % 24, wake_hour)."""
+    s = sleep_start_hour % 24
+    if s > wake_hour:
+        return hour >= s or hour < wake_hour
+    return s <= hour < wake_hour
 
 
-def _scale_peak_hours(
-    curve: list[float], wake_hour: float, factor: float
-) -> list[float]:
-    """Multiply hours in the primary peak window (wake+1 to wake+6) by factor."""
+def _scale_peak(curve: list[float], wake_hour: float, factor: float) -> list[float]:
+    """Multiply the primary-peak window (wake+1 … wake+7) by factor."""
     result = curve[:]
-    start = int(wake_hour + 1)
-    end = int(wake_hour + 7)
-    for h in range(start, min(end, 24)):
+    for h in range(int(wake_hour + 1), min(int(wake_hour + 8), 24)):
         result[h] = min(1.0, result[h] * factor)
     return result

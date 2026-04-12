@@ -3,7 +3,11 @@ Orchestrator — coordinates all specialist agents and assembles the final DaySc
 Health, Calendar, and Task agents run concurrently via asyncio.gather.
 """
 import asyncio
+import json
+import logging
+import os
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from agents import calendar_agent, health_agent, scheduler_agent, task_agent
 from agents.chat_agent import AdjustmentParams
@@ -12,6 +16,10 @@ from models.health import HealthSnapshot
 from models.schedule import BlockType, DaySchedule, FreeWindow, TimeBlock
 from models.task import CognitiveLoad, Subtask, Task
 from models.user import Language
+
+_DATA_DIR = Path(__file__).parent.parent / "data"
+_HEALTH_FILE = _DATA_DIR / "health_store.json"
+_log = logging.getLogger("dayflow")
 
 # ── In-memory caches (Phase 1) ──────────────────────────────────────────────
 _health_cache: dict[date, tuple[list[float], str]] = {}
@@ -28,6 +36,35 @@ schedule_store: dict[date, DaySchedule] = {}
 
 # Confirmed subtask plans from task chat (override Claude decomposition)
 subtask_overrides: dict[str, list[Subtask]] = {}
+
+
+# ── Health store persistence ─────────────────────────────────────────────────
+
+def save_health_store() -> None:
+    """Persist health_store to data/health_store.json."""
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {
+            str(d): snapshot.model_dump(mode="json")
+            for d, snapshot in health_store.items()
+        }
+        _HEALTH_FILE.write_text(json.dumps(payload, default=str))
+    except Exception as exc:
+        _log.warning("Could not save health store: %s", exc)
+
+
+def load_health_store() -> None:
+    """Load health_store from data/health_store.json on startup."""
+    if not _HEALTH_FILE.exists():
+        return
+    try:
+        payload = json.loads(_HEALTH_FILE.read_text())
+        for date_str, data in payload.items():
+            d = date.fromisoformat(date_str)
+            health_store[d] = HealthSnapshot.model_validate(data)
+        _log.info("Loaded %d health snapshot(s) from disk.", len(health_store))
+    except Exception as exc:
+        _log.warning("Could not load health store: %s", exc)
 
 
 def _make_instant_blocks(
@@ -105,9 +142,22 @@ async def generate_day_schedule(target_date: date) -> DaySchedule:
     async def _run_calendar():
         if target_date in _calendar_cache:
             return _calendar_cache[target_date]
-        fixed_blocks, free_windows = await calendar_agent.fetch_fixed_blocks(
-            target_date, prefs.work_start, prefs.work_end
-        )
+        try:
+            fixed_blocks, free_windows = await calendar_agent.fetch_fixed_blocks(
+                target_date, prefs.work_start, prefs.work_end
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger("dayflow").warning("Calendar fetch failed: %s", exc)
+            fixed_blocks, free_windows = [], []
+        # If CalDAV returned no free windows, synthesise the full work day
+        if not free_windows:
+            free_windows = [FreeWindow(
+                start_hour=prefs.work_start,
+                end_hour=prefs.work_end,
+                duration_minutes=(prefs.work_end - prefs.work_start) * 60,
+            )]
+
         result = (fixed_blocks, free_windows)
         _calendar_cache[target_date] = result
         return result
@@ -131,17 +181,21 @@ async def generate_day_schedule(target_date: date) -> DaySchedule:
     # Instant tasks become TimeBlocks at start of work day
     instant_blocks = _make_instant_blocks(instant_subtasks, target_date, prefs.work_start)
 
-    # Enrich free windows with energy scores
+    # Score windows for display on the health card (not used for scheduling).
     scored_windows = health_agent.score_windows(free_windows, energy_curve)
 
-    # Determine sleep start for constraint checks
+    # Determine tonight's sleep start for scheduler constraints.
+    # Only use the recorded bedtime if it's in the evening (≥ 20:00); an
+    # early-morning value like 03:00 is last night's bedtime, not tonight's.
     sleep_start_hour = 23
-    if snapshot:
+    if snapshot and snapshot.sleep.sleep_start.hour >= 20:
         sleep_start_hour = snapshot.sleep.sleep_start.hour
 
-    # Run scheduler (regular tasks only)
+    # Run scheduler — passes energy_curve directly so it checks per-hour
+    # energy at each candidate start time, not a coarse window average.
     result = scheduler_agent.generate_schedule(
-        regular_subtasks, scored_windows, fixed_blocks, target_date, sleep_start_hour
+        regular_subtasks, free_windows, fixed_blocks, target_date,
+        sleep_start_hour, energy_curve,
     )
 
     all_blocks = fixed_blocks + instant_blocks + result.blocks
@@ -218,11 +272,12 @@ async def apply_adjustment(
     instant_blocks = _make_instant_blocks(instant_subtasks, target_date, prefs.work_start)
 
     sleep_start_hour = 23
-    if snapshot:
+    if snapshot and snapshot.sleep.sleep_start.hour >= 20:
         sleep_start_hour = snapshot.sleep.sleep_start.hour
 
     result = scheduler_agent.generate_schedule(
-        regular_subtasks, scored_windows, fixed_blocks, target_date, sleep_start_hour
+        regular_subtasks, free_windows, fixed_blocks, target_date,
+        sleep_start_hour, energy_curve,
     )
 
     # Filter blocks if clearing afternoon

@@ -12,6 +12,7 @@ from api.health import router as health_router
 from api.preferences import router as preferences_router
 from api.schedule import router as schedule_router
 from api.task_chat import router as task_chat_router
+from agents.orchestrator import load_health_store
 from api.tasks import do_sync_reminders, router as tasks_router
 
 logger = logging.getLogger("dayflow")
@@ -19,6 +20,8 @@ logger = logging.getLogger("dayflow")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Restore persisted health data so it survives reloads
+    load_health_store()
     # Auto-sync reminders on every startup so the task store is never empty
     try:
         result = await do_sync_reminders()
