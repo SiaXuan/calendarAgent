@@ -76,6 +76,14 @@ async def generate_day_schedule(target_date: date) -> DaySchedule:
     3. Run Scheduler Agent (regular tasks only — instant tasks bypass it)
     4. Assemble and return DaySchedule
     """
+    # Auto-sync reminders if the task store is empty (e.g. after a server restart)
+    if not task_store:
+        try:
+            from api.tasks import do_sync_reminders
+            await do_sync_reminders()
+        except Exception:
+            pass  # Non-fatal — proceed with empty store
+
     snapshot = health_store.get(target_date)
     tasks = list(task_store.values())
     language = get_current_prefs().language
@@ -112,8 +120,12 @@ async def generate_day_schedule(target_date: date) -> DaySchedule:
         await asyncio.gather(_run_health(), _run_calendar(), _run_tasks())
     )
 
-    # Separate instant tasks from schedulable ones
-    instant_subtasks = [s for s in all_subtasks if s.is_instant]
+    # Separate instant tasks from schedulable ones.
+    # Instant reminders only surface on their due date (or if overdue/no deadline).
+    instant_subtasks = [
+        s for s in all_subtasks
+        if s.is_instant and (s.suggested_date is None or s.suggested_date <= target_date)
+    ]
     regular_subtasks = [s for s in all_subtasks if not s.is_instant]
 
     # Instant tasks become TimeBlocks at start of work day
@@ -198,7 +210,10 @@ async def apply_adjustment(
             )
         )
 
-    instant_subtasks = [s for s in all_subtasks if s.is_instant]
+    instant_subtasks = [
+        s for s in all_subtasks
+        if s.is_instant and (s.suggested_date is None or s.suggested_date <= target_date)
+    ]
     regular_subtasks = [s for s in all_subtasks if not s.is_instant]
     instant_blocks = _make_instant_blocks(instant_subtasks, target_date, prefs.work_start)
 

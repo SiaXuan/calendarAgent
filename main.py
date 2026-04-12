@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -11,11 +12,22 @@ from api.health import router as health_router
 from api.preferences import router as preferences_router
 from api.schedule import router as schedule_router
 from api.task_chat import router as task_chat_router
-from api.tasks import router as tasks_router
+from api.tasks import do_sync_reminders, router as tasks_router
+
+logger = logging.getLogger("dayflow")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Auto-sync reminders on every startup so the task store is never empty
+    try:
+        result = await do_sync_reminders()
+        logger.info(
+            "Startup sync: added=%d updated=%d skipped=%d",
+            result["added"], result["updated"], result["skipped"],
+        )
+    except Exception as exc:
+        logger.warning("Startup reminder sync failed (non-fatal): %s", exc)
     yield
 
 

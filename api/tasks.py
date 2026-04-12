@@ -65,12 +65,10 @@ async def list_tasks():
     return list(orchestrator.task_store.values())
 
 
-@router.post("/tasks/sync/reminders")
-async def sync_reminders():
+async def do_sync_reminders() -> dict:
     """
-    Pull incomplete reminders from iCloud (VTODO) and upsert them into task_store.
-    Already-imported reminders are updated in place (matched by UID).
-    Returns a summary of what was added / updated / skipped.
+    Core sync logic — shared by the API endpoint and the startup hook.
+    Pulls incomplete reminders from iCloud and upserts them into task_store.
     """
     raw = await asyncio.to_thread(fetch_reminders)
     if not raw:
@@ -80,7 +78,6 @@ async def sync_reminders():
     tasks_out = []
 
     for r in raw:
-        # Skip items from system lists that slipped through collection-level filtering
         source_list = r.get("source_list", "")
         if source_list and is_system_list(source_list):
             skipped += 1
@@ -88,11 +85,8 @@ async def sync_reminders():
 
         task_id = f"reminder_{r['id']}" if r["id"] else f"reminder_{uuid.uuid4()}"
 
-        # Detect instant tasks (quick actions like paying bills, sending emails, etc.)
         is_instant = _detect_instant(r["title"])
 
-        # cognitive_load: can't be inferred from VTODO → default medium (light for instant)
-        # estimated_hours: no duration in Reminders → 0.08h (5 min) for instant, else 0.5h
         task = Task(
             id=task_id,
             title=r["title"],
@@ -114,6 +108,12 @@ async def sync_reminders():
         tasks_out.append(task)
 
     return {"added": added, "updated": updated, "skipped": skipped, "tasks": tasks_out}
+
+
+@router.post("/tasks/sync/reminders")
+async def sync_reminders():
+    """Pull incomplete reminders from iCloud and upsert into task_store."""
+    return await do_sync_reminders()
 
 
 @router.delete("/tasks/{task_id}")
