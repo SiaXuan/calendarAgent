@@ -1,0 +1,9 @@
+{
+  "date": "2026-04-11",
+  "sleep_start": "2026-04-10T23:30:00",
+  "sleep_end": "2026-04-11T07:15:00",
+  "resting_heart_rate": 58,
+  "hrv": 45.0,
+  "steps": 8200,
+  "active_minutes": 38
+}

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "task_001",
+    "title": "Implement energy curve algorithm",
+    "description": "Write and test the compute_energy_curve function in health_agent.py",
+    "priority": "high",
+    "cognitive_load": "deep",
+    "estimated_hours": 2.5,
+    "deadline": "2026-04-11",
+    "source": "manual"
+  },
+  {
+    "id": "task_002",
+    "title": "Reply to internship emails",
+    "description": "Respond to 3 pending emails in inbox",
+    "priority": "medium",
+    "cognitive_load": "medium",
+    "estimated_hours": 0.5,
+    "deadline": "2026-04-11",
+    "source": "manual"
+  },
+  {
+    "id": "task_003",
+    "title": "Review CS5800 lecture notes",
+    "description": "Go over week 10 algorithms notes before the quiz",
+    "priority": "medium",
+    "cognitive_load": "medium",
+    "estimated_hours": 1.0,
+    "deadline": "2026-04-12",
+    "source": "manual"
+  },
+  {
+    "id": "task_004",
+    "title": "30-minute walk",
+    "description": "Evening walk for active minutes",
+    "priority": "low",
+    "cognitive_load": "light",
+    "estimated_hours": 0.5,
+    "deadline": null,
+    "source": "manual"
+  }
+]
