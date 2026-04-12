@@ -24,6 +24,8 @@ class Task(BaseModel):
     estimated_hours: float
     deadline: date | None = None
     source: str = "manual"   # "manual" | "todoist" | "reminders"
+    is_uncertain: bool = False   # triggers ★ planning chat in frontend
+    is_instant: bool = False     # quick action (< 10 min), skip decomposition
 
 
 class Subtask(BaseModel):
@@ -32,3 +34,5 @@ class Subtask(BaseModel):
     cognitive_load: CognitiveLoad
     estimated_minutes: int
     suggested_date: date | None = None
+    phase_label: str | None = None   # e.g. "Phase 1 · Research"
+    is_instant: bool = False         # pass-through quick action, skip scheduling

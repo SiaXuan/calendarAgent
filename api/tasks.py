@@ -11,6 +11,22 @@ from models.task import CognitiveLoad, Priority, Task
 
 router = APIRouter()
 
+# Title patterns that indicate a task is a quick action (< 10 min)
+_INSTANT_TRIGGERS = [
+    # English
+    'pay ', 'send ', 'email ', 'call ', 'text ', 'reply ', 'submit ', 'sign ',
+    'buy ', 'order ', 'book ', 'reserve ', 'print ', 'upload ', 'confirm ',
+    'transfer ', 'wire ', 'renew ', 'check in',
+    # Chinese
+    '交', '付款', '还款', '支付', '发送', '提交', '预约', '购买', '订购',
+    '签名', '打印', '转账', '汇款', '续费', '确认', '取件', '缴费', '转房租', '交租',
+]
+
+
+def _detect_instant(title: str) -> bool:
+    title_lower = title.lower()
+    return any(kw in title_lower for kw in _INSTANT_TRIGGERS)
+
 
 class TaskInput(BaseModel):
     title: str
@@ -72,17 +88,21 @@ async def sync_reminders():
 
         task_id = f"reminder_{r['id']}" if r["id"] else f"reminder_{uuid.uuid4()}"
 
-        # cognitive_load: can't be inferred from VTODO → default medium
-        # estimated_hours: no duration in Reminders → default 0.5h
+        # Detect instant tasks (quick actions like paying bills, sending emails, etc.)
+        is_instant = _detect_instant(r["title"])
+
+        # cognitive_load: can't be inferred from VTODO → default medium (light for instant)
+        # estimated_hours: no duration in Reminders → 0.08h (5 min) for instant, else 0.5h
         task = Task(
             id=task_id,
             title=r["title"],
             description=r["description"],
             priority=Priority(r["priority"]),
-            cognitive_load=CognitiveLoad.medium,
-            estimated_hours=0.5,
+            cognitive_load=CognitiveLoad.light if is_instant else CognitiveLoad.medium,
+            estimated_hours=0.08 if is_instant else 0.5,
             deadline=r["deadline"],
             source="reminders",
+            is_instant=is_instant,
         )
 
         if task_id in orchestrator.task_store:

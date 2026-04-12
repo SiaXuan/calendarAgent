@@ -9,6 +9,7 @@ class BlockType(str, Enum):
     fixed = "fixed"           # meetings, classes — do not move
     scheduled = "scheduled"   # agent-assigned task block
     free = "free"
+    instant = "instant"       # quick reminders (< 10 min), shown as pass-through
 
 
 class TimeBlock(BaseModel):
@@ -19,6 +20,11 @@ class TimeBlock(BaseModel):
     title: str
     cognitive_load: CognitiveLoad | None = None
     notes: str | None = None
+    phase_label: str | None = None   # e.g. "Phase 1 · Research"
+    focus_minutes: int = 25          # Pomodoro focus duration
+    break_minutes: int = 5           # break between Pomodoros
+    pomodoro_count: int = 1          # number of focus sessions
+    is_uncertain: bool = False       # ★ flag — task scope unclear
 
 
 class FreeWindow(BaseModel):

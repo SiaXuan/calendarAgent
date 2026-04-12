@@ -76,6 +76,9 @@ def generate_schedule(
             if not _check_constraints(block_start, block_end, sleep_start_hour, scheduled_blocks, target_date):
                 continue
 
+            # Compute Pomodoro count from estimated duration
+            pomodoro_count = max(1, round(subtask.estimated_minutes / 25))
+
             scheduled_blocks.append(
                 TimeBlock(
                     start=block_start,
@@ -85,6 +88,11 @@ def generate_schedule(
                     title=subtask.title,
                     cognitive_load=subtask.cognitive_load,
                     notes=None,
+                    phase_label=subtask.phase_label,
+                    focus_minutes=25,
+                    break_minutes=5,
+                    pomodoro_count=pomodoro_count,
+                    is_uncertain=False,
                 )
             )
             # Advance cursor (add buffer)
