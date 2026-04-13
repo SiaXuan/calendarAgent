@@ -175,11 +175,14 @@ end tell
         if _is_spam_reminder(title, body or None):
             continue
 
-        # Parse due date
+        # Parse due date — preserve full datetime so callers can use the time
         deadline = None
+        deadline_dt = None
         if due_str:
             try:
-                deadline = datetime.fromisoformat(due_str).date()
+                dt = datetime.fromisoformat(due_str)
+                deadline = dt.date()
+                deadline_dt = dt
             except ValueError:
                 pass
 
@@ -198,6 +201,7 @@ end tell
             "description": body.strip() or None,
             "priority": priority,
             "deadline": deadline,
+            "deadline_dt": deadline_dt,
             "source_list": list_name,
         })
 
@@ -613,11 +617,14 @@ def _parse_todo(item) -> dict | None:
                 return None
 
             deadline = None
+            deadline_dt = None
             due = component.get("DUE")
             if due:
                 due_val = due.dt
                 if isinstance(due_val, datetime):
-                    deadline = due_val.astimezone().date() if due_val.tzinfo else due_val.date()
+                    local_dt = due_val.astimezone() if due_val.tzinfo else due_val
+                    deadline = local_dt.date()
+                    deadline_dt = local_dt.replace(tzinfo=None)  # naive local
                 elif isinstance(due_val, date):
                     deadline = due_val
 
@@ -627,7 +634,7 @@ def _parse_todo(item) -> dict | None:
                         else "medium")
 
             return {"id": uid, "title": title, "description": description,
-                    "priority": priority, "deadline": deadline}
+                    "priority": priority, "deadline": deadline, "deadline_dt": deadline_dt}
     except Exception:
         return None
     return None

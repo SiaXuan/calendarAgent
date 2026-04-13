@@ -25,6 +25,7 @@ class TimeBlock(BaseModel):
     break_minutes: int = 5           # break between Pomodoros
     pomodoro_count: int = 1          # number of focus sessions
     is_uncertain: bool = False       # ★ flag — task scope unclear
+    has_explicit_time: bool = True   # False = reminder has date only, no specific time
 
 
 class FreeWindow(BaseModel):

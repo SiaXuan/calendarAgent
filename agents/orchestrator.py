@@ -72,11 +72,28 @@ def _make_instant_blocks(
     target_date: date,
     work_start_hour: int,
 ) -> list[TimeBlock]:
-    """Convert instant subtasks to TimeBlocks at the start of the work day."""
+    """
+    Convert instant subtasks to TimeBlocks.
+    - If the reminder has an explicit time (hour != 0 or minute != 0), use that time.
+    - If it's date-only (midnight), place at work_start and mark has_explicit_time=False.
+    """
     blocks: list[TimeBlock] = []
-    base = datetime(target_date.year, target_date.month, target_date.day, work_start_hour, 0)
-    for i, s in enumerate(instant_subtasks):
-        start = base + timedelta(minutes=i * 6)   # 6-min slots (5 min task + 1 min gap)
+    fallback_base = datetime(target_date.year, target_date.month, target_date.day, work_start_hour, 0)
+    fallback_cursor = fallback_base
+
+    for s in instant_subtasks:
+        dt = s.due_datetime
+        has_time = dt is not None and (dt.hour != 0 or dt.minute != 0)
+
+        if has_time:
+            # Use the reminder's actual due time (same day)
+            start = datetime(target_date.year, target_date.month, target_date.day,
+                             dt.hour, dt.minute)
+        else:
+            # Date-only reminder — slot at work_start sequentially
+            start = fallback_cursor
+            fallback_cursor += timedelta(minutes=6)
+
         end = start + timedelta(minutes=5)
         blocks.append(TimeBlock(
             start=start,
@@ -85,7 +102,11 @@ def _make_instant_blocks(
             task_id=s.parent_id,
             title=s.title,
             cognitive_load=CognitiveLoad.light,
+            has_explicit_time=has_time,
         ))
+
+    # Sort by start time so timed reminders appear in chronological order
+    blocks.sort(key=lambda b: b.start)
     return blocks
 
 

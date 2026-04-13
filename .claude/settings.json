@@ -85,7 +85,13 @@
       "Bash(curl -s http://localhost:8000/preferences)",
       "Bash(curl -s http://localhost:8000/health/2026-04-12)",
       "Bash(curl -s http://localhost:8000/health)",
-      "Bash(curl -s http://localhost:8000/health/today)"
+      "Bash(curl -s http://localhost:8000/health/today)",
+      "Bash(python3 -c \" import json, sys d = json.load\\(sys.stdin\\) for t in d.get\\('tasks', []\\): print\\(t['title'], '|', t.get\\('deadline_dt'\\) or 'no time'\\) \")",
+      "Bash(curl http://localhost:8000/tasks)",
+      "Bash(pip show:*)",
+      "Bash(python3)",
+      "Bash(python3 -c \"import anthropic\")",
+      "Read(//opt/homebrew/**)"
     ],
     "additionalDirectories": [
       "/tmp",

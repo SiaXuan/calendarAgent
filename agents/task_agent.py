@@ -50,6 +50,16 @@ TIME ESTIMATION by task type:
 PHASE LABELS — add phase_label to each subtask when a task has 3+ subtasks spanning
 multiple sessions. Format: "Phase 1 · Research", "Phase 2 · Implementation", "Phase 3 · Review"
 
+COGNITIVE LOAD — assign independently per subtask, do NOT just copy the parent task's value:
+- deep:   sustained focus + original thinking required
+          (coding, writing from scratch, solving problems, exam prep, implementing algorithms,
+           debugging, ML/CV/CS assignments, research, paper writing)
+- medium: moderate attention, less creative effort
+          (grading, reviewing work, reading with notes, planning, replying to complex messages,
+           revising a draft, data entry with judgement)
+- light:  minimal mental effort, mostly mechanical
+          (simple admin, scheduling, quick check-ins, filing, watching a video, re-reading notes)
+
 CONSTRAINTS:
 - Max subtask: 90 min (deep), 60 min (medium), 45 min (light)
 - Respect deadlines: prefer today for tasks due today or overdue
@@ -108,6 +118,7 @@ async def rank_and_decompose(
             cognitive_load=CognitiveLoad.light,
             estimated_minutes=5,
             suggested_date=t.deadline or target_date,
+            due_datetime=t.deadline_dt,   # preserve full time for InstantCard display
             is_instant=True,
         ))
 
