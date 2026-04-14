@@ -332,10 +332,16 @@ class ReminderItem(BaseModel):
     list: str = ""
 
 
+class PushRemindersPayload(BaseModel):
+    reminders: list[ReminderItem]
+
+
 @router.post("/tasks/push-reminders")
-async def push_reminders(items: list[ReminderItem]):
+async def push_reminders(payload: PushRemindersPayload):
+    items = payload.reminders
     """
     Receive reminders pushed from iPhone Shortcuts.
+    Body: {"reminders": [{title, due, priority, list}, ...]}
     Replaces all reminders-sourced tasks with the new batch.
     """
     from datetime import datetime
