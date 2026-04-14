@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from agents import orchestrator
+from agents.orchestrator import save_task_store
 from integrations.caldav_client import fetch_reminders, is_system_list
 from models.task import CognitiveLoad, Priority, Task
 
@@ -162,6 +163,7 @@ async def create_task(payload: TaskInput):
         source="manual",
     )
     orchestrator.task_store[task.id] = task
+    save_task_store()
     return task
 
 
@@ -251,6 +253,7 @@ async def do_sync_reminders() -> dict:
         _log.info("LLM classified %d tasks: %s", len(llm_results),
                   {it["title"]: llm_results[it["id"]].value for it in llm_pending})
 
+    save_task_store()
     return {"added": added, "updated": updated, "skipped": skipped, "tasks": tasks_out}
 
 
@@ -316,4 +319,5 @@ async def delete_task(task_id: str):
     if task_id not in orchestrator.task_store:
         raise HTTPException(status_code=404, detail="Task not found.")
     del orchestrator.task_store[task_id]
+    save_task_store()
     return {"deleted": task_id}

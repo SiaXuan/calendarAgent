@@ -20,6 +20,7 @@ from models.user import Language
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 _HEALTH_FILE = _DATA_DIR / "health_store.json"
+_TASKS_FILE = _DATA_DIR / "task_store.json"
 _log = logging.getLogger("dayflow")
 
 # ── In-memory caches (Phase 1) ──────────────────────────────────────────────
@@ -76,6 +77,29 @@ def load_health_store() -> None:
         _log.info("Loaded %d health snapshot(s) from disk.", len(health_store))
     except Exception as exc:
         _log.warning("Could not load health store: %s", exc)
+
+
+def save_task_store() -> None:
+    """Persist task_store to data/task_store.json."""
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {tid: t.model_dump(mode="json") for tid, t in task_store.items()}
+        _TASKS_FILE.write_text(json.dumps(payload, default=str))
+    except Exception as exc:
+        _log.warning("Could not save task store: %s", exc)
+
+
+def load_task_store() -> None:
+    """Load task_store from data/task_store.json on startup."""
+    if not _TASKS_FILE.exists():
+        return
+    try:
+        payload = json.loads(_TASKS_FILE.read_text())
+        for tid, data in payload.items():
+            task_store[tid] = Task.model_validate(data)
+        _log.info("Loaded %d task(s) from disk.", len(task_store))
+    except Exception as exc:
+        _log.warning("Could not load task store: %s", exc)
 
 
 def _make_instant_blocks(

@@ -12,7 +12,7 @@ from api.health import router as health_router
 from api.preferences import router as preferences_router
 from api.schedule import router as schedule_router
 from api.task_chat import router as task_chat_router
-from agents.orchestrator import load_health_store
+from agents.orchestrator import load_health_store, load_task_store
 from api.preferences import load_preferences
 from api.tasks import router as tasks_router
 
@@ -23,6 +23,7 @@ logger = logging.getLogger("dayflow")
 async def lifespan(app: FastAPI):
     # Restore persisted health data so it survives reloads
     load_health_store()
+    load_task_store()
     load_preferences()
     # No startup sync — the first /schedule/stream call will sync via the
     # throttle in stream_day_schedule (after yielding the health card, so

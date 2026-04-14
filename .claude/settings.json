@@ -158,7 +158,18 @@
       "Bash(/Library/Frameworks/Python.framework/Versions/3.12/bin/python3 -c ':*)",
       "Read(//usr/local/bin/**)",
       "WebSearch",
-      "Bash(ipconfig getifaddr:*)"
+      "Bash(ipconfig getifaddr:*)",
+      "Bash(curl -s https://stellar-achievement-production.up.railway.app/)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)",
+      "Bash(curl -s https://calendar-agent-bcx8yxu16-siaxuans-projects.vercel.app/ -o /dev/null -w \"%{http_code}\")",
+      "Bash(curl -s https://stellar-achievement-production.up.railway.app/preferences)",
+      "Bash(curl -s \"https://stellar-achievement-production.up.railway.app/calendar/debug?date=2026-04-14\")",
+      "Bash(curl -s \"https://stellar-achievement-production.up.railway.app/schedule/debug?date=2026-04-14\")",
+      "Bash(curl -s \"https://stellar-achievement-production.up.railway.app/calendar/debug/2026-04-14\")",
+      "Bash(curl -s \"https://stellar-achievement-production.up.railway.app/calendar/debug/2026-04-15\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('event_count:', d['event_count']\\); [print\\(e\\) for e in d.get\\('events',[]\\)]\")"
     ],
     "additionalDirectories": [
       "/tmp",
