@@ -364,6 +364,11 @@ async def push_reminders(request: Request):
         raw_items = body
     else:
         raw_items = body.get("reminders", [])
+
+    # Debug: return raw body so Shortcuts can show what was received
+    if not raw_items:
+        return {"debug_received": body, "added": 0, "total": 0}
+
     items = [ReminderItem.model_validate(r) for r in raw_items]
     """
     Receive reminders pushed from iPhone Shortcuts.
