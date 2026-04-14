@@ -321,3 +321,90 @@ async def delete_task(task_id: str):
     del orchestrator.task_store[task_id]
     save_task_store()
     return {"deleted": task_id}
+
+
+# ── iPhone Shortcuts push ─────────────────────────────────────────────────────
+
+class ReminderItem(BaseModel):
+    title: str
+    due: str | None = None        # ISO datetime string or empty string
+    priority: int = 0             # 0=none, 1=high, 5=medium, 9=low
+    list: str = ""
+
+
+@router.post("/tasks/push-reminders")
+async def push_reminders(items: list[ReminderItem]):
+    """
+    Receive reminders pushed from iPhone Shortcuts.
+    Replaces all reminders-sourced tasks with the new batch.
+    """
+    from datetime import datetime
+
+    # Remove stale reminders
+    stale = [tid for tid, t in orchestrator.task_store.items() if t.source == "reminders"]
+    for tid in stale:
+        del orchestrator.task_store[tid]
+
+    added = 0
+    llm_pending: list[dict] = []
+
+    for item in items:
+        if not item.title.strip():
+            continue
+        if is_system_list(item.list):
+            continue
+
+        task_id = f"reminder_push_{uuid.uuid4()}"
+        is_instant = _detect_instant(item.title)
+
+        # Parse due date
+        deadline: date_type | None = None
+        deadline_dt: datetime | None = None
+        if item.due and item.due.strip():
+            try:
+                dt = datetime.fromisoformat(item.due.strip())
+                deadline = dt.date()
+                deadline_dt = dt
+            except ValueError:
+                pass
+
+        # Priority mapping
+        pri_val = item.priority
+        priority = ("high" if 1 <= pri_val <= 4
+                    else "low" if 6 <= pri_val <= 9
+                    else "medium")
+
+        if is_instant:
+            load = CognitiveLoad.light
+        else:
+            kw_load = _keyword_classify(item.title, None)
+            if kw_load is not None:
+                load = kw_load
+            else:
+                load = CognitiveLoad.medium
+                llm_pending.append({"id": task_id, "title": item.title, "description": None})
+
+        task = Task(
+            id=task_id,
+            title=item.title.strip(),
+            priority=Priority(priority),
+            cognitive_load=load,
+            estimated_hours=0.08 if is_instant else 0.5,
+            deadline=deadline,
+            deadline_dt=deadline_dt,
+            source="reminders",
+            is_instant=is_instant,
+        )
+        orchestrator.task_store[task_id] = task
+        added += 1
+
+    if llm_pending:
+        llm_results = await _llm_classify_batch(llm_pending)
+        for tid, llm_load in llm_results.items():
+            if tid in orchestrator.task_store:
+                orchestrator.task_store[tid] = orchestrator.task_store[tid].model_copy(
+                    update={"cognitive_load": llm_load}
+                )
+
+    save_task_store()
+    return {"added": added, "total": len(orchestrator.task_store)}
