@@ -400,22 +400,21 @@ async def push_reminders(request: Request):
             except ValueError:
                 pass
 
-        # Priority: tags take precedence over numeric priority field
-        tag_priority = item.priority_from_tags()
-        if tag_priority:
-            priority = tag_priority
+        # Priority: derived from due date proximity
+        today = date_type.today()
+        if deadline is None:
+            priority = "medium"
+        elif deadline <= today:
+            priority = "high"      # overdue or due today
+        elif (deadline - today).days <= 3:
+            priority = "high"      # due within 3 days
+        elif (deadline - today).days <= 7:
+            priority = "medium"    # due this week
         else:
-            pri_val = item.priority_int()
-            priority = ("high" if 1 <= pri_val <= 4
-                        else "low" if 6 <= pri_val <= 9
-                        else "medium")
+            priority = "low"
 
-        # Cognitive load: tags take precedence over keyword/LLM
-        tag_load = item.load_from_tags()
         if is_instant:
             load = CognitiveLoad.light
-        elif tag_load is not None:
-            load = tag_load
         else:
             kw_load = _keyword_classify(item.title, None)
             if kw_load is not None:
