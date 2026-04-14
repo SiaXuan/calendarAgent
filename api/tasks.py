@@ -319,17 +319,27 @@ async def reclassify_tasks():
 class ReminderItem(BaseModel):
     title: str
     due: str | None = None        # ISO datetime string or empty string
-    priority: int = 0             # 0=none, 1=high, 5=medium, 9=low
+    priority: int | str = 0       # 0=none, 1=high, 5=medium, 9=low; Shortcuts sends "None"
     list: str = ""
 
+    def priority_int(self) -> int:
+        try:
+            return int(self.priority)
+        except (ValueError, TypeError):
+            return 0
 
-class PushRemindersPayload(BaseModel):
-    reminders: list[ReminderItem]
 
+from fastapi import Request
 
 @router.post("/tasks/push-reminders")
-async def push_reminders(payload: PushRemindersPayload):
-    items = payload.reminders
+async def push_reminders(request: Request):
+    body = await request.json()
+    # Accept both {"reminders": [...]} and bare [...]
+    if isinstance(body, list):
+        raw_items = body
+    else:
+        raw_items = body.get("reminders", [])
+    items = [ReminderItem.model_validate(r) for r in raw_items]
     """
     Receive reminders pushed from iPhone Shortcuts.
     Body: {"reminders": [{title, due, priority, list}, ...]}
@@ -366,7 +376,7 @@ async def push_reminders(payload: PushRemindersPayload):
                 pass
 
         # Priority mapping
-        pri_val = item.priority
+        pri_val = item.priority_int()
         priority = ("high" if 1 <= pri_val <= 4
                     else "low" if 6 <= pri_val <= 9
                     else "medium")
