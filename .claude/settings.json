@@ -170,7 +170,8 @@
       "Bash(curl -s \"https://stellar-achievement-production.up.railway.app/calendar/debug/2026-04-14\")",
       "Bash(curl -s \"https://stellar-achievement-production.up.railway.app/calendar/debug/2026-04-15\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('event_count:', d['event_count']\\); [print\\(e\\) for e in d.get\\('events',[]\\)]\")",
-      "Bash(python3 -c \"import ast; ast.parse\\(open\\('api/tasks.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('api/tasks.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(curl -s -X POST https://stellar-achievement-production.up.railway.app/tasks/push-reminders -H 'Content-Type: application/json' -d '{\"reminders\":[{\"title\":\"test\",\"due\":\"\",\"priority\":0,\"list\":\"\"}]}')"
     ],
     "additionalDirectories": [
       "/tmp",

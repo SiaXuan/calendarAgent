@@ -314,15 +314,6 @@ async def reclassify_tasks():
     return {"reclassified": len(all_updates), "results": results}
 
 
-@router.delete("/tasks/{task_id}")
-async def delete_task(task_id: str):
-    if task_id not in orchestrator.task_store:
-        raise HTTPException(status_code=404, detail="Task not found.")
-    del orchestrator.task_store[task_id]
-    save_task_store()
-    return {"deleted": task_id}
-
-
 # ── iPhone Shortcuts push ─────────────────────────────────────────────────────
 
 class ReminderItem(BaseModel):
@@ -414,3 +405,12 @@ async def push_reminders(payload: PushRemindersPayload):
 
     save_task_store()
     return {"added": added, "total": len(orchestrator.task_store)}
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(task_id: str):
+    if task_id not in orchestrator.task_store:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    del orchestrator.task_store[task_id]
+    save_task_store()
+    return {"deleted": task_id}
