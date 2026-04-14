@@ -316,6 +316,15 @@ async def reclassify_tasks():
 
 # ── iPhone Shortcuts push ─────────────────────────────────────────────────────
 
+@router.post("/tasks/clear-reminders")
+async def clear_reminders():
+    """Remove all reminder-sourced tasks. Call once before pushing new batch."""
+    stale = [tid for tid, t in orchestrator.task_store.items() if t.source == "reminders"]
+    for tid in stale:
+        del orchestrator.task_store[tid]
+    save_task_store()
+    return {"cleared": len(stale)}
+
 class ReminderItem(BaseModel):
     title: str
     due: str | None = None
@@ -356,31 +365,17 @@ class ReminderItem(BaseModel):
 
 from fastapi import Request
 
-@router.post("/tasks/push-reminders")
-async def push_reminders(request: Request):
+@router.post("/tasks/push-reminder")
+async def push_reminder(request: Request):
+    """Add a single reminder. Call inside Shortcuts loop after clear-reminders."""
     body = await request.json()
-    # Accept both {"reminders": [...]} and bare [...]
-    if isinstance(body, list):
-        raw_items = body
-    else:
-        raw_items = body.get("reminders", [])
-
-    # Debug: return raw body so Shortcuts can show what was received
-    if not raw_items:
-        return {"debug_received": body, "added": 0, "total": 0}
-
-    items = [ReminderItem.model_validate(r) for r in raw_items]
+    items = [ReminderItem.model_validate(body)]
     """
     Receive reminders pushed from iPhone Shortcuts.
     Body: {"reminders": [{title, due, priority, list}, ...]}
     Replaces all reminders-sourced tasks with the new batch.
     """
     from datetime import datetime
-
-    # Remove stale reminders
-    stale = [tid for tid, t in orchestrator.task_store.items() if t.source == "reminders"]
-    for tid in stale:
-        del orchestrator.task_store[tid]
 
     added = 0
     llm_pending: list[dict] = []
