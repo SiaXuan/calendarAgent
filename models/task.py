@@ -35,6 +35,7 @@ class Subtask(BaseModel):
     cognitive_load: CognitiveLoad
     estimated_minutes: int
     suggested_date: date | None = None
+    deadline: date | None = None          # inherited from parent task
     due_datetime: datetime | None = None  # full reminder due datetime (time preserved)
     phase_label: str | None = None   # e.g. "Phase 1 · Research"
     is_instant: bool = False         # pass-through quick action, skip scheduling

@@ -9,32 +9,21 @@ from integrations.caldav_client import fetch_events
 from models.schedule import BlockType, FreeWindow, TimeBlock
 from models.task import CognitiveLoad
 
-_FIXED_KEYWORDS = {
-    "meeting", "standup", "stand-up", "class", "lecture",
-    "interview", "seminar", "sync", "call", "review",
-}
 _AGENT_TAG = "[agent-scheduled]"
 
 
 def classify_event(event: dict) -> BlockType:
     """
-    event keys expected: title, attendees (list), description (optional)
-    Returns BlockType.fixed / scheduled / free.
+    Any event explicitly added to the calendar is treated as a fixed block —
+    the user put it there intentionally so we should respect it regardless of
+    the event title language or content.
+    Only events written by this agent (tagged [agent-scheduled]) are treated
+    as scheduled (moveable) blocks.
     """
-    title_lower = event.get("title", "").lower()
-    attendees = event.get("attendees", [])
     description = event.get("description", "")
-
     if description and _AGENT_TAG in description:
         return BlockType.scheduled
-
-    if len(attendees) > 1:
-        return BlockType.fixed
-
-    if any(kw in title_lower for kw in _FIXED_KEYWORDS):
-        return BlockType.fixed
-
-    return BlockType.free
+    return BlockType.fixed
 
 
 async def fetch_fixed_blocks(
@@ -84,7 +73,11 @@ def extract_free_windows(
     Minimum window size: 25 minutes.
     """
     day_start = datetime(target_date.year, target_date.month, target_date.day, work_start, 0)
-    day_end = datetime(target_date.year, target_date.month, target_date.day, work_end, 0)
+    # work_end=24 means "end of day" — use next-day midnight (timedelta avoids month/year edge cases)
+    if work_end >= 24:
+        day_end = datetime(target_date.year, target_date.month, target_date.day) + timedelta(days=1)
+    else:
+        day_end = datetime(target_date.year, target_date.month, target_date.day, work_end, 0)
 
     # Build sorted list of busy intervals clamped to work hours
     busy: list[tuple[datetime, datetime]] = []
@@ -126,7 +119,9 @@ def _append_window(windows: list[FreeWindow], start: datetime, end: datetime) ->
         windows.append(
             FreeWindow(
                 start_hour=start.hour,
+                start_minute=start.minute,
                 end_hour=end.hour,
+                end_minute=end.minute,
                 duration_minutes=duration,
                 energy_score=0.0,  # scored later by health_agent.score_windows
             )

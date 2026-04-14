@@ -13,7 +13,8 @@ from api.preferences import router as preferences_router
 from api.schedule import router as schedule_router
 from api.task_chat import router as task_chat_router
 from agents.orchestrator import load_health_store
-from api.tasks import do_sync_reminders, router as tasks_router
+from api.preferences import load_preferences
+from api.tasks import router as tasks_router
 
 logger = logging.getLogger("dayflow")
 
@@ -22,15 +23,11 @@ logger = logging.getLogger("dayflow")
 async def lifespan(app: FastAPI):
     # Restore persisted health data so it survives reloads
     load_health_store()
-    # Auto-sync reminders on every startup so the task store is never empty
-    try:
-        result = await do_sync_reminders()
-        logger.info(
-            "Startup sync: added=%d updated=%d skipped=%d",
-            result["added"], result["updated"], result["skipped"],
-        )
-    except Exception as exc:
-        logger.warning("Startup reminder sync failed (non-fatal): %s", exc)
+    load_preferences()
+    # No startup sync — the first /schedule/stream call will sync via the
+    # throttle in stream_day_schedule (after yielding the health card, so
+    # the user sees immediate feedback while the sync runs).
+    pass
     yield
 
 

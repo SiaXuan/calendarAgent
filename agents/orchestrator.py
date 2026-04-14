@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -23,7 +24,17 @@ _log = logging.getLogger("dayflow")
 
 # ── In-memory caches (Phase 1) ──────────────────────────────────────────────
 _health_cache: dict[date, tuple[list[float], str]] = {}
-_calendar_cache: dict[date, tuple[list[TimeBlock], list[FreeWindow]]] = {}
+# Calendar cache stores (fixed_blocks, free_windows, fetched_at_monotonic)
+_calendar_cache: dict[date, tuple[list[TimeBlock], list[FreeWindow], float]] = {}
+_CALENDAR_CACHE_TTL_S: float = 300.0  # 5-min TTL — long enough to cover any stream duration
+
+# Serialise all CalDAV fetches: iCloud silently drops concurrent connections.
+# Any second caller waits for the first to finish and then reuses the cached result.
+_calendar_lock = asyncio.Lock()
+
+# Throttle: don't re-sync reminders more than once per N seconds
+_last_sync_ts: float = 0.0
+_SYNC_THROTTLE_S: float = 60.0
 
 # Stored health snapshots keyed by date
 health_store: dict[date, HealthSnapshot] = {}
@@ -134,13 +145,20 @@ async def generate_day_schedule(target_date: date) -> DaySchedule:
     3. Run Scheduler Agent (regular tasks only — instant tasks bypass it)
     4. Assemble and return DaySchedule
     """
-    # Auto-sync reminders if the task store is empty (e.g. after a server restart)
-    if not task_store:
+    global _last_sync_ts
+    # Sync reminders at most once per throttle window so AppleScript doesn't
+    # block every regeneration. Calendar is always re-fetched (fast, no AppleScript).
+    now = time.monotonic()
+    if now - _last_sync_ts > _SYNC_THROTTLE_S:
         try:
             from api.tasks import do_sync_reminders
             await do_sync_reminders()
+            _last_sync_ts = now
         except Exception:
-            pass  # Non-fatal — proceed with empty store
+            pass  # Non-fatal — proceed with existing store
+
+    # Always re-fetch health (cheap, no network).
+    _health_cache.pop(target_date, None)
 
     snapshot = health_store.get(target_date)
     tasks = list(task_store.values())
@@ -161,27 +179,35 @@ async def generate_day_schedule(target_date: date) -> DaySchedule:
         return result
 
     async def _run_calendar():
-        if target_date in _calendar_cache:
-            return _calendar_cache[target_date]
-        try:
-            fixed_blocks, free_windows = await calendar_agent.fetch_fixed_blocks(
-                target_date, prefs.work_start, prefs.work_end
-            )
-        except Exception as exc:
-            import logging
-            logging.getLogger("dayflow").warning("Calendar fetch failed: %s", exc)
-            fixed_blocks, free_windows = [], []
-        # If CalDAV returned no free windows, synthesise the full work day
-        if not free_windows:
-            free_windows = [FreeWindow(
-                start_hour=prefs.work_start,
-                end_hour=prefs.work_end,
-                duration_minutes=(prefs.work_end - prefs.work_start) * 60,
-            )]
-
-        result = (fixed_blocks, free_windows)
-        _calendar_cache[target_date] = result
-        return result
+        # Fast path: fresh cache (no lock needed — just a read)
+        cached = _calendar_cache.get(target_date)
+        if cached and time.monotonic() - cached[2] < _CALENDAR_CACHE_TTL_S:
+            return cached[0], cached[1]
+        # Serialize CalDAV calls — iCloud drops concurrent connections silently
+        async with _calendar_lock:
+            # Re-check inside lock: another coroutine may have fetched while we waited
+            cached = _calendar_cache.get(target_date)
+            if cached and time.monotonic() - cached[2] < _CALENDAR_CACHE_TTL_S:
+                return cached[0], cached[1]
+            try:
+                fixed_blocks, free_windows = await calendar_agent.fetch_fixed_blocks(
+                    target_date, prefs.work_start, prefs.work_end
+                )
+            except Exception as exc:
+                _log.warning("Calendar fetch failed: %s", exc)
+                # Return stale cache rather than silently dropping events
+                if cached:
+                    return cached[0], cached[1]
+                fixed_blocks, free_windows = [], []
+            # If CalDAV returned no free windows, synthesise the full work day
+            if not free_windows:
+                free_windows = [FreeWindow(
+                    start_hour=prefs.work_start,
+                    end_hour=prefs.work_end,
+                    duration_minutes=(prefs.work_end - prefs.work_start) * 60,
+                )]
+            _calendar_cache[target_date] = (fixed_blocks, free_windows, time.monotonic())
+            return fixed_blocks, free_windows
 
     async def _run_tasks():
         all_subtasks = await task_agent.rank_and_decompose(tasks, target_date, language)
@@ -205,21 +231,44 @@ async def generate_day_schedule(target_date: date) -> DaySchedule:
     # Score windows for display on the health card (not used for scheduling).
     scored_windows = health_agent.score_windows(free_windows, energy_curve)
 
-    # Determine tonight's sleep start for scheduler constraints.
-    # Only use the recorded bedtime if it's in the evening (≥ 20:00); an
-    # early-morning value like 03:00 is last night's bedtime, not tonight's.
+    # Determine sleep hours (used for meal timing and scheduler constraints)
+    sleep_end_hour = 7   # default wake time
     sleep_start_hour = 23
-    if snapshot and snapshot.sleep.sleep_start.hour >= 20:
-        sleep_start_hour = snapshot.sleep.sleep_start.hour
+    if snapshot:
+        if snapshot.sleep.sleep_end.hour >= 5:
+            sleep_end_hour = snapshot.sleep.sleep_end.hour
+        if snapshot.sleep.sleep_start.hour >= 20:
+            sleep_start_hour = snapshot.sleep.sleep_start.hour
+
+    # ── Meal breaks ───────────────────────────────────────────────────────────
+    # Compute protected windows for lunch and dinner based on circadian biology
+    # and the user's fixed schedule (e.g. class end shifts lunch start).
+    meal_windows = scheduler_agent.compute_meal_breaks(
+        fixed_blocks, target_date, sleep_end_hour, sleep_start_hour, language
+    )
+    meal_blocks = [
+        TimeBlock(
+            start=start, end=end,
+            block_type=BlockType.meal,
+            title=label,
+            cognitive_load=None,
+        )
+        for start, end, label in meal_windows
+    ]
+    # Re-compute free windows to exclude meal times from scheduling
+    all_fixed_for_schedule = sorted(fixed_blocks + meal_blocks, key=lambda b: b.start)
+    free_windows_with_meals = calendar_agent.extract_free_windows(
+        all_fixed_for_schedule, target_date, prefs.work_start, prefs.work_end
+    )
 
     # Run scheduler — passes energy_curve directly so it checks per-hour
     # energy at each candidate start time, not a coarse window average.
     result = scheduler_agent.generate_schedule(
-        regular_subtasks, free_windows, fixed_blocks, target_date,
+        regular_subtasks, free_windows_with_meals, all_fixed_for_schedule, target_date,
         sleep_start_hour, energy_curve,
     )
 
-    all_blocks = fixed_blocks + instant_blocks + result.blocks
+    all_blocks = all_fixed_for_schedule + instant_blocks + result.blocks
     all_blocks.sort(key=lambda b: b.start)
 
     schedule = DaySchedule(
@@ -257,7 +306,7 @@ async def apply_adjustment(
             health_summary = "No health data — using defaults."
 
     cached_calendar = _calendar_cache.get(target_date)
-    fixed_blocks, free_windows = cached_calendar if cached_calendar else ([], [])
+    fixed_blocks, free_windows = (cached_calendar[0], cached_calendar[1]) if cached_calendar else ([], [])
 
     scored_windows = health_agent.score_windows(free_windows, energy_curve)
 
@@ -321,6 +370,165 @@ async def apply_adjustment(
     )
     schedule_store[target_date] = schedule
     return schedule
+
+
+async def stream_day_schedule(target_date: date):
+    """
+    Async generator that streams schedule-building progress as JSON dicts.
+    Events (in order):
+      {"type": "health",    "energy_curve": [...], "health_summary": "..."}
+      {"type": "fixed",     "blocks": [...]}          # calendar events
+      {"type": "schedule",  "blocks": [...], "unscheduled": [...]}  # full result
+      {"type": "done"}
+
+    Health is yielded FIRST (before any slow I/O) so the health card renders
+    immediately. Reminder sync and CalDAV fetch happen after that.
+    """
+    global _last_sync_ts
+
+    language = get_current_prefs().language
+    prefs = get_current_prefs()
+    snapshot = health_store.get(target_date)
+
+    # ── Step 1: yield health immediately (no network needed) ─
+    _health_cache.pop(target_date, None)
+
+    if snapshot is None:
+        energy_curve = _default_energy_curve()
+        health_summary = "No health data for today — using default energy curve."
+    else:
+        energy_curve = health_agent.compute_energy_curve(snapshot)
+        health_summary = await health_agent.get_health_summary(snapshot, language)
+    _health_cache[target_date] = (energy_curve, health_summary)
+
+    yield {"type": "health", "energy_curve": energy_curve, "health_summary": health_summary}
+
+    # ── Step 2: sync reminders + calendar CONCURRENTLY ────────────────────
+    # Both are I/O-bound; running in parallel cuts the wait to max(sync, cal)
+    # instead of sync + cal.
+    async def _do_sync():
+        global _last_sync_ts
+        now = time.monotonic()
+        if now - _last_sync_ts > _SYNC_THROTTLE_S:
+            try:
+                from api.tasks import do_sync_reminders
+                await do_sync_reminders()
+                _last_sync_ts = time.monotonic()
+            except Exception:
+                pass
+
+    async def _calendar_task():
+        # Fast path: fresh cache (no lock needed — just a read)
+        cached = _calendar_cache.get(target_date)
+        if cached and time.monotonic() - cached[2] < _CALENDAR_CACHE_TTL_S:
+            return cached[0], cached[1]
+        # Serialize CalDAV calls — iCloud drops concurrent connections silently
+        async with _calendar_lock:
+            cached = _calendar_cache.get(target_date)
+            if cached and time.monotonic() - cached[2] < _CALENDAR_CACHE_TTL_S:
+                return cached[0], cached[1]
+            try:
+                fb, fw = await calendar_agent.fetch_fixed_blocks(target_date, prefs.work_start, prefs.work_end)
+            except Exception as exc:
+                _log.warning("Calendar fetch failed in stream: %s", exc)
+                if cached:
+                    return cached[0], cached[1]
+                fb, fw = [], []
+            if not fw:
+                fw = [FreeWindow(
+                    start_hour=prefs.work_start, end_hour=prefs.work_end,
+                    duration_minutes=(prefs.work_end - prefs.work_start) * 60,
+                )]
+            _calendar_cache[target_date] = (fb, fw, time.monotonic())
+            return fb, fw
+
+    # ── Step 2b: calendar fetch FIRST (sequential), then sync ────────────────
+    # Running both concurrently caused iCloud to drop one CalDAV connection
+    # silently, losing CS6140.  Sequential order: calendar → sync → tasks.
+    fixed_blocks, free_windows = await _calendar_task()
+
+    yield {"type": "fixed", "blocks": [_block_json(b) for b in fixed_blocks]}
+
+    # Reminder sync runs AFTER calendar is fetched and cached — no concurrent CalDAV
+    await _do_sync()
+
+    # ── Step 3: task decomposition (Claude — slowest) ─────────────────────
+    tasks = list(task_store.values())
+    all_subtasks = await task_agent.rank_and_decompose(tasks, target_date, language)
+    all_subtasks = _apply_overrides(all_subtasks)
+
+    instant_subtasks = [
+        s for s in all_subtasks
+        if s.is_instant and (s.suggested_date is None or s.suggested_date <= target_date)
+    ]
+    regular_subtasks = [s for s in all_subtasks if not s.is_instant]
+
+    sleep_end_hour = 7
+    sleep_start_hour = 23
+    if snapshot:
+        if snapshot.sleep.sleep_end.hour >= 5:
+            sleep_end_hour = snapshot.sleep.sleep_end.hour
+        if snapshot.sleep.sleep_start.hour >= 20:
+            sleep_start_hour = snapshot.sleep.sleep_start.hour
+
+    instant_blocks = _make_instant_blocks(instant_subtasks, target_date, prefs.work_start)
+
+    # ── Meal breaks ────────────────────────────────────────────────────────
+    meal_windows = scheduler_agent.compute_meal_breaks(
+        fixed_blocks, target_date, sleep_end_hour, sleep_start_hour, language
+    )
+    meal_blocks = [
+        TimeBlock(
+            start=start, end=end,
+            block_type=BlockType.meal,
+            title=label,
+            cognitive_load=None,
+        )
+        for start, end, label in meal_windows
+    ]
+    all_fixed_for_schedule = sorted(fixed_blocks + meal_blocks, key=lambda b: b.start)
+    free_windows_with_meals = calendar_agent.extract_free_windows(
+        all_fixed_for_schedule, target_date, prefs.work_start, prefs.work_end
+    )
+
+    result = scheduler_agent.generate_schedule(
+        regular_subtasks, free_windows_with_meals, all_fixed_for_schedule, target_date,
+        sleep_start_hour, energy_curve,
+    )
+
+    all_blocks = sorted(all_fixed_for_schedule + instant_blocks + result.blocks, key=lambda b: b.start)
+
+    schedule = DaySchedule(
+        date=target_date,
+        energy_curve=energy_curve,
+        blocks=all_blocks,
+        unscheduled=result.unscheduled,
+        health_summary=health_summary,
+    )
+    schedule_store[target_date] = schedule
+
+    yield {
+        "type": "schedule",
+        "blocks": [_block_json(b) for b in all_blocks],
+        "unscheduled": [_subtask_json(s) for s in result.unscheduled],
+    }
+    yield {"type": "done"}
+
+
+def _block_json(b: TimeBlock) -> dict:
+    d = b.model_dump(mode="json")
+    d["start"] = b.start.isoformat()
+    d["end"] = b.end.isoformat()
+    if b.deadline:
+        d["deadline"] = b.deadline.isoformat()
+    return d
+
+
+def _subtask_json(s) -> dict:
+    d = s.model_dump(mode="json")
+    if s.deadline:
+        d["deadline"] = s.deadline.isoformat()
+    return d
 
 
 def _default_energy_curve() -> list[float]:

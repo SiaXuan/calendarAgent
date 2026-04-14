@@ -27,6 +27,18 @@ _INSTANT_TRIGGERS = [
     '签名', '打印', '转账', '汇款', '续费', '确认', '取件', '缴费', '转房租', '交租',
 ]
 
+# If ANY of these appear in the title, never treat as instant — it's a real task.
+# Catches "提交 CV Assessment", "submit homework", "完成 CS project", etc.
+_INSTANT_EXCLUSIONS = [
+    # English academic / work
+    'assignment', 'assessment', 'homework', 'project', 'report',
+    'exam', 'quiz', 'midterm', 'final', 'paper', 'essay', 'test',
+    'proposal', 'presentation', 'lab', 'problem set', 'ps ',
+    # Chinese academic
+    '作业', '作文', '测验', '报告', '项目', '考试', '实验', '论文',
+    '期末', '期中', '大作业', '小作业', '课程', '完成',
+]
+
 # ── High-confidence keyword rules (no LLM needed) ────────────────────────────
 # Rules here must hold regardless of surrounding context.
 # "problem set" alone is NOT here — "grading problem set" ≠ deep.
@@ -46,6 +58,9 @@ _CONFIDENT_LIGHT = [
 
 def _detect_instant(title: str) -> bool:
     tl = title.lower()
+    # Never instant if the title looks like an academic/work deliverable
+    if any(ex in tl for ex in _INSTANT_EXCLUSIONS):
+        return False
     return any(kw in tl for kw in _INSTANT_TRIGGERS)
 
 
@@ -167,6 +182,13 @@ async def do_sync_reminders() -> dict:
     raw = await asyncio.to_thread(fetch_reminders)
     if not raw:
         return {"added": 0, "updated": 0, "skipped": 0, "tasks": []}
+
+    # Full replace: remove all stale reminder-sourced tasks before upserting.
+    # This ensures deleted/completed reminders disappear and stale instant
+    # classifications (from previous code versions) don't persist.
+    stale_ids = [tid for tid, t in orchestrator.task_store.items() if t.source == "reminders"]
+    for tid in stale_ids:
+        del orchestrator.task_store[tid]
 
     added, updated, skipped = 0, 0, 0
     tasks_out = []

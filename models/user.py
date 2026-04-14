@@ -10,7 +10,7 @@ class Language(str, Enum):
 
 
 class UserPreferences(BaseModel):
-    language: Language = Language.en
+    language: Language = Language.zh_CN
     work_start: int = Field(default=8, ge=0, le=23)
     work_end: int = Field(default=22, ge=1, le=24)
     max_deep_work_minutes: int = Field(default=90, ge=15, le=180)

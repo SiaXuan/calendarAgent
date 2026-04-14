@@ -7,7 +7,9 @@ from models.task import CognitiveLoad, Subtask
 
 class BlockType(str, Enum):
     fixed = "fixed"           # meetings, classes — do not move
-    scheduled = "scheduled"   # agent-assigned task block
+    meal = "meal"             # protected meal break (lunch / dinner)
+    suggested = "suggested"   # agent recommends but user hasn't confirmed (soft-fallback slot)
+    scheduled = "scheduled"   # agent-assigned task block (user confirmed or high-confidence)
     free = "free"
     instant = "instant"       # quick reminders (< 10 min), shown as pass-through
 
@@ -24,13 +26,16 @@ class TimeBlock(BaseModel):
     focus_minutes: int = 25          # Pomodoro focus duration
     break_minutes: int = 5           # break between Pomodoros
     pomodoro_count: int = 1          # number of focus sessions
-    is_uncertain: bool = False       # ★ flag — task scope unclear
-    has_explicit_time: bool = True   # False = reminder has date only, no specific time
+    deadline: date | None = None       # inherited from parent task, drives urgency color
+    is_uncertain: bool = False         # ★ flag — task scope unclear
+    has_explicit_time: bool = True     # False = reminder has date only, no specific time
 
 
 class FreeWindow(BaseModel):
     start_hour: int
+    start_minute: int = 0
     end_hour: int
+    end_minute: int = 0
     duration_minutes: int
     energy_score: float = 0.0   # avg energy in this window, 0.0–1.0
 

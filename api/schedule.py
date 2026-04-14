@@ -1,8 +1,10 @@
 import asyncio
+import json
 from datetime import date
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
 from agents import orchestrator
 from integrations.caldav_client import fetch_debug_info
@@ -38,6 +40,27 @@ async def debug_calendar(target_date: str):
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
 
     return await asyncio.to_thread(fetch_debug_info, d)
+
+
+@router.get("/schedule/stream/{target_date}")
+async def stream_schedule(target_date: str):
+    """
+    SSE endpoint — streams health → fixed blocks → full schedule as JSON events.
+    The frontend renders each stage incrementally as it arrives.
+    """
+    try:
+        d = date.fromisoformat(target_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    async def generator():
+        try:
+            async for event in orchestrator.stream_day_schedule(d):
+                yield {"data": json.dumps(event, default=str)}
+        except Exception as exc:
+            yield {"data": json.dumps({"type": "error", "message": str(exc)})}
+
+    return EventSourceResponse(generator())
 
 
 @router.get("/schedule/{target_date}", response_model=DaySchedule)

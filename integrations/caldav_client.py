@@ -21,6 +21,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 
 import caldav
+import recurring_ical_events
 from icalendar import Calendar as ICalendar
 
 
@@ -30,9 +31,10 @@ from icalendar import Calendar as ICalendar
 
 def fetch_events(target_date: date) -> list[dict]:
     """
-    Return VEVENT items for target_date.
+    Return VEVENT items for target_date, including recurring event instances.
     iCloud doesn't support REPORT CALENDAR-QUERY (date_search), so we fetch
-    all objects from each calendar and filter by date client-side.
+    all objects from each calendar and use recurring_ical_events to expand
+    recurrences client-side.
     """
     client = _make_client()
     if client is None:
@@ -42,9 +44,8 @@ def fetch_events(target_date: date) -> list[dict]:
     try:
         for cal in _event_calendars(client):
             for item in _load_objects(cal):
-                parsed = _parse_event(item, target_date)
-                if parsed and _overlaps_date(parsed, target_date):
-                    events.append(parsed)
+                parsed_list = _parse_event_recurring(item.data, target_date)
+                events.extend(parsed_list)
     except Exception:
         pass
     return events
@@ -111,33 +112,42 @@ tell application "Reminders"
         repeat with r in every reminder of aList
             if completed of r is false then
                 set rTitle to name of r
-                try
-                    set rDueDate to due date of r
-                    -- format as ISO: YYYY-MM-DDTHH:MM:SS
-                    set y to year of rDueDate as string
-                    set mo to month of rDueDate as integer
-                    set d to day of rDueDate as integer
-                    set h to hours of rDueDate as integer
-                    set mi to minutes of rDueDate as integer
-                    if mo < 10 then set mo to "0" & mo
-                    if d < 10 then set d to "0" & d
-                    if h < 10 then set h to "0" & h
-                    if mi < 10 then set mi to "0" & mi
-                    set rDue to y & "-" & mo & "-" & d & "T" & h & ":" & mi & ":00"
-                on error
-                    set rDue to ""
-                end try
-                try
-                    set rPri to priority of r as integer
-                on error
-                    set rPri to 0
-                end try
-                try
-                    set rBody to body of r
-                    if rBody is missing value then set rBody to ""
-                on error
-                    set rBody to ""
-                end try
+                set rDue to ""
+                set rPri to 0
+                set rBody to ""
+                with timeout of 4 seconds
+                    try
+                        set rDueDate to due date of r
+                        -- format as ISO: YYYY-MM-DDTHH:MM:SS
+                        set y to year of rDueDate as string
+                        set mo to month of rDueDate as integer
+                        set d to day of rDueDate as integer
+                        set h to hours of rDueDate as integer
+                        set mi to minutes of rDueDate as integer
+                        if mo < 10 then set mo to "0" & mo
+                        if d < 10 then set d to "0" & d
+                        if h < 10 then set h to "0" & h
+                        if mi < 10 then set mi to "0" & mi
+                        set rDue to y & "-" & mo & "-" & d & "T" & h & ":" & mi & ":00"
+                    on error
+                        set rDue to ""
+                    end try
+                end timeout
+                with timeout of 2 seconds
+                    try
+                        set rPri to priority of r as integer
+                    on error
+                        set rPri to 0
+                    end try
+                end timeout
+                with timeout of 2 seconds
+                    try
+                        set rBody to body of r
+                        if rBody is missing value then set rBody to ""
+                    on error
+                        set rBody to ""
+                    end try
+                end timeout
                 -- Replace pipe and newline in fields to avoid parsing errors
                 set output to output & listName & sep & rTitle & sep & rDue & sep & rPri & sep & rBody & nl
             end if
@@ -149,7 +159,7 @@ end tell
     try:
         result = subprocess.run(
             ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=60
         )
         if result.returncode != 0:
             return []
@@ -249,8 +259,7 @@ def fetch_debug_info(target_date: date) -> dict:
             raw = _load_objects(cal)
             found = []
             for item in raw:
-                parsed = _parse_event(item, target_date)
-                if parsed and _overlaps_date(parsed, target_date):
+                for parsed in _parse_event_recurring(item.data, target_date):
                     found.append({
                         "title": parsed["title"],
                         "start": str(parsed["start"]),
@@ -568,33 +577,59 @@ def _load_objects(col: caldav.Calendar) -> list:
 # Parsers
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _parse_event_recurring(ical_data: str, target_date: date) -> list[dict]:
+    """
+    Parse a raw iCal string and return all event instances that fall on
+    target_date, correctly expanding RRULE recurring events.
+    """
+    results: list[dict] = []
+    try:
+        cal = ICalendar.from_ical(ical_data)
+        instances = recurring_ical_events.of(cal).at(target_date)
+        for component in instances:
+            ev = _component_to_event(component, target_date)
+            if ev:
+                results.append(ev)
+    except Exception:
+        pass
+    return results
+
+
+def _component_to_event(component, target_date: date) -> dict | None:
+    """Convert a VEVENT component (already expanded to the right occurrence) to a dict."""
+    try:
+        dtstart_prop = component.get("DTSTART")
+        if not dtstart_prop:
+            return None
+        start_dt = _to_naive_local(dtstart_prop.dt, target_date)
+
+        dtend_prop = component.get("DTEND")
+        if dtend_prop:
+            end_dt = _to_naive_local(dtend_prop.dt, target_date)
+        else:
+            dur = component.get("DURATION")
+            end_dt = start_dt + dur.dt if dur else start_dt + timedelta(hours=1)
+
+        title = str(component.get("SUMMARY", "Busy"))
+        description = str(component.get("DESCRIPTION", "") or "")
+
+        attendees: list[str] = []
+        att = component.get("ATTENDEE")
+        if att:
+            attendees = [str(a) for a in att] if isinstance(att, list) else [str(att)]
+
+        return {"title": title, "start": start_dt, "end": end_dt,
+                "attendees": attendees, "description": description}
+    except Exception:
+        return None
+
+
 def _parse_event(item, target_date: date) -> dict | None:
-    """Parse a CalDAV object into an event dict using icalendar."""
+    """Parse a CalDAV object into an event dict (non-recurring, used by debug path)."""
     try:
         cal = ICalendar.from_ical(item.data)
         for component in cal.walk("VEVENT"):
-            dtstart_prop = component.get("DTSTART")
-            if not dtstart_prop:
-                continue
-            start_dt = _to_naive_local(dtstart_prop.dt, target_date)
-
-            dtend_prop = component.get("DTEND")
-            if dtend_prop:
-                end_dt = _to_naive_local(dtend_prop.dt, target_date)
-            else:
-                dur = component.get("DURATION")
-                end_dt = start_dt + dur.dt if dur else start_dt + timedelta(hours=1)
-
-            title = str(component.get("SUMMARY", "Busy"))
-            description = str(component.get("DESCRIPTION", ""))
-
-            attendees: list[str] = []
-            att = component.get("ATTENDEE")
-            if att:
-                attendees = [str(a) for a in att] if isinstance(att, list) else [str(att)]
-
-            return {"title": title, "start": start_dt, "end": end_dt,
-                    "attendees": attendees, "description": description}
+            return _component_to_event(component, target_date)
     except Exception:
         return None
     return None
