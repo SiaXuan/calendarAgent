@@ -318,8 +318,9 @@ async def reclassify_tasks():
 
 class ReminderItem(BaseModel):
     title: str
-    due: str | None = None        # ISO datetime string or empty string
-    priority: int | str = 0       # 0=none, 1=high, 5=medium, 9=low; Shortcuts sends "None"
+    due: str | None = None
+    priority: int | str = 0       # kept for backwards compat; Shortcuts sends "None"
+    tags: list[str] = []          # iOS Reminder tags e.g. ["high", "deep", "work"]
     list: str = ""
 
     def priority_int(self) -> int:
@@ -327,6 +328,30 @@ class ReminderItem(BaseModel):
             return int(self.priority)
         except (ValueError, TypeError):
             return 0
+
+    def priority_from_tags(self) -> str | None:
+        """Return 'high'/'medium'/'low' if a matching tag exists."""
+        for t in self.tags:
+            tl = t.lower()
+            if tl in ("high", "urgent", "重要", "紧急"):
+                return "high"
+            if tl in ("low", "someday", "低"):
+                return "low"
+            if tl in ("medium", "normal", "中"):
+                return "medium"
+        return None
+
+    def load_from_tags(self) -> CognitiveLoad | None:
+        """Return CognitiveLoad if a matching tag exists."""
+        for t in self.tags:
+            tl = t.lower()
+            if tl in ("deep", "focus", "专注", "深度"):
+                return CognitiveLoad.deep
+            if tl in ("light", "easy", "轻松", "简单"):
+                return CognitiveLoad.light
+            if tl in ("medium", "normal", "中"):
+                return CognitiveLoad.medium
+        return None
 
 
 from fastapi import Request
@@ -375,14 +400,22 @@ async def push_reminders(request: Request):
             except ValueError:
                 pass
 
-        # Priority mapping
-        pri_val = item.priority_int()
-        priority = ("high" if 1 <= pri_val <= 4
-                    else "low" if 6 <= pri_val <= 9
-                    else "medium")
+        # Priority: tags take precedence over numeric priority field
+        tag_priority = item.priority_from_tags()
+        if tag_priority:
+            priority = tag_priority
+        else:
+            pri_val = item.priority_int()
+            priority = ("high" if 1 <= pri_val <= 4
+                        else "low" if 6 <= pri_val <= 9
+                        else "medium")
 
+        # Cognitive load: tags take precedence over keyword/LLM
+        tag_load = item.load_from_tags()
         if is_instant:
             load = CognitiveLoad.light
+        elif tag_load is not None:
+            load = tag_load
         else:
             kw_load = _keyword_classify(item.title, None)
             if kw_load is not None:
