@@ -74,3 +74,23 @@ async def get_schedule(target_date: str):
     if schedule is None:
         raise HTTPException(status_code=404, detail=f"No schedule found for {target_date}.")
     return schedule
+
+
+@router.post("/schedule/{target_date}/write")
+async def write_schedule_to_calendar(target_date: str):
+    """
+    Write the cached DaySchedule for target_date back to iCloud Calendar.
+    Clears previously-written agent blocks first so re-runs don't duplicate.
+    """
+    try:
+        d = date.fromisoformat(target_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    if orchestrator.schedule_store.get(d) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No schedule cached for {target_date}. Generate it first.",
+        )
+
+    return await orchestrator.write_schedule_to_calendar(d)

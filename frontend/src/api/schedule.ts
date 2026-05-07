@@ -12,6 +12,12 @@ export function generateSchedule(date: string): Promise<DaySchedule> {
   })
 }
 
+export function writeScheduleToCalendar(
+  date: string,
+): Promise<{ written: number; deleted: number }> {
+  return apiFetch(`/schedule/${date}/write`, { method: 'POST' })
+}
+
 // ── SSE streaming ─────────────────────────────────────────────────────────────
 
 export type StreamEvent =

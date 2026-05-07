@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { fetchSchedule, generateSchedule, streamSchedule } from '../api/schedule'
+import { fetchSchedule, generateSchedule, streamSchedule, writeScheduleToCalendar } from '../api/schedule'
 import { reclassifyTasks } from '../api/tasks'
 import HealthCard from '../components/HealthCard'
 import ScheduleTimeline from '../components/ScheduleTimeline'
@@ -106,6 +106,18 @@ export default function TodayPage() {
     },
   })
 
+  const writeToCalendar = useMutation({
+    mutationFn: () => writeScheduleToCalendar(date),
+    onSuccess: ({ written }) => {
+      setReclassifyToast(t('addedToCalendar') + ` · ${written}`)
+      setTimeout(() => setReclassifyToast(null), 2500)
+    },
+    onError: () => {
+      setReclassifyToast(t('error'))
+      setTimeout(() => setReclassifyToast(null), 2500)
+    },
+  })
+
   const dateLabel = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 
   return (
@@ -158,7 +170,7 @@ export default function TodayPage() {
                 if (block.task_id) setChatBlock(block)
               }}
             />
-            <div className="flex gap-2 mb-3">
+            <div className="flex gap-2">
               <button
                 onClick={startStream}
                 disabled={isStreaming || reclassify.isPending}
@@ -174,6 +186,13 @@ export default function TodayPage() {
                 {reclassify.isPending ? '…' : t('reclassify')}
               </button>
             </div>
+            <button
+              onClick={() => writeToCalendar.mutate()}
+              disabled={writeToCalendar.isPending || isStreaming}
+              className="w-full p-3.5 mb-3 rounded-2xl bg-blue-deep text-[13px] font-medium text-white text-center active:opacity-80 disabled:opacity-50"
+            >
+              {writeToCalendar.isPending ? t('writingToCalendar') : t('syncToCalendar')}
+            </button>
           </>
         )}
       </div>

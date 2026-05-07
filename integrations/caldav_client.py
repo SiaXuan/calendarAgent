@@ -19,10 +19,18 @@ import os
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
+from uuid import uuid4
 
 import caldav
 import recurring_ical_events
-from icalendar import Calendar as ICalendar
+from icalendar import Calendar as ICalendar, Event as IEvent
+
+
+# Tag embedded in DESCRIPTION of agent-written events.
+# Existing classify_event() in agents/calendar_agent.py looks for the substring
+# "[agent-scheduled]" — this tag preserves that prefix so re-reads still classify
+# our blocks as `scheduled` (moveable) rather than `fixed` (user events).
+AGENT_DESC_TAG = "[agent-scheduled:dayflow]"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -340,6 +348,108 @@ def fetch_debug_info(target_date: date) -> dict:
         result["errors"].append(f"objects() spot-check: {exc}")
 
     return result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Write-back (Phase 3)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def write_event(
+    title: str, start: datetime, end: datetime, description: str = ""
+) -> str | None:
+    """
+    Create a VEVENT on the user's iCloud calendar tagged as agent-written.
+    Returns the event UID on success, None if not configured or on failure.
+
+    The description always ends with AGENT_DESC_TAG so we can later identify
+    and remove agent-written events without touching user events.
+    """
+    client = _make_client()
+    if client is None:
+        return None
+    cal = _writable_calendar(client)
+    if cal is None:
+        return None
+
+    full_desc = f"{description}\n{AGENT_DESC_TAG}" if description else AGENT_DESC_TAG
+    uid = str(uuid4())
+
+    cal_obj = ICalendar()
+    cal_obj.add("prodid", "-//Dayflow//AgentScheduler//EN")
+    cal_obj.add("version", "2.0")
+
+    event = IEvent()
+    event.add("summary", title)
+    event.add("dtstart", start)
+    event.add("dtend", end)
+    event.add("description", full_desc)
+    event.add("uid", uid)
+    event.add("dtstamp", datetime.now())
+    cal_obj.add_component(event)
+
+    try:
+        cal.save_event(cal_obj.to_ical().decode())
+        return uid
+    except Exception:
+        return None
+
+
+def delete_events_with_tag(target_date: date, tag: str = AGENT_DESC_TAG) -> int:
+    """
+    Delete all events on target_date whose DESCRIPTION contains `tag`.
+    Used before re-writing a schedule so previous agent blocks are cleared.
+    Returns the number of events deleted.
+    """
+    client = _make_client()
+    if client is None:
+        return 0
+
+    deleted = 0
+    try:
+        for cal in _event_calendars(client):
+            for item in _load_objects(cal):
+                try:
+                    ical = ICalendar.from_ical(item.data)
+                    if not recurring_ical_events.of(ical).at(target_date):
+                        continue
+                    description = ""
+                    for component in ical.walk("VEVENT"):
+                        description = str(component.get("DESCRIPTION", "") or "")
+                        break
+                    if tag in description:
+                        item.delete()
+                        deleted += 1
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return deleted
+
+
+def _writable_calendar(client: caldav.DAVClient) -> caldav.Calendar | None:
+    """
+    Pick a calendar to write to. Honors CALDAV_TARGET_CALENDAR env var
+    (exact display-name match); otherwise falls back to the first non-holiday
+    non-birthday calendar. Returns None when no event calendars are reachable.
+    """
+    cals = _event_calendars(client)
+    if not cals:
+        return None
+
+    target = os.getenv("CALDAV_TARGET_CALENDAR", "").strip()
+    if target:
+        for cal in cals:
+            if _cal_name(cal).strip() == target:
+                return cal
+
+    # Skip read-only system calendars
+    skip = ("holiday", "birthday", "节假日", "生日", "节日")
+    for cal in cals:
+        name = _cal_name(cal).strip().lower()
+        if any(s in name for s in skip):
+            continue
+        return cal
+    return cals[0]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

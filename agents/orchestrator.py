@@ -396,6 +396,47 @@ async def apply_adjustment(
     return schedule
 
 
+async def write_schedule_to_calendar(target_date: date) -> dict:
+    """
+    Write current schedule_store[target_date] back to iCloud Calendar.
+    Clears previously-written agent blocks for that date first so re-runs don't
+    duplicate. Only `scheduled`, `meal`, and `suggested` blocks are written —
+    `fixed` (user events) and `instant` (reminders) are skipped.
+
+    Returns {written: int, deleted: int}.
+    """
+    schedule = schedule_store.get(target_date)
+    if schedule is None:
+        return {"written": 0, "deleted": 0}
+
+    writable = [
+        b for b in schedule.blocks
+        if b.block_type in (BlockType.scheduled, BlockType.meal, BlockType.suggested)
+    ]
+
+    def _do_write() -> dict:
+        from integrations.caldav_client import write_event, delete_events_with_tag
+        deleted = delete_events_with_tag(target_date)
+        written = 0
+        for b in writable:
+            parts: list[str] = []
+            if b.cognitive_load:
+                parts.append(f"Cognitive load: {b.cognitive_load.value}")
+            if b.phase_label:
+                parts.append(b.phase_label)
+            if b.notes:
+                parts.append(b.notes)
+            uid = write_event(b.title, b.start, b.end, "\n".join(parts))
+            if uid:
+                written += 1
+        # Invalidate calendar cache so next read picks up the newly-written events
+        # and classifies them correctly as scheduled (via the AGENT_DESC_TAG).
+        _calendar_cache.pop(target_date, None)
+        return {"written": written, "deleted": deleted}
+
+    return await asyncio.to_thread(_do_write)
+
+
 async def stream_day_schedule(target_date: date):
     """
     Async generator that streams schedule-building progress as JSON dicts.
