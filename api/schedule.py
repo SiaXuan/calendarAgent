@@ -94,3 +94,36 @@ async def write_schedule_to_calendar(target_date: str):
         )
 
     return await orchestrator.write_schedule_to_calendar(d)
+
+
+class BlockWriteRequest(BaseModel):
+    start: str  # ISO datetime — looked up against schedule_store[date].blocks
+
+
+@router.post("/schedule/{target_date}/blocks/write")
+async def write_single_block(target_date: str, payload: BlockWriteRequest):
+    """
+    Write one block from schedule_store[target_date] to iCloud Calendar.
+    Identified by its start datetime (unique per day). Idempotent: a second
+    call with the same start replaces the previously-written event.
+    """
+    try:
+        d = date.fromisoformat(target_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    schedule = orchestrator.schedule_store.get(d)
+    if schedule is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No schedule cached for {target_date}. Generate it first.",
+        )
+
+    target = next((b for b in schedule.blocks if b.start.isoformat() == payload.start), None)
+    if target is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No block with start={payload.start} in schedule for {target_date}.",
+        )
+
+    return await orchestrator.write_block_to_calendar(d, target)

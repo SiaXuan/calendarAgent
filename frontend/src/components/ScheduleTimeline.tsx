@@ -1,8 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ScheduleBlock, UnscheduledTask } from '../api/types'
+import { writeScheduleBlock } from '../api/schedule'
 
 interface Props {
+  date: string                // YYYY-MM-DD — needed for per-block sync
   blocks: ScheduleBlock[]
   unscheduled?: UnscheduledTask[]
   scheduleGen?: number
@@ -128,17 +130,25 @@ interface BlockCardProps {
   onAccept?: () => void
   onDecline?: () => void
   onOpenChat?: () => void
+  /**
+   * Called when the user swipes far enough to commit. Should resolve when the
+   * block is successfully written to the calendar. Throw to indicate failure
+   * (the card will revert and show an error tint).
+   */
+  onSync?: () => Promise<void>
   /** Extra top margin in px derived from time gap above — animated on pom change */
   gapMargin?: number
 }
 
-function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onAccept, onDecline, onOpenChat, gapMargin = 0 }: BlockCardProps) {
+function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onAccept, onDecline, onOpenChat, onSync, gapMargin = 0 }: BlockCardProps) {
   const { t } = useTranslation()
   const type = block.block_type
 
   // Swipe-to-sync state
   const [offset, setOffset] = useState(0)
   const [synced, setSynced] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncError, setSyncError] = useState(false)
   const [isSwiping, setIsSwiping] = useState(false)
   const touchStartX = useRef(0)
   const mouseStartX = useRef(0)
@@ -151,12 +161,34 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
   // Urgency color level (0–4) drives stripe/title depth
   const urgency = urgencyLevel(block.deadline ?? null)
 
+  /**
+   * Commit a swipe — calls the sync callback (real API write), and only marks
+   * the card as synced on success. Failures bounce the card back and tint red briefly.
+   */
+  const commitSync = useCallback(async () => {
+    setOffset(0)
+    if (!onSync) {
+      setSynced(true)
+      return
+    }
+    setSyncing(true)
+    try {
+      await onSync()
+      setSynced(true)
+    } catch {
+      setSyncError(true)
+      setTimeout(() => setSyncError(false), 1500)
+    } finally {
+      setSyncing(false)
+    }
+  }, [onSync])
+
   // Swipe handlers
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (synced || type === 'fixed' || type === 'meal') return
+    if (synced || syncing || type === 'fixed' || type === 'meal') return
     touchStartX.current = e.touches[0].clientX
     setIsSwiping(true)
-  }, [synced, type])
+  }, [synced, syncing, type])
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (!isSwiping) return
@@ -167,18 +199,17 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
   const handleTouchEnd = useCallback(() => {
     setIsSwiping(false)
     if (offset < -55) {
-      setSynced(true)
-      setOffset(0)
+      void commitSync()
     } else {
       setOffset(0)
     }
-  }, [offset])
+  }, [offset, commitSync])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (synced || type === 'fixed' || type === 'meal') return
+    if (synced || syncing || type === 'fixed' || type === 'meal') return
     mouseStartX.current = e.clientX
     isDragging.current = true
-  }, [synced, type])
+  }, [synced, syncing, type])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isDragging.current) return
@@ -190,12 +221,11 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
     if (!isDragging.current) return
     isDragging.current = false
     if (offset < -55) {
-      setSynced(true)
-      setOffset(0)
+      void commitSync()
     } else {
       setOffset(0)
     }
-  }, [offset])
+  }, [offset, commitSync])
 
   // ── Colors ─────────────────────────────────────────────────────────────────
   // Fixed: always neutral grey
@@ -207,6 +237,8 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
     ? 'bg-white border border-gray-border'
     : type === 'meal'
     ? 'bg-[#F0FAF4] border border-[#B8DBBF]'
+    : syncError
+    ? 'bg-[#FCEFEF] border border-[#E5A5A5]'
     : type === 'suggested'
     ? 'bg-amber-bg border-2 border-dashed border-amber-border'
     : synced
@@ -500,7 +532,7 @@ function cascadeBlocks(
 
 // ── Main timeline ─────────────────────────────────────────────────────────────
 
-export default function ScheduleTimeline({ blocks, unscheduled = [], scheduleGen, isStreaming, onOpenChat }: Props) {
+export default function ScheduleTimeline({ date, blocks, unscheduled = [], scheduleGen, isStreaming, onOpenChat }: Props) {
   const { t } = useTranslation()
 
   // All three stores use stable blockKey (task_id::title) so they survive regeneration.
@@ -610,6 +642,12 @@ export default function ScheduleTimeline({ blocks, unscheduled = [], scheduleGen
                 onAccept={() => setAccepted(s => new Set(s).add(bk))}
                 onDecline={() => setDismissed(s => new Set(s).add(bk))}
                 onOpenChat={() => onOpenChat?.(block)}
+                onSync={async () => {
+                  const r = await writeScheduleBlock(date, block.start)
+                  if (r.skipped || r.written === 0) {
+                    throw new Error('write failed')
+                  }
+                }}
                 gapMargin={i === 0 ? 0 : gapMargin}
               />
             </div>

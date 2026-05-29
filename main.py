@@ -15,6 +15,7 @@ from api.task_chat import router as task_chat_router
 from agents.orchestrator import load_health_store, load_task_store
 from api.preferences import load_preferences
 from api.tasks import router as tasks_router
+from config import CORS_ORIGINS, DEPLOYMENT_MODE
 
 logger = logging.getLogger("dayflow")
 
@@ -41,7 +42,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -56,4 +57,8 @@ app.include_router(preferences_router, tags=["preferences"])
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "Health-Aware Scheduling Agent running."}
+    return {
+        "status": "ok",
+        "message": "Health-Aware Scheduling Agent running.",
+        "mode": DEPLOYMENT_MODE,
+    }

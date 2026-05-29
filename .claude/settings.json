@@ -190,7 +190,16 @@
       "Bash(curl -sS -X POST http://localhost:8765/schedule/2099-12-31/write -w \"\\\\nHTTP %{http_code}\\\\n\")",
       "Bash(curl -sS -X POST http://localhost:8765/schedule/not-a-date/write -w \"\\\\nHTTP %{http_code}\\\\n\")",
       "Bash(kill %1)",
-      "Bash(pkill -f \"uvicorn main:app --port 8765\")"
+      "Bash(pkill -f \"uvicorn main:app --port 8765\")",
+      "Bash(/opt/homebrew/bin/python3.13 -m uvicorn main:app --reload)",
+      "Bash(curl -sS http://localhost:8000/)",
+      "Bash(curl -sSI http://localhost:5173/)",
+      "Bash(node ./node_modules/vite/bin/vite.js)",
+      "Bash(curl -sS http://localhost:8000/health/2026-05-07 -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(/opt/homebrew/bin/python3.13 -c \"import os; from dotenv import load_dotenv; load_dotenv\\('/Users/siaxuan/Desktop/calendarAgent/.env'\\); print\\('CALDAV_TARGET_CALENDAR =', repr\\(os.getenv\\('CALDAV_TARGET_CALENDAR'\\)\\)\\)\")",
+      "Bash(curl -sS http://localhost:8000/openapi.json)",
+      "Bash(/opt/homebrew/bin/python3.13 -c \"import sys, json; spec = json.load\\(sys.stdin\\); print\\('\\\\n'.join\\(sorted\\(p for p in spec['paths'] if 'schedule' in p\\)\\)\\)\")",
+      "Bash(curl -sS -X POST http://localhost:8000/schedule/2099-12-31/blocks/write -H \"Content-Type: application/json\" -d '{\"start\": \"2099-12-31T10:00:00\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")"
     ],
     "additionalDirectories": [
       "/tmp",

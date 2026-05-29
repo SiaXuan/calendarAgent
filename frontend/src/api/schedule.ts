@@ -18,6 +18,16 @@ export function writeScheduleToCalendar(
   return apiFetch(`/schedule/${date}/write`, { method: 'POST' })
 }
 
+export function writeScheduleBlock(
+  date: string,
+  start: string,
+): Promise<{ written: number; deleted: number; skipped: boolean }> {
+  return apiFetch(`/schedule/${date}/blocks/write`, {
+    method: 'POST',
+    body: JSON.stringify({ start }),
+  })
+}
+
 // ── SSE streaming ─────────────────────────────────────────────────────────────
 
 export type StreamEvent =

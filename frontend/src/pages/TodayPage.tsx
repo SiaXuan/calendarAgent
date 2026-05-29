@@ -162,6 +162,7 @@ export default function TodayPage() {
               onLogSleep={() => setSleepModalOpen(true)}
             />
             <ScheduleTimeline
+              date={date}
               blocks={data.blocks}
               unscheduled={data.unscheduled}
               scheduleGen={scheduleGen}

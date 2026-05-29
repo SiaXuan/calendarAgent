@@ -355,14 +355,20 @@ def fetch_debug_info(target_date: date) -> dict:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def write_event(
-    title: str, start: datetime, end: datetime, description: str = ""
+    title: str,
+    start: datetime,
+    end: datetime,
+    description: str = "",
+    tag: str = AGENT_DESC_TAG,
 ) -> str | None:
     """
     Create a VEVENT on the user's iCloud calendar tagged as agent-written.
     Returns the event UID on success, None if not configured or on failure.
 
-    The description always ends with AGENT_DESC_TAG so we can later identify
-    and remove agent-written events without touching user events.
+    `tag` is appended to the DESCRIPTION so callers can later identify and
+    remove the event. Per-block syncs use a unique tag per block so they don't
+    interfere with each other; full-day syncs all share the bare AGENT_DESC_TAG
+    prefix and can be cleaned in one shot.
     """
     client = _make_client()
     if client is None:
@@ -371,7 +377,7 @@ def write_event(
     if cal is None:
         return None
 
-    full_desc = f"{description}\n{AGENT_DESC_TAG}" if description else AGENT_DESC_TAG
+    full_desc = f"{description}\n{tag}" if description else tag
     uid = str(uuid4())
 
     cal_obj = ICalendar()
