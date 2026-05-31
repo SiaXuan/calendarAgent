@@ -12,11 +12,15 @@
 ## Running Locally
 
 ```bash
-pip install -r requirements.txt
+# one-time setup — use venv to isolate the fast-moving langchain stack
+python3.13 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env
 # Set ANTHROPIC_API_KEY at minimum
-uvicorn main:app --reload
+.venv/bin/uvicorn main:app --reload
 ```
+
+See [docs/deployment.md](docs/deployment.md) for the local vs cloud config split.
 
 ## Key Conventions
 
@@ -44,5 +48,9 @@ The frontend uses `react-i18next` with locale files under `src/locales/{lang}.js
 ## Phase Status
 
 - **Phase 1** ✅ Core pipeline with mock data (no real API integrations)
-- **Phase 2** 🔲 Real calendar/task integrations + Railway deploy
-- **Phase 3** 🔲 Chat agent + calendar write-back + daily briefing
+- **Phase 2** ✅ Real CalDAV (iCloud) + iOS Reminders integration; manual sleep input
+- **Phase 3** ✅ Chat agent + calendar write-back + per-task planning chat
+- **Phase 4 (in progress)** 🔄 Migration to LangGraph + LangMem long-term memory
+  + multi-source health adapter + research-driven health rules
+  + user-attached MCP extension interface.
+  See [docs/phase3-plan.md](docs/phase3-plan.md) for the full roadmap.

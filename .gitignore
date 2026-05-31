@@ -65,3 +65,10 @@ local_data/
 # ── Frontend ──────────────────────────────────────────────────────────────────
 frontend/node_modules/
 frontend/dist/
+
+# ── plans ─────────────────────────────────────────────────────────────
+ClAUDE.md
+docs/phase3_plan.md
+
+# -- gitignore --
+.gitignore

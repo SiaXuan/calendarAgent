@@ -26,15 +26,30 @@ The only true platform branch in the code is the `sys.platform == "darwin"` chec
 
 ## Local mode (default — recommended)
 
-```bash
-# backend
-uvicorn main:app --reload
+### One-time setup
 
-# frontend
+```bash
+# create isolated venv (avoid polluting the global python install)
+python3.13 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+```
+
+### Daily run
+
+```bash
+# backend (uses the venv's uvicorn)
+.venv/bin/uvicorn main:app --reload
+
+# frontend (in a separate terminal)
 cd frontend && npm run dev
 ```
 
 Open <http://localhost:5173>.
+
+> The project depends on a fast-moving `langchain` / `langgraph` stack. Running
+> them in a venv keeps that dependency tree isolated from the system Python.
+> If you'd rather use the global Python, drop the `.venv/bin/` prefix — but
+> expect version conflicts with other projects over time.
 
 ## Cloud mode (Railway, etc.)
 
