@@ -1,16 +1,23 @@
 """
 Task Chat Agent — manages per-task AI conversations for uncertain or complex tasks.
+
 The user can discuss scope, breakdown, and time estimates with the model.
-When the user confirms a plan, returns decomposed subtasks that replace Claude's default decomposition.
+When the user confirms a plan, the bot emits prose + a "---" separator + JSON,
+which we parse into Subtasks that override the default decomposition.
+
+Phase A migration: switched from raw `anthropic.AsyncAnthropic` to
+`ChatAnthropic` (LangChain). The "---"-then-JSON pattern stays because the bot
+is supposed to *converse* before committing — we don't want a structured-output
+constraint forcing it to emit JSON on every turn.
 """
 import json
-import os
 from datetime import date
 
-import anthropic
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
-from models.task import CognitiveLoad, Subtask, Task
+from agents.llm import sonnet
+from models.task import Subtask, Task
 from models.user import Language
 
 
@@ -37,7 +44,9 @@ RULES:
 - Be conversational; don't dump the JSON until the user confirms
 - When confirmed, output a "---" separator then a JSON array with this shape:
   [{{"parent_id": "{task_id}", "title": "...", "estimated_minutes": <int>,
-    "cognitive_load": "deep"|"medium"|"light", "suggested_date": "<YYYY-MM-DD>"|null,
+    "cognitive_load": "deep"|"medium"|"light",
+    "task_kind": "analytical"|"insight"|"admin",
+    "suggested_date": "<YYYY-MM-DD>"|null,
     "phase_label": "..."|null, "is_instant": false}}]
 - All user-facing text in: {language}
 
@@ -57,9 +66,6 @@ async def chat(
     target_date: date,
     language: Language = Language.en,
 ) -> TaskChatResult:
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    client = anthropic.AsyncAnthropic(api_key=api_key)
-
     system = _SYSTEM_TEMPLATE.format(
         task_id=task.id,
         title=task.title,
@@ -70,16 +76,16 @@ async def chat(
         language=language.value,
     )
 
-    api_messages = [{"role": m.role, "content": m.content} for m in messages]
+    lc_messages = [SystemMessage(content=system)]
+    for m in messages:
+        if m.role == "user":
+            lc_messages.append(HumanMessage(content=m.content))
+        else:
+            lc_messages.append(AIMessage(content=m.content))
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=system,
-        messages=api_messages,
-    )
-
-    reply_text = response.content[0].text.strip()
+    response = await sonnet.ainvoke(lc_messages)
+    reply_text = (response.content or "").strip() if isinstance(response.content, str) \
+        else "".join(part.get("text", "") for part in response.content if isinstance(part, dict)).strip()
 
     # Parse decomposed subtasks from JSON block after "---" separator
     decomposed: list[Subtask] | None = None

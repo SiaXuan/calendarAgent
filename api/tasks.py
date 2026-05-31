@@ -9,10 +9,9 @@ import anthropic
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from agents import orchestrator
-from agents.orchestrator import save_task_store
 from integrations.caldav_client import fetch_reminders, is_system_list
 from models.task import CognitiveLoad, Priority, Task
+from storage import save_task_store, task_store
 
 router = APIRouter()
 _log = logging.getLogger("dayflow")
@@ -162,14 +161,14 @@ async def create_task(payload: TaskInput):
         deadline=deadline,
         source="manual",
     )
-    orchestrator.task_store[task.id] = task
+    task_store[task.id] = task
     save_task_store()
     return task
 
 
 @router.get("/tasks", response_model=list[Task])
 async def list_tasks():
-    return list(orchestrator.task_store.values())
+    return list(task_store.values())
 
 
 async def do_sync_reminders() -> dict:
@@ -188,9 +187,9 @@ async def do_sync_reminders() -> dict:
     # Full replace: remove all stale reminder-sourced tasks before upserting.
     # This ensures deleted/completed reminders disappear and stale instant
     # classifications (from previous code versions) don't persist.
-    stale_ids = [tid for tid, t in orchestrator.task_store.items() if t.source == "reminders"]
+    stale_ids = [tid for tid, t in task_store.items() if t.source == "reminders"]
     for tid in stale_ids:
-        del orchestrator.task_store[tid]
+        del task_store[tid]
 
     added, updated, skipped = 0, 0, 0
     tasks_out = []
@@ -229,21 +228,21 @@ async def do_sync_reminders() -> dict:
             is_instant=is_instant,
         )
 
-        if task_id in orchestrator.task_store:
+        if task_id in task_store:
             updated += 1
         else:
             added += 1
 
-        orchestrator.task_store[task_id] = task
+        task_store[task_id] = task
         tasks_out.append(task)
 
     # Pass 2: LLM batch for uncertain tasks
     if llm_pending:
         llm_results = await _llm_classify_batch(llm_pending)
         for task_id, llm_load in llm_results.items():
-            if task_id in orchestrator.task_store:
-                orig = orchestrator.task_store[task_id]
-                orchestrator.task_store[task_id] = orig.model_copy(
+            if task_id in task_store:
+                orig = task_store[task_id]
+                task_store[task_id] = orig.model_copy(
                     update={"cognitive_load": llm_load}
                 )
         # Reflect LLM loads in tasks_out
@@ -269,7 +268,7 @@ async def reclassify_tasks():
     Re-run hybrid cognitive-load classification (keyword + LLM) on all tasks
     currently in task_store. Useful after updating classification rules.
     """
-    tasks = list(orchestrator.task_store.values())
+    tasks = list(task_store.values())
     if not tasks:
         return {"reclassified": 0, "results": []}
 
@@ -288,8 +287,8 @@ async def reclassify_tasks():
 
     # Apply keyword results immediately
     for task_id, load in keyword_updates.items():
-        if task_id in orchestrator.task_store:
-            orchestrator.task_store[task_id] = orchestrator.task_store[task_id].model_copy(
+        if task_id in task_store:
+            task_store[task_id] = task_store[task_id].model_copy(
                 update={"cognitive_load": load}
             )
 
@@ -298,8 +297,8 @@ async def reclassify_tasks():
     if llm_pending:
         llm_results = await _llm_classify_batch(llm_pending)
         for task_id, load in llm_results.items():
-            if task_id in orchestrator.task_store:
-                orchestrator.task_store[task_id] = orchestrator.task_store[task_id].model_copy(
+            if task_id in task_store:
+                task_store[task_id] = task_store[task_id].model_copy(
                     update={"cognitive_load": load}
                 )
         _log.info("Reclassify: LLM classified %d tasks: %s", len(llm_results),
@@ -307,9 +306,9 @@ async def reclassify_tasks():
 
     all_updates = {**keyword_updates, **llm_results}
     results = [
-        {"id": tid, "title": orchestrator.task_store[tid].title, "cognitive_load": load.value}
+        {"id": tid, "title": task_store[tid].title, "cognitive_load": load.value}
         for tid, load in all_updates.items()
-        if tid in orchestrator.task_store
+        if tid in task_store
     ]
     return {"reclassified": len(all_updates), "results": results}
 
@@ -319,9 +318,9 @@ async def reclassify_tasks():
 @router.post("/tasks/clear-reminders")
 async def clear_reminders():
     """Remove all reminder-sourced tasks. Call once before pushing new batch."""
-    stale = [tid for tid, t in orchestrator.task_store.items() if t.source == "reminders"]
+    stale = [tid for tid, t in task_store.items() if t.source == "reminders"]
     for tid in stale:
-        del orchestrator.task_store[tid]
+        del task_store[tid]
     save_task_store()
     return {"cleared": len(stale)}
 
@@ -434,25 +433,25 @@ async def push_reminder(request: Request):
             source="reminders",
             is_instant=is_instant,
         )
-        orchestrator.task_store[task_id] = task
+        task_store[task_id] = task
         added += 1
 
     if llm_pending:
         llm_results = await _llm_classify_batch(llm_pending)
         for tid, llm_load in llm_results.items():
-            if tid in orchestrator.task_store:
-                orchestrator.task_store[tid] = orchestrator.task_store[tid].model_copy(
+            if tid in task_store:
+                task_store[tid] = task_store[tid].model_copy(
                     update={"cognitive_load": llm_load}
                 )
 
     save_task_store()
-    return {"added": added, "total": len(orchestrator.task_store)}
+    return {"added": added, "total": len(task_store)}
 
 
 @router.delete("/tasks/{task_id}")
 async def delete_task(task_id: str):
-    if task_id not in orchestrator.task_store:
+    if task_id not in task_store:
         raise HTTPException(status_code=404, detail="Task not found.")
-    del orchestrator.task_store[task_id]
+    del task_store[task_id]
     save_task_store()
     return {"deleted": task_id}

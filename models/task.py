@@ -15,12 +15,28 @@ class CognitiveLoad(str, Enum):
     light = "light"     # admin, exercise, casual review
 
 
+class TaskKind(str, Enum):
+    """
+    Orthogonal to CognitiveLoad: indicates *what kind of cognitive process*
+    the task needs, which drives optimal time-of-day placement.
+
+    Based on Daniel Pink "When" (2018) and underlying research:
+      * Analytical → focused attention, problem-solving (peak alertness time)
+      * Insight   → creative, novel-association (off-peak / slightly fatigued)
+      * Admin     → procedural, low-focus (afternoon trough is fine)
+    """
+    analytical = "analytical"
+    insight = "insight"
+    admin = "admin"
+
+
 class Task(BaseModel):
     id: str
     title: str
     description: str | None = None
     priority: Priority
     cognitive_load: CognitiveLoad
+    task_kind: TaskKind = TaskKind.analytical  # default preserves prior behaviour
     estimated_hours: float
     deadline: date | None = None
     deadline_dt: datetime | None = None  # full due datetime, preserved from reminder
@@ -33,6 +49,7 @@ class Subtask(BaseModel):
     parent_id: str
     title: str
     cognitive_load: CognitiveLoad
+    task_kind: TaskKind = TaskKind.analytical  # inherited from parent or LLM-classified
     estimated_minutes: int
     suggested_date: date | None = None
     deadline: date | None = None          # inherited from parent task

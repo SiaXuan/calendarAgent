@@ -1,15 +1,22 @@
 """
-Task Agent — uses Claude API to rank and decompose tasks into subtasks.
-Always validates Claude's JSON output with Pydantic before use.
+Task Agent — uses Claude (via langchain-anthropic) to rank and decompose tasks.
+
+Phase A migration: switched from raw `anthropic.AsyncAnthropic` + ad-hoc JSON
+parsing to `ChatAnthropic.with_structured_output(...)`. This gives us:
+  * Pydantic-validated output for free (no manual `json.loads` + ValidationError)
+  * LangSmith trace integration when LANGSMITH_TRACING=true
+  * Easy model swap via agents/llm.py
+
+The instant-task short-circuit and heuristic fallback remain unchanged.
 """
 import json
-import os
 from datetime import date
 
-import anthropic
-from pydantic import ValidationError
+from langchain_core.exceptions import OutputParserException
+from pydantic import BaseModel, ValidationError
 
-from models.task import CognitiveLoad, Subtask, Task
+from agents.llm import sonnet
+from models.task import CognitiveLoad, Subtask, Task, TaskKind
 from models.user import Language
 
 _MAX_SUBTASK_MINUTES = {
@@ -18,20 +25,28 @@ _MAX_SUBTASK_MINUTES = {
     CognitiveLoad.light: 45,
 }
 
-# Keywords that indicate a task is a quick action (< 10 min)
-_INSTANT_KEYWORDS = [
-    # English
-    'pay ', 'send ', 'email ', 'call ', 'text ', 'reply ', 'submit ', 'sign ',
-    'buy ', 'order ', 'book ', 'reserve ', 'print ', 'upload ', 'download ',
-    'transfer ', 'wire ', 'renew ', 'confirm ',
-    # Chinese
-    '交', '付款', '还款', '支付', '发送', '提交', '预约', '购买', '订购',
-    '签名', '打印', '上传', '转账', '汇款', '续费', '确认',
-]
+
+# ─── Structured-output schema for the LLM ────────────────────────────────────
+# We wrap the list in an object because `with_structured_output` expects a
+# single top-level schema, not a bare array.
+
+class _LLMSubtask(BaseModel):
+    parent_id: str
+    title: str
+    estimated_minutes: int
+    cognitive_load: CognitiveLoad
+    task_kind: TaskKind = TaskKind.analytical
+    suggested_date: date | None = None
+    phase_label: str | None = None
+    is_instant: bool = False
+
+
+class _LLMSubtaskList(BaseModel):
+    subtasks: list[_LLMSubtask]
+
 
 _SYSTEM_PROMPT_TEMPLATE = """\
-You are a task planning assistant. Output ONLY valid JSON — no explanation, no markdown fences.
-All text fields (e.g. "title") must be written in {language}.
+You are a task planning assistant. All text fields (e.g. "title") must be written in {language}.
 
 Analyze each task and decompose it into appropriately-sized subtasks. Follow these guidelines:
 
@@ -68,24 +83,21 @@ COGNITIVE LOAD — assign independently per subtask, do NOT just copy the parent
 - light:  minimal mental effort, mostly mechanical
           (simple admin, scheduling, quick check-ins, filing, watching a video, re-reading notes)
 
+TASK_KIND — orthogonal to cognitive_load; classifies *what kind of cognitive process* the
+subtask needs, which we'll use later to place it at the optimal time of day:
+- analytical: focused attention, problem-solving, structured analysis
+              (coding, debugging, math problems, structured writing, reading papers with intent)
+- insight:    creative, novel-association, open-ended exploration
+              (brainstorming, design, outlining new ideas, drafting from scratch, research framing)
+- admin:      procedural, low-focus, mostly mechanical
+              (emails, filing, scheduling, organising, formatting, simple data entry)
+When unsure, default to "analytical".
+
 CONSTRAINTS:
 - Max subtask: 90 min (deep), 60 min (medium), 45 min (light)
 - Respect deadlines: prefer today for tasks due today or overdue
 - High-priority tasks must have at least one subtask assigned to today
 - Output subtasks ordered by urgency: overdue/today first, then earliest deadline, then priority
-
-Return a flat JSON array — no other text:
-[
-  {{
-    "parent_id": "<task id>",
-    "title": "<subtask title in {language}>",
-    "estimated_minutes": <integer ≥ 25>,
-    "cognitive_load": "deep" | "medium" | "light",
-    "suggested_date": "<YYYY-MM-DD>" | null,
-    "phase_label": "<phase label>" | null,
-    "is_instant": false
-  }}
-]
 """
 
 
@@ -122,12 +134,14 @@ async def rank_and_decompose(
 
     subtasks: list[Subtask] = []
 
-    # Instant tasks → single pass-through subtask each
+    # Instant tasks → single pass-through subtask each. task_kind defaults to
+    # admin because these are by definition procedural / low-focus actions.
     for t in instant_tasks:
         subtasks.append(Subtask(
             parent_id=t.id,
             title=t.title,
             cognitive_load=CognitiveLoad.light,
+            task_kind=TaskKind.admin,
             estimated_minutes=5,
             suggested_date=t.deadline or target_date,
             deadline=t.deadline,
@@ -137,10 +151,6 @@ async def rank_and_decompose(
 
     if not regular_tasks:
         return subtasks
-
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    client = anthropic.AsyncAnthropic(api_key=api_key)
-    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(language=language.value)
 
     # Pre-sort by urgency before sending to Claude
     sorted_tasks = sorted(
@@ -165,58 +175,52 @@ async def rank_and_decompose(
         for t in sorted_tasks
     ]
 
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(language=language.value)
     user_message = (
         f"Today's date: {target_date.isoformat()}\n\n"
         f"Tasks:\n{json.dumps(task_payload, indent=2)}"
     )
 
-    message = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
-    )
-
-    raw_text = message.content[0].text.strip()
-
-    # Strip accidental markdown fences
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("```")[1]
-        if raw_text.startswith("json"):
-            raw_text = raw_text[4:]
-        raw_text = raw_text.strip()
-
     # Build deadline/priority lookup for post-sort safety net
     deadline_by_id = {t.id: t.deadline for t in regular_tasks}
     deadline_sort_key = {t.id: (t.deadline or date.max) for t in regular_tasks}
     priority_by_id = {t.id: t.priority.value for t in regular_tasks}
+    parent_hours = {t.id: t.estimated_hours for t in regular_tasks}
 
     try:
-        raw_list = json.loads(raw_text)
-        claude_subtasks = [Subtask.model_validate(item) for item in raw_list]
-        # Patch deadline, force is_instant=False, and enforce minimum time.
-        # Claude sometimes marks subtasks as instant (5 min) because titles start with
-        # action verbs ("完成X", "提交X") — these are regular work steps, not quick actions.
-        parent_hours = {t.id: t.estimated_hours for t in regular_tasks}
-        claude_subtasks = [
-            s.model_copy(update={
-                "deadline": deadline_by_id.get(s.parent_id),
-                "is_instant": False,
-                # If Claude gave an instant-sized time (< 25 min) for a real task,
-                # floor it to max(25, parent_estimated_hours * 60) so blocks have
-                # actual work duration and don't vanish in the timeline.
-                "estimated_minutes": s.estimated_minutes if s.estimated_minutes >= 25
-                    else max(25, int(parent_hours.get(s.parent_id, 0.5) * 60)),
-            })
-            for s in claude_subtasks
-        ]
+        structured_llm = sonnet.with_structured_output(_LLMSubtaskList)
+        result: _LLMSubtaskList = await structured_llm.ainvoke([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ])
+
+        # Map LLM subtasks → real Subtask, patching deadline + safety floors.
+        # Claude sometimes marks subtasks as instant (5 min) because titles start
+        # with action verbs ("完成X", "提交X") — these are regular work steps,
+        # not quick actions, so force is_instant=False and floor the duration.
+        claude_subtasks: list[Subtask] = []
+        for item in result.subtasks:
+            minutes = item.estimated_minutes if item.estimated_minutes >= 25 \
+                else max(25, int(parent_hours.get(item.parent_id, 0.5) * 60))
+            claude_subtasks.append(Subtask(
+                parent_id=item.parent_id,
+                title=item.title,
+                cognitive_load=item.cognitive_load,
+                task_kind=item.task_kind,
+                estimated_minutes=minutes,
+                suggested_date=item.suggested_date,
+                deadline=deadline_by_id.get(item.parent_id),
+                phase_label=item.phase_label,
+                is_instant=False,
+            ))
+
         # Safety net: re-sort by parent task urgency
         claude_subtasks.sort(key=lambda s: (
             deadline_sort_key.get(s.parent_id, date.max),
             priority_by_id.get(s.parent_id, "medium"),
         ))
         subtasks.extend(claude_subtasks)
-    except (json.JSONDecodeError, ValidationError, KeyError):
+    except (OutputParserException, ValidationError, ValueError, KeyError):
         subtasks.extend(_heuristic_decompose(sorted_tasks, target_date))
 
     return subtasks
@@ -239,6 +243,7 @@ def _heuristic_decompose(tasks: list[Task], target_date: date) -> list[Subtask]:
                     parent_id=task.id,
                     title=f"{task.title} (part {idx})" if n_chunks > 1 else task.title,
                     cognitive_load=task.cognitive_load,
+                    task_kind=task.task_kind,
                     estimated_minutes=size,
                     suggested_date=target_date,
                     deadline=task.deadline,

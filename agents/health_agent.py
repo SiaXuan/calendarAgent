@@ -13,13 +13,10 @@ Bedtime is used to infer the user's circadian rhythm:
 All three peak Gaussians are evaluated on an extended hour axis (h_ext) anchored at
 wake_hour, so the arithmetic stays monotone across midnight.
 """
-import json
 import math
-import os
 from datetime import date
 
-import anthropic
-
+from agents.llm import haiku
 from models.health import HealthSnapshot
 from models.schedule import FreeWindow
 from models.user import Language
@@ -176,19 +173,20 @@ def _build_english_summary(snapshot: HealthSnapshot) -> str:
 
 
 async def _translate_summary(english: str, language: Language) -> str:
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
-        response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=256,
-            system=(
-                f"Translate the following health summary into {language.value}. "
-                "Return only the translated text, no explanation."
-            ),
-            messages=[{"role": "user", "content": english}],
-        )
-        return response.content[0].text.strip()
+        response = await haiku.ainvoke([
+            {
+                "role": "system",
+                "content": (
+                    f"Translate the following health summary into {language.value}. "
+                    "Return only the translated text, no explanation."
+                ),
+            },
+            {"role": "user", "content": english},
+        ])
+        text = response.content if isinstance(response.content, str) else \
+            "".join(part.get("text", "") for part in response.content if isinstance(part, dict))
+        return text.strip() or english
     except Exception:
         return english
 

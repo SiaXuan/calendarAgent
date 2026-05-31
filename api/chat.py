@@ -3,10 +3,9 @@ from datetime import date
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from agents import orchestrator
-from agents.chat_agent import handle_message
-from api.preferences import get_current_prefs
+from graphs.adjust_graph import run_adjust_graph
 from models.schedule import DaySchedule
+from storage import schedule_store
 
 router = APIRouter()
 
@@ -23,13 +22,11 @@ async def chat(payload: ChatRequest):
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
 
-    current = orchestrator.schedule_store.get(d)
-    if current is None:
+    if schedule_store.get(d) is None:
         raise HTTPException(
             status_code=404,
             detail=f"No schedule for {payload.date}. Generate one first via POST /schedule/generate.",
         )
 
-    params = await handle_message(payload.message, current, get_current_prefs().language)
-    updated = await orchestrator.apply_adjustment(d, params)
+    updated, _params = await run_adjust_graph(d, payload.message)
     return updated

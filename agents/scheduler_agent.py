@@ -197,6 +197,7 @@ def generate_schedule(
                 task_id=subtask.parent_id,
                 title=subtask.title,
                 cognitive_load=subtask.cognitive_load,
+                task_kind=subtask.task_kind,
                 notes=None,
                 phase_label=subtask.phase_label,
                 focus_minutes=25,

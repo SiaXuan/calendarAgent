@@ -372,10 +372,18 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
             )}
           </div>
 
-          {/* time + cognitive load — cascaded from ScheduleTimeline */}
+          {/* time + cognitive load + task_kind — cascaded from ScheduleTimeline */}
           <div className="text-[11px] leading-relaxed mt-0.5" style={{ color: subColor }}>
             {fmt(displayStart)} – {fmt(displayEnd)}
             {block.cognitive_load && ` · ${t(block.cognitive_load)}`}
+            {block.task_kind && (
+              <span
+                className="ml-1 px-1.5 py-px rounded text-[10px] uppercase tracking-wide"
+                style={{ background: 'rgba(0,0,0,0.06)', color: subColor }}
+              >
+                {block.task_kind}
+              </span>
+            )}
           </div>
 
           {/* Pomodoro controls — only for agent/suggested blocks */}

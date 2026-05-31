@@ -1,3 +1,5 @@
+export type TaskKind = 'analytical' | 'insight' | 'admin'
+
 export interface ScheduleBlock {
   start: string
   end: string
@@ -5,6 +7,7 @@ export interface ScheduleBlock {
   task_id: string | null
   title: string
   cognitive_load: 'light' | 'medium' | 'deep' | null
+  task_kind: TaskKind | null
   notes: string | null
   // Phase & Pomodoro
   phase_label: string | null

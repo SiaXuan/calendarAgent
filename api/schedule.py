@@ -6,9 +6,15 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from agents import orchestrator
+from agents.calendar_writeback import (
+    write_block_to_calendar as _writeback_block,
+    write_schedule_to_calendar as _writeback_schedule,
+)
+from graphs.schedule_graph import run_schedule_graph
+from graphs.schedule_stream import stream_schedule_events
 from integrations.caldav_client import fetch_debug_info
 from models.schedule import DaySchedule
+from storage import schedule_store
 
 router = APIRouter()
 
@@ -24,7 +30,7 @@ async def generate_schedule(payload: GenerateRequest):
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
 
-    schedule = await orchestrator.generate_day_schedule(d)
+    schedule = await run_schedule_graph(d)
     return schedule
 
 
@@ -55,7 +61,7 @@ async def stream_schedule(target_date: str):
 
     async def generator():
         try:
-            async for event in orchestrator.stream_day_schedule(d):
+            async for event in stream_schedule_events(d):
                 yield {"data": json.dumps(event, default=str)}
         except Exception as exc:
             yield {"data": json.dumps({"type": "error", "message": str(exc)})}
@@ -70,7 +76,7 @@ async def get_schedule(target_date: str):
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
 
-    schedule = orchestrator.schedule_store.get(d)
+    schedule = schedule_store.get(d)
     if schedule is None:
         raise HTTPException(status_code=404, detail=f"No schedule found for {target_date}.")
     return schedule
@@ -87,13 +93,13 @@ async def write_schedule_to_calendar(target_date: str):
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
 
-    if orchestrator.schedule_store.get(d) is None:
+    if schedule_store.get(d) is None:
         raise HTTPException(
             status_code=404,
             detail=f"No schedule cached for {target_date}. Generate it first.",
         )
 
-    return await orchestrator.write_schedule_to_calendar(d)
+    return await _writeback_schedule(d)
 
 
 class BlockWriteRequest(BaseModel):
@@ -112,7 +118,7 @@ async def write_single_block(target_date: str, payload: BlockWriteRequest):
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
 
-    schedule = orchestrator.schedule_store.get(d)
+    schedule = schedule_store.get(d)
     if schedule is None:
         raise HTTPException(
             status_code=404,
@@ -126,4 +132,4 @@ async def write_single_block(target_date: str, payload: BlockWriteRequest):
             detail=f"No block with start={payload.start} in schedule for {target_date}.",
         )
 
-    return await orchestrator.write_block_to_calendar(d, target)
+    return await _writeback_block(d, target)

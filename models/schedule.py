@@ -2,7 +2,7 @@ from datetime import date, datetime
 from enum import Enum
 from pydantic import BaseModel
 
-from models.task import CognitiveLoad, Subtask
+from models.task import CognitiveLoad, Subtask, TaskKind
 
 
 class BlockType(str, Enum):
@@ -21,6 +21,7 @@ class TimeBlock(BaseModel):
     task_id: str | None = None
     title: str
     cognitive_load: CognitiveLoad | None = None
+    task_kind: TaskKind | None = None   # surfaced from parent subtask for UI labels
     notes: str | None = None
     phase_label: str | None = None   # e.g. "Phase 1 · Research"
     focus_minutes: int = 25          # Pomodoro focus duration

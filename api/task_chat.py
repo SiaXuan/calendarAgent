@@ -8,10 +8,10 @@ from datetime import date as date_type
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ValidationError
 
-from agents import orchestrator
 from agents.task_chat_agent import ChatMessage, TaskChatResult, chat
 from api.preferences import get_current_prefs
 from models.task import Subtask
+from storage import schedule_store, subtask_overrides, task_store
 
 router = APIRouter()
 
@@ -28,7 +28,7 @@ class ConfirmPlanRequest(BaseModel):
 @router.post("/chat/task/{task_id}", response_model=TaskChatResult)
 async def task_chat(task_id: str, payload: TaskChatRequest):
     """Send a message in a per-task planning chat. Returns AI reply + optional plan."""
-    task = orchestrator.task_store.get(task_id)
+    task = task_store.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found.")
 
@@ -49,7 +49,7 @@ async def confirm_task_plan(task_id: str, payload: ConfirmPlanRequest):
     Commit a confirmed decomposition plan.
     On the next schedule generation, these subtasks replace Claude's decomposition for this task.
     """
-    if task_id not in orchestrator.task_store:
+    if task_id not in task_store:
         raise HTTPException(status_code=404, detail="Task not found.")
 
     try:
@@ -57,9 +57,9 @@ async def confirm_task_plan(task_id: str, payload: ConfirmPlanRequest):
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    orchestrator.subtask_overrides[task_id] = subtasks
+    subtask_overrides[task_id] = subtasks
 
     # Invalidate cached schedule so next generate picks up the new plan
-    orchestrator.schedule_store.clear()
+    schedule_store.clear()
 
     return {"confirmed": len(subtasks), "task_id": task_id}

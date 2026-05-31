@@ -4,7 +4,8 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from agents import orchestrator
+from agents.nodes import _health_cache
+from storage import health_store, save_health_store
 from models.health import HealthSnapshot, SleepData
 
 router = APIRouter()
@@ -133,7 +134,7 @@ async def get_health(date: str):
         d = date_type.fromisoformat(date)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
-    snapshot = orchestrator.health_store.get(d)
+    snapshot = health_store.get(d)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="No health data for this date.")
     return snapshot
@@ -163,9 +164,9 @@ async def receive_health(payload: HealthInput):
         submitted_at=datetime.now(),
     )
 
-    orchestrator.health_store[d] = snapshot
+    health_store[d] = snapshot
     # Invalidate cached health for this date so it's recomputed next time
-    orchestrator._health_cache.pop(d, None)
-    orchestrator.save_health_store()
+    _health_cache.pop(d, None)
+    save_health_store()
 
     return snapshot

@@ -1,13 +1,15 @@
 """
 Chat Agent — translates natural language adjustments into AdjustmentParams.
-Uses Claude API.
+
+Phase A migration: switched from raw `anthropic.AsyncAnthropic` + manual JSON
+parsing to `ChatAnthropic.with_structured_output(...)` for free Pydantic
+validation + LangSmith tracing.
 """
 import json
-import os
 
-import anthropic
 from pydantic import BaseModel
 
+from agents.llm import sonnet
 from models.schedule import DaySchedule
 from models.user import Language
 
@@ -25,20 +27,15 @@ class AdjustmentParams(BaseModel):
 
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are a scheduling assistant. Given a user message and their current schedule, \
-return ONLY valid JSON describing what adjustment to make. No explanation.
+describe what adjustment to make.
 All text fields (e.g. "add_task_title", "raw_intent") must be written in {language}.
 
-Return an object with these optional keys (omit keys that don't apply):
-{{
-  "energy_threshold_modifier": <float, e.g. -0.2 if user is tired>,
-  "remove_blocks_after_hour": <int, 24h hour if clearing afternoon/evening>,
-  "reschedule_block_title": <string>,
-  "reschedule_to_hour": <int>,
-  "add_task_title": <string>,
-  "add_task_load": "light" | "medium" | "deep",
-  "add_task_minutes": <int>,
-  "raw_intent": <string, one-line summary of what you understood>
-}}
+Fill only the fields that apply; leave the rest at their default (0.0 / null / empty string).
+- energy_threshold_modifier: float, e.g. -0.2 if user is tired
+- remove_blocks_after_hour: 24h hour if clearing afternoon/evening
+- reschedule_block_title + reschedule_to_hour: rescheduling a specific block
+- add_task_title + add_task_load + add_task_minutes: adding a new task
+- raw_intent: one-line summary of what you understood
 """
 
 
@@ -47,8 +44,6 @@ async def handle_message(
     current_schedule: DaySchedule,
     language: Language = Language.en,
 ) -> AdjustmentParams:
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    client = anthropic.AsyncAnthropic(api_key=api_key)
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(language=language.value)
 
     schedule_summary = {
@@ -70,22 +65,15 @@ async def handle_message(
         f"Current schedule:\n{json.dumps(schedule_summary, indent=2)}"
     )
 
-    response = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=512,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_content}],
-    )
-
-    raw = response.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
-
     try:
-        data = json.loads(raw)
-        return AdjustmentParams.model_validate(data)
+        structured_llm = sonnet.with_structured_output(AdjustmentParams)
+        result: AdjustmentParams = await structured_llm.ainvoke([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ])
+        # Ensure raw_intent is set even if the model omitted it
+        if not result.raw_intent:
+            result = result.model_copy(update={"raw_intent": message})
+        return result
     except Exception:
         return AdjustmentParams(raw_intent=message)
