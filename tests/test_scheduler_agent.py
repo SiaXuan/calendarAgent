@@ -39,13 +39,24 @@ class TestGenerateSchedule:
         assert len(result.blocks) == 1
         assert result.blocks[0].title == "Write code"
 
-    def test_deep_work_requires_high_energy(self):
-        """Deep task should NOT be placed in a low-energy window."""
-        windows = [_window(9, 11, 0.4)]  # energy 0.4 < threshold 0.7
+    def test_deep_work_low_energy_falls_back_to_suggested(self):
+        """
+        When every hour is below the deep-work energy threshold, the scheduler
+        still places the task at the best available slot but marks it as
+        `suggested` (best-effort) rather than `scheduled` (confirmed). This is
+        a deliberate UX choice — the user sees a warning block instead of an
+        invisible "unscheduled" surprise.
+        """
+        windows = [_window(9, 11, 0.3)]
         subtasks = [_subtask("Deep focus", CognitiveLoad.deep, 60)]
-        result = generate_schedule(subtasks, windows, [], TARGET_DATE)
-        assert len(result.blocks) == 0
-        assert len(result.unscheduled) == 1
+        # Curve uniformly below the deep threshold (0.45) so the hard pass fails.
+        low_curve = [0.3] * 24
+        result = generate_schedule(
+            subtasks, windows, [], TARGET_DATE, energy_curve=low_curve,
+        )
+        assert len(result.blocks) == 1
+        assert result.blocks[0].block_type == BlockType.suggested
+        assert len(result.unscheduled) == 0
 
     def test_light_task_placed_in_low_energy_window(self):
         """Light task should be placed in a moderate energy window (0.3 threshold)."""

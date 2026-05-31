@@ -220,7 +220,10 @@ async def rank_and_decompose(
             priority_by_id.get(s.parent_id, "medium"),
         ))
         subtasks.extend(claude_subtasks)
-    except (OutputParserException, ValidationError, ValueError, KeyError):
+    except Exception:
+        # Any LLM-side failure (network, parser, validation, provider quota,
+        # rate-limit, etc.) → fall back to the deterministic heuristic so the
+        # rest of the schedule pipeline doesn't crash.
         subtasks.extend(_heuristic_decompose(sorted_tasks, target_date))
 
     return subtasks
