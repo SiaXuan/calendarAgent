@@ -60,6 +60,35 @@ async def test_run_schedule_graph_end_to_end(
     assert schedule_store[sample_date] is schedule
 
 
+async def test_meals_are_inserted_exactly_once(
+    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    sample_task, sample_date,
+):
+    """
+    Regression: an earlier topology wired compute_meals to BOTH fetch_calendar
+    and split_instant, which caused LangGraph to fire compute_meals twice and
+    insert two lunch + two dinner blocks. Guard against that ever returning.
+    """
+    from storage import task_store
+    task_store[sample_task.id] = sample_task
+
+    mock_sonnet.set_structured_response(_LLMSubtaskList(subtasks=[
+        _LLMSubtask(
+            parent_id=sample_task.id, title="Work",
+            estimated_minutes=60, cognitive_load=CognitiveLoad.deep,
+            task_kind=TaskKind.analytical, suggested_date=sample_date,
+        ),
+    ]))
+
+    schedule = await run_schedule_graph(sample_date)
+    meal_blocks = [b for b in schedule.blocks if b.block_type == BlockType.meal]
+    # Exactly one lunch and one dinner — never two of each.
+    assert len(meal_blocks) == 2
+    # Distinct labels — the bug produced two with the same label
+    labels = {b.title for b in meal_blocks}
+    assert len(labels) == 2
+
+
 async def test_run_schedule_graph_with_no_tasks(
     clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync, sample_date,
 ):

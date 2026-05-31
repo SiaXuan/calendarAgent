@@ -4,23 +4,27 @@ LangGraph: full day schedule generation.
 Topology:
 
     START
-      ├──► fetch_health ────┐
-      ├──► fetch_calendar ──┤  (parallel fan-out)
-      └──► rank_tasks ──────┤
-                            ▼
-                       split_instant
-                            ▼
-                       compute_meals
-                            ▼
-                        schedule
-                            ▼
-                        assemble
-                            ▼
-                          END
+      ▼
+    fetch_health
+      │
+      ├──► fetch_calendar ──► compute_meals ─┐
+      │                                       │
+      └──► rank_tasks ──► split_instant ──────┤
+                                              ▼
+                                          schedule
+                                              ▼
+                                          assemble
+                                              ▼
+                                            END
 
-The three fan-out branches run concurrently — same shape as the original
-asyncio.gather call. After they converge, the sequential stages process the
-combined state.
+`compute_meals` depends only on `fetch_calendar` (it needs fixed_blocks) — NOT
+on `split_instant`. Earlier we wired both branches into `compute_meals` to
+"converge" them, but LangGraph fires a node once per incoming branch
+completion, not once per super-step where all in-edges become ready. That
+caused `compute_meals` to run twice and place lunch/dinner blocks twice.
+
+Convergence happens at `schedule` instead, which legitimately needs subtasks
+(from split_instant) AND free_windows-with-meals (from compute_meals).
 """
 from datetime import date
 from functools import lru_cache
@@ -65,13 +69,16 @@ def build_schedule_graph():
     graph.add_edge("fetch_health", "fetch_calendar")
     graph.add_edge("fetch_health", "rank_tasks")
 
-    # split_instant depends on rank_tasks; compute_meals waits for calendar +
-    # split_instant. LangGraph waits for all in-edges to a node before invoking it.
+    # compute_meals has ONE in-edge (fetch_calendar). Putting it after both
+    # fetch_calendar AND split_instant made it fire twice — see the topology
+    # docstring above.
     graph.add_edge("rank_tasks", "split_instant")
     graph.add_edge("fetch_calendar", "compute_meals")
-    graph.add_edge("split_instant", "compute_meals")
 
+    # `schedule` is the real convergence point — it needs subtasks AND the
+    # meal-aware free_windows.
     graph.add_edge("compute_meals", "schedule")
+    graph.add_edge("split_instant", "schedule")
     graph.add_edge("schedule", "assemble")
     graph.add_edge("assemble", END)
 
