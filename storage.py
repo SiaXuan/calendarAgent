@@ -65,6 +65,13 @@ subtask_pins: dict[date, dict[str, PinSpec]] = {}
 # Namespace lookups + retrieval helpers live in memory/store.py.
 memory_store: dict[str, Memory] = {}
 
+# Pre-memory observation log (Phase C.3). In-memory only — these are noisy
+# signals that get promoted to memory_store once N same-direction events
+# accumulate. Server restart wipes the counter (intentional — stale signals
+# shouldn't promote weeks later).
+from models.memory import Observation as _Obs   # avoid top-level circular import
+observation_log: list[_Obs] = []
+
 
 # ─── health_store persistence ────────────────────────────────────────────────
 

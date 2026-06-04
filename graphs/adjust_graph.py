@@ -43,7 +43,11 @@ async def run_adjust_graph(
         # No prior schedule — nothing to adjust. Bail with empty params.
         return current_schedule, AdjustmentParams(raw_intent=user_message)
 
-    params = await handle_message(user_message, current_schedule, language)
+    from memory import retrieval
+    memory_context = retrieval.for_chat()
+    params = await handle_message(
+        user_message, current_schedule, language, memory_context=memory_context,
+    )
 
     initial_state: AdjustState = {
         "target_date": target_date,

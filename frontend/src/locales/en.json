@@ -79,5 +79,21 @@
   "unscheduled": "Didn't fit today",
   "unscheduledSub": "These tasks had no remaining slot — they'll roll to tomorrow",
   "estMins": "~{{n}} min",
-  "generating": "Generating schedule"
+  "generating": "Generating schedule",
+  "memory": "Memory",
+  "memoryEmpty": "Nothing learned yet. Memories appear here as the agent observes patterns.",
+  "memoryAll": "All",
+  "memoryNamespaceSchedulePrefs": "Scheduling",
+  "memoryNamespaceTaskLexicon": "Task lexicon",
+  "memoryNamespacePhysiological": "Physiological",
+  "memoryNamespaceInteractions": "Interactions",
+  "memoryConfidence": "confidence",
+  "memoryVerified": "verified",
+  "memoryUnverified": "auto",
+  "memoryDelete": "Delete",
+  "memorySave": "Save",
+  "memoryCancel": "Cancel",
+  "memoryEdit": "Edit",
+  "memoryConfirm": "Mark verified",
+  "memoryReinforced": "last reinforced {{when}}"
 }

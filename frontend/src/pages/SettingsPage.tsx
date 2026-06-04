@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { useUserPreferences } from '../context/UserPreferencesContext'
+import MemoryInspector from '../components/MemoryInspector'
 
 const LANGUAGES = [
   { code: 'zh-CN', label: '中文（简体）' },
@@ -78,6 +79,9 @@ export default function SettingsPage() {
             </select>
           </div>
         </div>
+
+        {/* Memory Inspector (Phase C.2) */}
+        <MemoryInspector />
       </div>
     </div>
   )

@@ -119,11 +119,17 @@ async def rank_and_decompose(
     tasks: list[Task],
     target_date: date,
     language: Language = Language.en,
+    memory_context: list[str] | None = None,
 ) -> list[Subtask]:
     """
     Call Claude to rank and decompose tasks. Validates output with Pydantic.
     Instant tasks are short-circuited without a Claude call.
     Falls back to a simple heuristic split if the API call fails.
+
+    `memory_context` (Phase C.3) is a list of confidence-filtered user-pattern
+    bullets — schedule_prefs memories above PROD_CONFIDENCE_FLOOR. They get
+    appended to the system prompt as a "KNOWN USER PREFERENCES" section so the
+    LLM honours learned habits when picking task_kind / suggested_date.
     """
     if not tasks:
         return []
@@ -176,6 +182,14 @@ async def rank_and_decompose(
     ]
 
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(language=language.value)
+    if memory_context:
+        bullets = "\n".join(f"  - {b}" for b in memory_context)
+        system_prompt += (
+            "\n\nKNOWN USER PREFERENCES (learned from past accept/dismiss signals):\n"
+            f"{bullets}\n"
+            "When picking suggested_date and task_kind, honour these preferences "
+            "unless an explicit constraint (deadline, priority) overrides them."
+        )
     user_message = (
         f"Today's date: {target_date.isoformat()}\n\n"
         f"Tasks:\n{json.dumps(task_payload, indent=2)}"

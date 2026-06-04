@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { DaySchedule, ScheduleBlock, UnscheduledTask } from '../api/types'
 import { pinBlock, writeScheduleBlock } from '../api/schedule'
+import { submitFeedback } from '../api/memory'
 import { useUserPreferences } from '../context/UserPreferencesContext'
 
 interface Props {
@@ -800,8 +801,27 @@ export default function ScheduleTimeline({ date, blocks, unscheduled = [], sched
                   setPomCounts(prev => ({ ...prev, [bk]: count }))
                   schedulePinSync(block, count)
                 }}
-                onAccept={() => setAccepted(s => new Set(s).add(bk))}
-                onDecline={() => setDismissed(s => new Set(s).add(bk))}
+                onAccept={() => {
+                  setAccepted(s => new Set(s).add(bk))
+                  // Fire-and-forget — backend learns from this signal
+                  submitFeedback({
+                    action: 'accept',
+                    block_key: bk,
+                    hour: new Date(block.start).getHours(),
+                    task_kind: block.task_kind,
+                    cognitive_load: block.cognitive_load,
+                  }).catch(err => console.warn('feedback (accept) failed:', err))
+                }}
+                onDecline={() => {
+                  setDismissed(s => new Set(s).add(bk))
+                  submitFeedback({
+                    action: 'dismiss',
+                    block_key: bk,
+                    hour: new Date(block.start).getHours(),
+                    task_kind: block.task_kind,
+                    cognitive_load: block.cognitive_load,
+                  }).catch(err => console.warn('feedback (dismiss) failed:', err))
+                }}
                 onOpenChat={() => onOpenChat?.(block)}
                 onSync={async () => {
                   const r = await writeScheduleBlock(date, block.start)

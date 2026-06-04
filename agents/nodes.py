@@ -187,14 +187,24 @@ async def fetch_calendar_node(state: dict) -> dict:
 
 
 async def rank_tasks_node(state: dict) -> dict:
-    """Rank + decompose tasks via task_agent, apply per-task overrides."""
+    """Rank + decompose tasks via task_agent, apply per-task overrides.
+
+    Pulls memory bullets (Phase C.3) and threads them into the LLM prompt so
+    the agent honours learned user patterns (e.g. "user prefers analytical
+    work in mornings").
+    """
+    from memory import retrieval
+
     tasks = state.get("tasks", [])
     target_date: date = state["target_date"]
     language = state["language"]
+    memory_context = retrieval.for_task_ranking()
 
-    all_subtasks = await task_agent.rank_and_decompose(tasks, target_date, language)
+    all_subtasks = await task_agent.rank_and_decompose(
+        tasks, target_date, language, memory_context=memory_context,
+    )
     all_subtasks = _apply_overrides(all_subtasks)
-    return {"subtasks": all_subtasks}
+    return {"subtasks": all_subtasks, "user_memory": memory_context}
 
 
 def split_instant_node(state: dict) -> dict:

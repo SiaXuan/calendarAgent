@@ -43,8 +43,21 @@ async def handle_message(
     message: str,
     current_schedule: DaySchedule,
     language: Language = Language.en,
+    memory_context: list[str] | None = None,
 ) -> AdjustmentParams:
+    """Memory-aware adjustment parsing.
+
+    `memory_context` (Phase C.3) — confidence-filtered user-pattern bullets
+    appended to the system prompt so requests like "lighter morning" are
+    interpreted with knowledge of what *this user* considers light/heavy.
+    """
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(language=language.value)
+    if memory_context:
+        bullets = "\n".join(f"  - {b}" for b in memory_context)
+        system_prompt += (
+            "\n\nKNOWN USER PREFERENCES (factor these into your interpretation):\n"
+            f"{bullets}"
+        )
 
     schedule_summary = {
         "date": current_schedule.date.isoformat(),

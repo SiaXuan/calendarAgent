@@ -18,6 +18,7 @@ first element.
 """
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -68,3 +69,45 @@ class MemoryUpdate(BaseModel):
     content: str | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     user_verified: bool | None = None
+
+
+# ─── Observation (Phase C.3 — pre-memory signal) ────────────────────────────
+
+ActionType = Literal["accept", "dismiss"]
+
+# 5 hour buckets matching common chronotype regions (Pink "When" 2018).
+HourBucket = Literal["morning", "midday", "afternoon", "evening", "night"]
+
+
+def hour_to_bucket(hour: int) -> HourBucket:
+    """5–11 → morning, 11–14 → midday, 14–17 → afternoon, 17–21 → evening, else night."""
+    if 5 <= hour < 11:
+        return "morning"
+    if 11 <= hour < 14:
+        return "midday"
+    if 14 <= hour < 17:
+        return "afternoon"
+    if 17 <= hour < 21:
+        return "evening"
+    return "night"
+
+
+class Observation(BaseModel):
+    """
+    A single piece of evidence — user accepted or dismissed a scheduled block.
+
+    Observations live in-memory and feed the promotion engine (memory/observations.py):
+    once N same-direction observations accumulate for the same (action, task_kind,
+    hour_bucket) tuple inside a sliding window, they promote into a Memory.
+
+    Single observations are intentionally NOT memories — the plan calls this out
+    as the most important safeguard against "bad mood → noisy memory" (C.4).
+    """
+
+    id: str
+    timestamp: datetime
+    action: ActionType
+    hour_bucket: HourBucket
+    task_kind: str | None = None         # TaskKind value (analytical / insight / admin)
+    cognitive_load: str | None = None    # CognitiveLoad value (deep / medium / light)
+    block_key: str                       # "{task_id}::{title}" for source attribution

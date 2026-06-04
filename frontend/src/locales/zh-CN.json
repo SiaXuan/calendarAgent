@@ -79,5 +79,21 @@
   "unscheduled": "今日未安排",
   "unscheduledSub": "以下任务今日空间不足，明日再安排",
   "estMins": "约 {{n}} 分钟",
-  "generating": "正在生成日程"
+  "generating": "正在生成日程",
+  "memory": "记忆",
+  "memoryEmpty": "暂无学习内容。Agent 观察到模式后会出现在这里。",
+  "memoryAll": "全部",
+  "memoryNamespaceSchedulePrefs": "日程偏好",
+  "memoryNamespaceTaskLexicon": "任务词典",
+  "memoryNamespacePhysiological": "生理基线",
+  "memoryNamespaceInteractions": "互动日志",
+  "memoryConfidence": "置信度",
+  "memoryVerified": "已确认",
+  "memoryUnverified": "自动",
+  "memoryDelete": "删除",
+  "memorySave": "保存",
+  "memoryCancel": "取消",
+  "memoryEdit": "编辑",
+  "memoryConfirm": "标记为确认",
+  "memoryReinforced": "上次强化 {{when}}"
 }

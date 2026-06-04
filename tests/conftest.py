@@ -41,6 +41,7 @@ def clean_stores(tmp_path, monkeypatch):
         storage.subtask_overrides.clear()
         storage.subtask_pins.clear()
         storage.memory_store.clear()
+        storage.observation_log.clear()
         nodes._health_cache.clear()
         nodes._calendar_cache.clear()
 
