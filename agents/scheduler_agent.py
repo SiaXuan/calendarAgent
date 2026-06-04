@@ -42,6 +42,67 @@ _ENERGY_THRESHOLD = {
 
 _BUFFER_MINUTES = 10
 _SLOT_STEP = 30  # granularity for scanning start times within a free window
+_PIN_SNAP_MIN = 15  # drag-to-pin snaps to this granularity
+
+
+def find_nearest_slot(
+    preferred_start: datetime,
+    duration_min: int,
+    blocking_blocks: list[TimeBlock],
+    work_start_hour: int,
+    work_end_hour: int,
+) -> datetime:
+    """
+    Return a start datetime as close as possible to `preferred_start` such that
+    the proposed slot [start, start+duration) doesn't overlap any
+    `blocking_blocks` (typically fixed + meal events) and stays within the
+    user's work hours [work_start_hour, work_end_hour).
+
+    Snaps to _PIN_SNAP_MIN granularity. If the preferred slot is clear,
+    returns it unchanged.
+    """
+    target_date = preferred_start.date()
+    work_start = datetime(target_date.year, target_date.month, target_date.day, work_start_hour)
+    if work_end_hour >= 24:
+        work_end = datetime(target_date.year, target_date.month, target_date.day) + timedelta(days=1)
+    else:
+        work_end = datetime(target_date.year, target_date.month, target_date.day, work_end_hour)
+    duration = timedelta(minutes=duration_min)
+
+    def _snap(t: datetime) -> datetime:
+        # Snap to nearest _PIN_SNAP_MIN multiple
+        minutes = (t.minute // _PIN_SNAP_MIN) * _PIN_SNAP_MIN
+        return t.replace(minute=minutes, second=0, microsecond=0)
+
+    def _conflicts(candidate: datetime) -> bool:
+        cand_end = candidate + duration
+        if candidate < work_start or cand_end > work_end:
+            return True
+        for b in blocking_blocks:
+            # Overlap if intervals intersect
+            if candidate < b.end and cand_end > b.start:
+                return True
+        return False
+
+    base = _snap(preferred_start)
+    if not _conflicts(base):
+        return base
+
+    # Walk outward in ±_PIN_SNAP_MIN steps until a clear slot is found.
+    # Cap at the full work day to avoid infinite loops on impossible inputs.
+    max_steps = int(((work_end_hour - work_start_hour) * 60) / _PIN_SNAP_MIN)
+    for step in range(1, max_steps + 1):
+        delta = timedelta(minutes=step * _PIN_SNAP_MIN)
+        forward = base + delta
+        backward = base - delta
+        # Prefer forward (later) — feels less surprising than jumping earlier.
+        if not _conflicts(forward):
+            return forward
+        if not _conflicts(backward):
+            return backward
+    # Last resort: return the snapped preferred even if it conflicts — caller
+    # decides whether to surface an error.
+    return base
 
 # ── Meal break reference (circadian biology) ─────────────────────────────────
 # Sources: Panda (2019) "Circadian physiology of metabolism" Science;

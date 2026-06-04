@@ -28,6 +28,40 @@ export function writeScheduleBlock(
   })
 }
 
+// ── Pin (drag-to-move + pomodoro +/-) ────────────────────────────────────────
+
+export interface PinResponse {
+  block_key: string
+  start: string
+  duration_min: number
+  adjusted: boolean
+  schedule: DaySchedule
+}
+
+/**
+ * Pin a subtask to a specific time/duration. Backend reflows the rest of the
+ * day around it. Pass start_iso to move, duration_min to resize, or both.
+ * Backend's conflict resolver snaps to nearest available slot if the requested
+ * start collides with a fixed/meal block — see `adjusted` on the response.
+ */
+export function pinBlock(
+  date: string,
+  block_key: string,
+  opts: { start_iso?: string; duration_min?: number },
+): Promise<PinResponse> {
+  return apiFetch<PinResponse>(`/schedule/${date}/pin`, {
+    method: 'POST',
+    body: JSON.stringify({ block_key, ...opts }),
+  })
+}
+
+export function unpinBlock(date: string, block_key: string): Promise<DaySchedule> {
+  return apiFetch<DaySchedule>(
+    `/schedule/${date}/pin/${encodeURIComponent(block_key)}`,
+    { method: 'DELETE' },
+  )
+}
+
 // ── SSE streaming ─────────────────────────────────────────────────────────────
 
 export type StreamEvent =

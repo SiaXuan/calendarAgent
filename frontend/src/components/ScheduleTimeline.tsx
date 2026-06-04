@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ScheduleBlock, UnscheduledTask } from '../api/types'
-import { writeScheduleBlock } from '../api/schedule'
+import type { DaySchedule, ScheduleBlock, UnscheduledTask } from '../api/types'
+import { pinBlock, writeScheduleBlock } from '../api/schedule'
+import { useUserPreferences } from '../context/UserPreferencesContext'
 
 interface Props {
   date: string                // YYYY-MM-DD — needed for per-block sync
@@ -10,6 +11,11 @@ interface Props {
   scheduleGen?: number
   isStreaming?: boolean
   onOpenChat?: (block: ScheduleBlock) => void
+  /**
+   * Called when the user pins a block (drag or pomodoro +/-) and the backend
+   * returns a re-flowed schedule. Lets the parent update its query cache.
+   */
+  onScheduleUpdated?: (newSchedule: DaySchedule) => void
 }
 
 // ── Urgency helpers ──────────────────────────────────────────────────────────
@@ -499,11 +505,22 @@ function cascadeBlocks(
   let cursor: Date | null = null
   let prevDisplayEnd: Date | null = null
 
-  // Pre-compute sorted fixed + meal block start times for cap lookup
-  const fixedStarts = sorted
+  // Pre-compute fixed + meal block RANGES (start + end), sorted by start.
+  // We need ranges, not just starts, so the cascade can detect when a scheduled
+  // block's displayStart would land INSIDE a meal/fixed window (e.g. previous
+  // block grew via pomodoro + and pushed this one past lunch's start).
+  const fixedRanges = sorted
     .filter(b => b.block_type === 'fixed' || b.block_type === 'meal')
-    .map(b => new Date(b.start))
-    .sort((a, b) => a.getTime() - b.getTime())
+    .map(b => ({ start: new Date(b.start), end: new Date(b.end) }))
+    .sort((a, b) => a.start.getTime() - b.start.getTime())
+
+  /** If `t` falls inside any fixed/meal range, return that range's end; else null. */
+  function rangeContaining(t: Date): Date | null {
+    for (const r of fixedRanges) {
+      if (r.start <= t && t < r.end) return r.end
+    }
+    return null
+  }
 
   return sorted.map(block => {
     if (block.block_type === 'fixed' || block.block_type === 'meal') {
@@ -518,14 +535,21 @@ function cascadeBlocks(
     }
     const backendStart = new Date(block.start)
     // Don't move earlier than the backend-scheduled start
-    const displayStart = cursor && cursor > backendStart ? cursor : backendStart
+    let displayStart = cursor && cursor > backendStart ? cursor : backendStart
+    // If displayStart lands inside a meal/fixed window, jump to after it.
+    // Loop because jumping past lunch could land inside dinner (rare but cheap to guard).
+    let inside = rangeContaining(displayStart)
+    while (inside) {
+      displayStart = new Date(inside.getTime() + BUFFER_MINUTES * 60_000)
+      inside = rangeContaining(displayStart)
+    }
     const durMin = effectiveMin(block, pomCounts)
     let displayEnd = new Date(displayStart.getTime() + durMin * 60_000)
 
     // Cap display end at the next fixed block's start to prevent visual overlap
-    const nextFixed = fixedStarts.find(fs => fs > displayStart)
-    if (nextFixed && displayEnd > nextFixed) {
-      displayEnd = nextFixed
+    const nextFixedStart = fixedRanges.find(r => r.start > displayStart)?.start
+    if (nextFixedStart && displayEnd > nextFixedStart) {
+      displayEnd = nextFixedStart
     }
 
     // Gap margin relative to previous block's display end
@@ -540,7 +564,7 @@ function cascadeBlocks(
 
 // ── Main timeline ─────────────────────────────────────────────────────────────
 
-export default function ScheduleTimeline({ date, blocks, unscheduled = [], scheduleGen, isStreaming, onOpenChat }: Props) {
+export default function ScheduleTimeline({ date, blocks, unscheduled = [], scheduleGen, isStreaming, onOpenChat, onScheduleUpdated }: Props) {
   const { t } = useTranslation()
 
   // All three stores use stable blockKey (task_id::title) so they survive regeneration.
@@ -560,6 +584,105 @@ export default function ScheduleTimeline({ date, blocks, unscheduled = [], sched
   useEffect(() => { lsSave(LS_POM, pomCounts) }, [pomCounts])
   useEffect(() => { lsSave(LS_DIMISS, [...dismissed]) }, [dismissed])
   useEffect(() => { lsSave(LS_ACCEPT, [...accepted]) }, [accepted])
+
+  // Debounced sync: after the user stops clicking pomodoro +/- for 500ms,
+  // POST the new duration to the backend. Backend reflows the rest of the day
+  // around the resized block and returns the new schedule.
+  const pinDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const schedulePinSync = useCallback((block: ScheduleBlock, newCount: number) => {
+    if (!block.task_id) return
+    const key = blockKey(block)
+    const existing = pinDebounceRef.current.get(key)
+    if (existing) clearTimeout(existing)
+    const focusMin = block.focus_minutes ?? 25
+    const breakMin = block.break_minutes ?? 5
+    const duration_min = newCount * focusMin + Math.max(0, newCount - 1) * breakMin
+    const timer = setTimeout(async () => {
+      pinDebounceRef.current.delete(key)
+      try {
+        const res = await pinBlock(date, key, { duration_min })
+        // Clear the local pomCount override now that the backend reflects it
+        setPomCounts(prev => {
+          const next = { ...prev }
+          delete next[key]
+          return next
+        })
+        onScheduleUpdated?.(res.schedule)
+      } catch (err) {
+        // Network or backend error — leave the localStorage override in place
+        // so the visual cascade stays correct; the user can retry by clicking.
+        console.warn('pinBlock failed:', err)
+      }
+    }, 500)
+    pinDebounceRef.current.set(key, timer)
+  }, [date, onScheduleUpdated])
+
+  // Clean up pending debounce timers on unmount to avoid stale POSTs
+  useEffect(() => {
+    return () => {
+      pinDebounceRef.current.forEach(t => clearTimeout(t))
+      pinDebounceRef.current.clear()
+    }
+  }, [])
+
+  // ── Drag-to-reschedule ─────────────────────────────────────────────────────
+  const { prefs } = useUserPreferences()
+  const workStart = prefs?.work_start ?? 8
+  const workEnd = prefs?.work_end ?? 22
+
+  const timelineRef = useRef<HTMLDivElement | null>(null)
+  const [dragging, setDragging] = useState<{
+    block: ScheduleBlock
+    durationMin: number
+  } | null>(null)
+  const [dropTime, setDropTime] = useState<Date | null>(null)
+  const [dropIndicatorY, setDropIndicatorY] = useState<number | null>(null)
+
+  /** Map cursor y inside the timeline container to a Date snapped to 15min. */
+  const yToTime = useCallback((clientY: number, rect: DOMRect): Date => {
+    const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height))
+    const totalMin = (workEnd - workStart) * 60 * ratio
+    const snappedMin = Math.round(totalMin / 15) * 15
+    const base = new Date(date + 'T00:00:00')
+    base.setHours(workStart, 0, 0, 0)
+    base.setMinutes(base.getMinutes() + snappedMin)
+    return base
+  }, [date, workStart, workEnd])
+
+  const handleContainerDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!dragging || !timelineRef.current) return
+    e.preventDefault()   // allow drop
+    e.dataTransfer.dropEffect = 'move'
+    const rect = timelineRef.current.getBoundingClientRect()
+    setDropTime(yToTime(e.clientY, rect))
+    setDropIndicatorY(e.clientY - rect.top)
+  }, [dragging, yToTime])
+
+  const handleContainerDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    if (!dragging || !dropTime) {
+      setDragging(null); setDropTime(null); setDropIndicatorY(null)
+      return
+    }
+    const key = blockKey(dragging.block)
+    const dropISO = toLocalISO(dropTime)
+    setDragging(null); setDropTime(null); setDropIndicatorY(null)
+    try {
+      const res = await pinBlock(date, key, {
+        start_iso: dropISO,
+        duration_min: dragging.durationMin,
+      })
+      // Wipe local pomCount override now that backend reflects the new duration
+      setPomCounts(prev => {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+      onScheduleUpdated?.(res.schedule)
+    } catch (err) {
+      console.warn('drag-to-pin failed:', err)
+    }
+  }, [dragging, dropTime, date, onScheduleUpdated])
 
   // Stagger-entry animation: when a new full schedule arrives (scheduleGen bumps),
   // mark all current block keys as "fresh" so they animate in sequentially.
@@ -629,24 +752,54 @@ export default function ScheduleTimeline({ date, blocks, unscheduled = [], sched
       )}
 
       {/* regular timeline */}
-      <div className="flex flex-col">
+      <div
+        ref={timelineRef}
+        className="flex flex-col relative"
+        onDragOver={handleContainerDragOver}
+        onDrop={handleContainerDrop}
+        onDragLeave={() => { setDropTime(null); setDropIndicatorY(null) }}
+      >
+        {/* drop-time indicator (visible only while dragging) */}
+        {dragging && dropIndicatorY !== null && dropTime && (
+          <div
+            className="pointer-events-none absolute left-0 right-0 z-10 flex items-center"
+            style={{ top: dropIndicatorY }}
+          >
+            <div className="h-px flex-1 bg-[#4E8BB5]" />
+            <div className="ml-2 px-2 py-0.5 text-[10px] rounded bg-[#4E8BB5] text-white">
+              {dropTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+            </div>
+          </div>
+        )}
         {cascaded.map(({ block, displayStart, displayEnd, gapMargin }, i) => {
           const bk = blockKey(block)
           const isFresh = freshKeys.has(bk)
+          const isDraggable = block.block_type === 'scheduled' || block.block_type === 'suggested'
           return (
             <div
               key={bk}
+              draggable={isDraggable}
+              onDragStart={isDraggable ? (e) => {
+                e.dataTransfer.effectAllowed = 'move'
+                const durMin = effectiveMin(block, pomCounts)
+                setDragging({ block, durationMin: durMin })
+              } : undefined}
+              onDragEnd={() => { setDragging(null); setDropTime(null); setDropIndicatorY(null) }}
               style={isFresh ? {
                 animation: `blockEnter 0.35s cubic-bezier(0.4,0,0.2,1) both`,
                 animationDelay: `${i * 55}ms`,
-              } : undefined}
+                opacity: dragging?.block === block ? 0.4 : undefined,
+              } : { opacity: dragging?.block === block ? 0.4 : undefined }}
             >
               <BlockCard
                 block={block}
                 displayStart={displayStart}
                 displayEnd={displayEnd}
                 pomCount={pomCounts[bk] ?? (block.pomodoro_count ?? 1)}
-                onPomChange={count => setPomCounts(prev => ({ ...prev, [bk]: count }))}
+                onPomChange={count => {
+                  setPomCounts(prev => ({ ...prev, [bk]: count }))
+                  schedulePinSync(block, count)
+                }}
                 onAccept={() => setAccepted(s => new Set(s).add(bk))}
                 onDecline={() => setDismissed(s => new Set(s).add(bk))}
                 onOpenChat={() => onOpenChat?.(block)}

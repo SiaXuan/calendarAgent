@@ -21,8 +21,14 @@ from storage import (
     health_store,
     schedule_store,
     subtask_overrides,
+    subtask_pins,
     task_store,
 )
+
+
+def _subtask_block_key(subtask: Subtask) -> str:
+    """Mirror of the frontend's blockKey(): "{task_id}::{title}"."""
+    return f"{subtask.parent_id}::{subtask.title}"
 
 _log = logging.getLogger("dayflow")
 
@@ -239,6 +245,67 @@ def compute_meals_node(state: dict) -> dict:
         "meal_blocks": meal_blocks,
         "fixed_blocks": all_fixed,
         "free_windows": free_windows_with_meals,
+    }
+
+
+def apply_pins_node(state: dict) -> dict:
+    """
+    Convert user-pinned subtasks into TimeBlocks and treat them as additional
+    fixed blocks. The matching subtasks are removed from the scheduler's input
+    so they don't get placed twice.
+
+    Pin precedence: pinned subtasks have already had their final slot decided
+    by the /schedule/{date}/pin endpoint (with conflict resolution baked in),
+    so this node trusts the pin's start + duration verbatim.
+    """
+    target_date: date = state["target_date"]
+    pins = subtask_pins.get(target_date, {})
+    if not pins:
+        return {}   # no-op patch
+
+    subtasks: list[Subtask] = state.get("subtasks", [])
+    fixed_blocks: list[TimeBlock] = list(state.get("fixed_blocks", []))
+    free_windows: list[FreeWindow] = state.get("free_windows", [])
+    prefs = get_current_prefs()
+
+    pin_blocks: list[TimeBlock] = []
+    remaining_subtasks: list[Subtask] = []
+
+    for s in subtasks:
+        key = _subtask_block_key(s)
+        pin = pins.get(key)
+        if pin is None:
+            remaining_subtasks.append(s)
+            continue
+        pin_end = pin.start + timedelta(minutes=pin.duration_min)
+        pin_blocks.append(TimeBlock(
+            start=pin.start,
+            end=pin_end,
+            block_type=BlockType.scheduled,
+            task_id=s.parent_id,
+            title=s.title,
+            cognitive_load=s.cognitive_load,
+            task_kind=s.task_kind,
+            phase_label=s.phase_label,
+            focus_minutes=25,
+            break_minutes=5,
+            pomodoro_count=max(1, pin.duration_min // 25),
+            deadline=s.deadline,
+        ))
+
+    if not pin_blocks:
+        # User has pins recorded but none match the current subtask list —
+        # likely the parent task was deleted. Silently drop.
+        return {"subtasks": remaining_subtasks}
+
+    new_fixed = sorted(fixed_blocks + pin_blocks, key=lambda b: b.start)
+    new_free = calendar_agent.extract_free_windows(
+        new_fixed, target_date, prefs.work_start, prefs.work_end,
+    )
+    return {
+        "subtasks": remaining_subtasks,
+        "fixed_blocks": new_fixed,
+        "free_windows": new_free,
     }
 
 

@@ -12,18 +12,33 @@ Phase C will add a fifth store (LangMem memories); we'll add it here.
 """
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from models.health import HealthSnapshot
+from models.memory import Memory
 from models.schedule import DaySchedule
 from models.task import Subtask, Task
+
+
+class PinSpec(BaseModel):
+    """A user-pinned subtask position (set by drag-to-move or pomodoro +/-).
+
+    During schedule_graph the pin gets converted to a TimeBlock and treated as
+    an additional fixed_block — the rest of the scheduler then routes around
+    it. Pins are per-date because they describe a specific calendar slot.
+    """
+    start: datetime
+    duration_min: int
 
 
 _log = logging.getLogger("dayflow")
 _DATA_DIR = Path(__file__).parent / "data"
 _HEALTH_FILE = _DATA_DIR / "health_store.json"
 _TASKS_FILE = _DATA_DIR / "task_store.json"
+_MEMORY_FILE = _DATA_DIR / "memory_store.json"
 
 
 # ─── In-memory stores ────────────────────────────────────────────────────────
@@ -40,6 +55,15 @@ schedule_store: dict[date, DaySchedule] = {}
 # Confirmed subtask plans from the per-task planning chat — when present,
 # they override the LLM's task decomposition. Cleared on regenerate.
 subtask_overrides: dict[str, list[Subtask]] = {}
+
+# User-pinned subtask positions, keyed by date then by block_key
+# (block_key = "{task_id}::{title}" — matches the frontend's `blockKey`).
+# In-memory only — pinning is intentionally ephemeral; full regenerate clears.
+subtask_pins: dict[date, dict[str, PinSpec]] = {}
+
+# Long-term memories (Phase C). Keyed by memory.id. Persisted to JSON.
+# Namespace lookups + retrieval helpers live in memory/store.py.
+memory_store: dict[str, Memory] = {}
 
 
 # ─── health_store persistence ────────────────────────────────────────────────
@@ -90,3 +114,26 @@ def load_task_store() -> None:
         _log.info("Loaded %d task(s) from disk.", len(task_store))
     except Exception as exc:
         _log.warning("Could not load task store: %s", exc)
+
+
+# ─── memory_store persistence ────────────────────────────────────────────────
+
+def save_memory_store() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {mid: m.model_dump(mode="json") for mid, m in memory_store.items()}
+        _MEMORY_FILE.write_text(json.dumps(payload, default=str, ensure_ascii=False))
+    except Exception as exc:
+        _log.warning("Could not save memory store: %s", exc)
+
+
+def load_memory_store() -> None:
+    if not _MEMORY_FILE.exists():
+        return
+    try:
+        payload = json.loads(_MEMORY_FILE.read_text())
+        for mid, data in payload.items():
+            memory_store[mid] = Memory.model_validate(data)
+        _log.info("Loaded %d memory record(s) from disk.", len(memory_store))
+    except Exception as exc:
+        _log.warning("Could not load memory store: %s", exc)

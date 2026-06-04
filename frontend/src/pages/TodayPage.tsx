@@ -170,6 +170,10 @@ export default function TodayPage() {
               onOpenChat={block => {
                 if (block.task_id) setChatBlock(block)
               }}
+              onScheduleUpdated={schedule => {
+                qc.setQueryData(['schedule', date], schedule)
+                setScheduleGen(g => g + 1)
+              }}
             />
             <div className="flex gap-2">
               <button

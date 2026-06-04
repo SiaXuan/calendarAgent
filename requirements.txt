@@ -15,3 +15,6 @@ langgraph>=1.2.0
 langchain-anthropic>=1.4.0
 langchain-core>=1.4.0
 langsmith>=0.8.0
+
+# LangMem long-term memory (Phase C). Pinned to 0.0.x line — pre-1.0.
+langmem>=0.0.30,<0.1

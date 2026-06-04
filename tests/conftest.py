@@ -17,21 +17,30 @@ from models.task import CognitiveLoad, Priority, Subtask, Task, TaskKind
 # ─── Reset persistence between tests ────────────────────────────────────────
 
 @pytest.fixture
-def clean_stores():
+def clean_stores(tmp_path, monkeypatch):
     """
-    Clear all in-memory stores before AND after the test.
-    Also clears the module-level caches in agents/nodes.py.
+    Wipe in-memory stores before/after the test AND redirect storage's JSON
+    file paths to a tmp dir. The redirect is critical: API tests that POST to
+    /tasks call save_task_store(), which would otherwise persist test data into
+    the real data/task_store.json and leak across runs (each test run added a
+    new "Test task" forever).
     """
+    import storage
     from agents import nodes
-    from storage import (
-        health_store, schedule_store, subtask_overrides, task_store,
-    )
+
+    # Redirect file paths so saves go to tmp_path, not the real data/ dir
+    monkeypatch.setattr(storage, "_DATA_DIR", tmp_path)
+    monkeypatch.setattr(storage, "_HEALTH_FILE", tmp_path / "health_store.json")
+    monkeypatch.setattr(storage, "_TASKS_FILE", tmp_path / "task_store.json")
+    monkeypatch.setattr(storage, "_MEMORY_FILE", tmp_path / "memory_store.json")
 
     def _wipe():
-        health_store.clear()
-        task_store.clear()
-        schedule_store.clear()
-        subtask_overrides.clear()
+        storage.health_store.clear()
+        storage.task_store.clear()
+        storage.schedule_store.clear()
+        storage.subtask_overrides.clear()
+        storage.subtask_pins.clear()
+        storage.memory_store.clear()
         nodes._health_cache.clear()
         nodes._calendar_cache.clear()
 
