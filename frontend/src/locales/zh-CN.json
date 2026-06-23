@@ -12,6 +12,8 @@
   "blocksReady": "{{count}} 个块待同步",
   "addedToCalendar": "已添加到 Apple 日历",
   "regenerate": "重新生成今日计划",
+  "refresh": "刷新（重新加载当前计划）",
+  "regenerateConfirm": "重新生成会从头排一份全新计划，丢弃你当前的安排（对话调整、拖动）。确定继续？",
   "moveTo": "移至 {{time}}",
   "keepOriginal": "保持原时间",
   "notYetInCalendar": "计划已生成 · 尚未写入日历",
@@ -95,5 +97,16 @@
   "memoryCancel": "取消",
   "memoryEdit": "编辑",
   "memoryConfirm": "标记为确认",
-  "memoryReinforced": "上次强化 {{when}}"
+  "memoryReinforced": "上次强化 {{when}}",
+  "chatAgentHint": "用大白话让我帮你调整今天的日程。",
+  "chatAgentPlaceholder": "比如：把深度任务挪到上午",
+  "chatAgentSend": "发送",
+  "chatAgentStop": "停止",
+  "proposalTitle": "改动预览",
+  "proposalPending": "尚未生效 —— 点「应用」这些改动才会真正执行。",
+  "proposalMove": "移动",
+  "proposalRemove": "删除",
+  "proposalAdd": "新增",
+  "proposalConfirm": "应用",
+  "proposalReject": "保持原样"
 }

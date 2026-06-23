@@ -12,6 +12,8 @@
   "blocksReady": "{{count}} blocks ready",
   "addedToCalendar": "Added to Apple Calendar",
   "regenerate": "Regenerate today's plan",
+  "refresh": "Refresh (reload current plan)",
+  "regenerateConfirm": "Regenerating builds a fresh plan from scratch and discards your current arrangement (chat edits, drags). Continue?",
   "moveTo": "Move to {{time}}",
   "keepOriginal": "Keep original",
   "notYetInCalendar": "Plan generated · not yet in Calendar",
@@ -95,5 +97,16 @@
   "memoryCancel": "Cancel",
   "memoryEdit": "Edit",
   "memoryConfirm": "Mark verified",
-  "memoryReinforced": "last reinforced {{when}}"
+  "memoryReinforced": "last reinforced {{when}}",
+  "chatAgentHint": "Ask me to adjust today's schedule in plain language.",
+  "chatAgentPlaceholder": "e.g. move my deep work to the morning",
+  "chatAgentSend": "Send",
+  "chatAgentStop": "Stop",
+  "proposalTitle": "Proposed changes",
+  "proposalPending": "Not applied yet — tap Apply to make these changes take effect.",
+  "proposalMove": "Move",
+  "proposalRemove": "Remove",
+  "proposalAdd": "Add",
+  "proposalConfirm": "Apply",
+  "proposalReject": "Keep as is"
 }

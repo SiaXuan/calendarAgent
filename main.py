@@ -16,7 +16,9 @@ from api.task_chat import router as task_chat_router
 from api.preferences import load_preferences
 from api.tasks import router as tasks_router
 from config import CORS_ORIGINS, DEPLOYMENT_MODE
-from storage import load_health_store, load_memory_store, load_task_store
+from storage import (
+    load_health_store, load_memory_store, load_schedule_store, load_task_store,
+)
 
 logger = logging.getLogger("dayflow")
 
@@ -27,6 +29,7 @@ async def lifespan(app: FastAPI):
     load_health_store()
     load_task_store()
     load_memory_store()
+    load_schedule_store()   # restore adjusted schedules so restarts keep manual edits
     load_preferences()
     # No startup sync — the first /schedule/stream call will sync via the
     # throttle in stream_day_schedule (after yielding the health card, so

@@ -18,6 +18,7 @@ from api.preferences import get_current_prefs
 from models.schedule import BlockType, DaySchedule, FreeWindow, TimeBlock
 from models.task import CognitiveLoad, Subtask
 from storage import (
+    bump_schedule_version,
     health_store,
     schedule_store,
     subtask_overrides,
@@ -357,6 +358,7 @@ def assemble_node(state: dict) -> dict:
         health_summary=state.get("health_summary", ""),
     )
     schedule_store[target_date] = schedule
+    bump_schedule_version(target_date)   # invalidate any stale pending Proposal
     return {"final_schedule": schedule}
 
 
@@ -443,6 +445,7 @@ async def apply_adjustment_node(state: dict) -> dict:
         health_summary=health_summary,
     )
     schedule_store[target_date] = schedule
+    bump_schedule_version(target_date)   # invalidate any stale pending Proposal
     return {"final_schedule": schedule}
 
 

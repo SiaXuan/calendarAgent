@@ -10,6 +10,7 @@ parsing to `ChatAnthropic.with_structured_output(...)`. This gives us:
 The instant-task short-circuit and heuristic fallback remain unchanged.
 """
 import json
+from collections import Counter
 from datetime import date
 
 from langchain_core.exceptions import OutputParserException
@@ -101,6 +102,30 @@ CONSTRAINTS:
 """
 
 
+def _disambiguate_titles(subtasks: list[Subtask]) -> list[Subtask]:
+    """
+    Append （i/N) to subtasks that share a title within the same parent task.
+
+    Two purposes:
+      1. UX — split subtasks ("做2道LeetCode" → 2 sessions) read as distinct,
+         not a confusing duplicate.
+      2. Correctness — block_key is "{task_id}::{title}"; identical titles
+         collide, which would break per-block pins / sync / feedback that key
+         off block_key. Distinct titles give distinct keys.
+    """
+    totals = Counter((s.parent_id, s.title) for s in subtasks)
+    seen: dict[tuple, int] = {}
+    out: list[Subtask] = []
+    for s in subtasks:
+        key = (s.parent_id, s.title)
+        if totals[key] > 1:
+            seen[key] = seen.get(key, 0) + 1
+            out.append(s.model_copy(update={"title": f"{s.title}（{seen[key]}/{totals[key]}）"}))
+        else:
+            out.append(s)
+    return out
+
+
 def _is_instant_task(task: Task) -> bool:
     """
     Check if a task should bypass Claude and go straight to the instant path.
@@ -156,7 +181,7 @@ async def rank_and_decompose(
         ))
 
     if not regular_tasks:
-        return subtasks
+        return _disambiguate_titles(subtasks)
 
     # Pre-sort by urgency before sending to Claude
     sorted_tasks = sorted(
@@ -240,7 +265,7 @@ async def rank_and_decompose(
         # rest of the schedule pipeline doesn't crash.
         subtasks.extend(_heuristic_decompose(sorted_tasks, target_date))
 
-    return subtasks
+    return _disambiguate_titles(subtasks)
 
 
 def _heuristic_decompose(tasks: list[Task], target_date: date) -> list[Subtask]:

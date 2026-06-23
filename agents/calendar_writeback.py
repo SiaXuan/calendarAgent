@@ -10,8 +10,16 @@ import asyncio
 from datetime import date
 
 from agents import nodes  # for _calendar_cache invalidation
+from integrations.caldav_client import AGENT_DESC_TAG
 from models.schedule import BlockType, TimeBlock
 from storage import schedule_store
+
+# Bracket-less prefix shared by the bare tag and every per-block tag.
+# IMPORTANT: the bare AGENT_DESC_TAG "[agent-scheduled:dayflow]" is NOT a
+# substring of a per-block tag "[agent-scheduled:dayflow:KEY]" (the trailing
+# "]" breaks it), so full-day cleanup must match on this PREFIX instead —
+# otherwise re-syncing leaves the previous events behind (duplicates).
+_AGENT_TAG_PREFIX = AGENT_DESC_TAG[:-1]  # "[agent-scheduled:dayflow"
 
 
 def _block_key(block: TimeBlock) -> str:
@@ -20,10 +28,8 @@ def _block_key(block: TimeBlock) -> str:
 
 
 def _block_tag(block: TimeBlock) -> str:
-    """Per-block agent tag. Substring-matches AGENT_DESC_TAG so full-day cleanup catches it too."""
-    from integrations.caldav_client import AGENT_DESC_TAG
-    # AGENT_DESC_TAG = "[agent-scheduled:dayflow]"  →  "[agent-scheduled:dayflow:<key>]"
-    return f"{AGENT_DESC_TAG[:-1]}:{_block_key(block)}]"
+    """Per-block agent tag: "[agent-scheduled:dayflow:<key>]"."""
+    return f"{_AGENT_TAG_PREFIX}:{_block_key(block)}]"
 
 
 def _block_description(block: TimeBlock) -> str:
@@ -55,10 +61,9 @@ async def write_schedule_to_calendar(target_date: date) -> dict:
     ]
 
     def _do_write() -> dict:
-        from integrations.caldav_client import (
-            AGENT_DESC_TAG, write_event, delete_events_with_tag,
-        )
-        deleted = delete_events_with_tag(target_date, AGENT_DESC_TAG)
+        from integrations.caldav_client import write_event, delete_events_with_tag
+        # Match on the prefix so BOTH bare and per-block tagged events are wiped.
+        deleted = delete_events_with_tag(target_date, _AGENT_TAG_PREFIX)
         written = 0
         for b in writable:
             uid = write_event(b.title, b.start, b.end, _block_description(b), tag=_block_tag(b))

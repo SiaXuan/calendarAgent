@@ -104,6 +104,38 @@ async def test_task_kind_defaults_when_llm_omits(mock_sonnet, sample_task, sampl
     assert result[0].task_kind == TaskKind.analytical
 
 
+async def test_split_subtasks_get_distinct_titles(mock_sonnet, sample_task, sample_date):
+    """
+    Same-titled subtasks of one parent must be disambiguated to (1/N)(2/N) —
+    both for UX and because block_key = task_id::title would otherwise collide.
+    """
+    mock_sonnet.set_structured_response(_LLMSubtaskList(subtasks=[
+        _LLMSubtask(parent_id="task_001", title="完成 LeetCode 刷题 ×2",
+                    estimated_minutes=25, cognitive_load=CognitiveLoad.deep,
+                    task_kind=TaskKind.analytical),
+        _LLMSubtask(parent_id="task_001", title="完成 LeetCode 刷题 ×2",
+                    estimated_minutes=25, cognitive_load=CognitiveLoad.deep,
+                    task_kind=TaskKind.analytical),
+    ]))
+    result = await rank_and_decompose([sample_task], sample_date, Language.en)
+    titles = [s.title for s in result]
+    # distinct now
+    assert len(set(titles)) == 2
+    assert any("1/2" in t for t in titles)
+    assert any("2/2" in t for t in titles)
+
+
+async def test_single_subtask_title_unchanged(mock_sonnet, sample_task, sample_date):
+    """A non-duplicated title is left alone (no spurious (1/1))."""
+    mock_sonnet.set_structured_response(_LLMSubtaskList(subtasks=[
+        _LLMSubtask(parent_id="task_001", title="独一无二的任务",
+                    estimated_minutes=60, cognitive_load=CognitiveLoad.deep,
+                    task_kind=TaskKind.analytical),
+    ]))
+    result = await rank_and_decompose([sample_task], sample_date, Language.en)
+    assert result[0].title == "独一无二的任务"
+
+
 async def test_mixed_instant_and_regular(
     mock_sonnet, sample_task, sample_instant_task, sample_date,
 ):

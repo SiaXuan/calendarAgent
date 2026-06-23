@@ -51,7 +51,9 @@ from api.preferences import get_current_prefs
 from graphs.state import ScheduleState
 from models.schedule import BlockType, DaySchedule, TimeBlock
 from models.task import CognitiveLoad, Subtask, TaskKind
-from storage import health_store, schedule_store, subtask_pins, task_store
+from storage import (
+    bump_schedule_version, health_store, schedule_store, subtask_pins, task_store,
+)
 
 
 @lru_cache(maxsize=1)
@@ -104,6 +106,11 @@ async def run_schedule_graph(target_date: date) -> DaySchedule:
     """
     await sync_reminders_if_due()
 
+    # Full regenerate = fresh day → drop the old conversation + pending proposal.
+    from storage import chat_sessions, pending_proposals
+    chat_sessions.pop(target_date, None)
+    pending_proposals.pop(target_date, None)
+
     initial_state: ScheduleState = {
         "target_date": target_date,
         "language": get_current_prefs().language,
@@ -118,103 +125,88 @@ async def reflow_after_pin(target_date: date) -> DaySchedule:
     """
     Lightweight rescheduler triggered by pin/unpin (drag-to-move + pomodoro +/-).
 
-    Why a separate path? The full schedule_graph runs ~10-30s because of
-    AppleScript reminder sync, CalDAV fetch, health translation, and the LLM
-    task decomposition. A pin operation doesn't need any of those — the set of
-    tasks, calendar events, and energy curve are all unchanged. We just need to
-    re-run the scheduler with the new pin in place.
+    **Preserves every block's current position.** Only the pinned block(s) get
+    resized/moved (per their PinSpec); then a forward cascade nudges any block
+    that now overlaps. It does NOT re-run the greedy scheduler — doing so would
+    relocate blocks the user (or the chat agent) deliberately placed (e.g.
+    moving deep work back to the high-energy morning after the agent put it in
+    the afternoon). Energy curve / health summary carry over unchanged.
 
-    Reconstructs subtasks from the *existing* schedule_store[target_date] and
-    reuses cached health + free windows. If no prior schedule exists, falls
-    back to the full graph so first-time pins still work.
-
-    Result is in-memory only (and saved to schedule_store) — caller doesn't
-    need to re-fetch CalDAV or call any LLM.
+    If no prior schedule exists, falls back to the full graph.
     """
     current = schedule_store.get(target_date)
     if current is None:
         return await run_schedule_graph(target_date)
 
-    # Split the current schedule into the three buckets the scheduler needs.
-    fixed_blocks: list[TimeBlock] = []
-    instant_blocks: list[TimeBlock] = []
-    schedulable_subtasks: list[Subtask] = []
-    for b in current.blocks:
-        if b.block_type in (BlockType.fixed, BlockType.meal):
-            fixed_blocks.append(b)
-        elif b.block_type == BlockType.instant:
-            instant_blocks.append(b)
-        elif b.block_type in (BlockType.scheduled, BlockType.suggested) and b.task_id:
-            duration = max(1, int((b.end - b.start).total_seconds() / 60))
-            schedulable_subtasks.append(Subtask(
-                parent_id=b.task_id,
-                title=b.title,
-                cognitive_load=b.cognitive_load or CognitiveLoad.medium,
-                task_kind=b.task_kind or TaskKind.analytical,
-                estimated_minutes=duration,
-                suggested_date=target_date,
-                deadline=b.deadline,
-                phase_label=b.phase_label,
-            ))
-
-    # Apply pins → pinned subtasks become additional fixed blocks
     pins = subtask_pins.get(target_date, {})
-    pin_blocks: list[TimeBlock] = []
-    remaining_subtasks: list[Subtask] = []
-    for s in schedulable_subtasks:
-        key = f"{s.parent_id}::{s.title}"
-        pin = pins.get(key)
-        if pin is None:
-            remaining_subtasks.append(s)
-            continue
-        pin_end = pin.start + timedelta(minutes=pin.duration_min)
-        pin_blocks.append(TimeBlock(
-            start=pin.start,
-            end=pin_end,
-            block_type=BlockType.scheduled,
-            task_id=s.parent_id,
-            title=s.title,
-            cognitive_load=s.cognitive_load,
-            task_kind=s.task_kind,
-            phase_label=s.phase_label,
-            focus_minutes=25,
-            break_minutes=5,
-            pomodoro_count=max(1, pin.duration_min // 25),
-            deadline=s.deadline,
-        ))
 
-    all_fixed = sorted(fixed_blocks + pin_blocks, key=lambda b: b.start)
-    prefs = get_current_prefs()
-    free_windows = calendar_agent.extract_free_windows(
-        all_fixed, target_date, prefs.work_start, prefs.work_end,
-    )
+    # Apply pins in place; keep every other block exactly where it is.
+    updated: list[TimeBlock] = []
+    for b in current.blocks:
+        key = f"{b.task_id}::{b.title}" if b.task_id else None
+        pin = pins.get(key) if key else None
+        if pin is not None:
+            updated.append(b.model_copy(update={
+                "start": pin.start,
+                "end": pin.start + timedelta(minutes=pin.duration_min),
+                "pomodoro_count": max(1, pin.duration_min // 25),
+            }))
+        else:
+            updated.append(b.model_copy(deep=True))
 
-    # Reuse the cached energy curve from the last full generation.
-    cached_health = nodes._health_cache.get(target_date)
-    energy_curve = cached_health[0] if cached_health else nodes._default_energy_curve()
-    health_summary = cached_health[1] if cached_health else current.health_summary
-
-    # Sleep start hour: pull from snapshot if available, else default.
-    snapshot = health_store.get(target_date)
-    sleep_start_hour = 23
-    if snapshot and snapshot.sleep.sleep_start.hour >= 20:
-        sleep_start_hour = snapshot.sleep.sleep_start.hour
-
-    result = scheduler_agent.generate_schedule(
-        remaining_subtasks, free_windows, all_fixed, target_date,
-        sleep_start_hour, energy_curve,
-    )
-
-    all_blocks = sorted(
-        all_fixed + instant_blocks + result.blocks,
-        key=lambda b: b.start,
-    )
-    new_schedule = DaySchedule(
-        date=target_date,
-        energy_curve=energy_curve,
-        blocks=all_blocks,
-        unscheduled=result.unscheduled,
-        health_summary=health_summary,
-    )
+    cascaded = _cascade_in_place(updated)
+    new_schedule = current.model_copy(update={
+        "blocks": sorted(cascaded, key=lambda b: b.start),
+    })
     schedule_store[target_date] = new_schedule
+    bump_schedule_version(target_date)
     return new_schedule
+
+
+_CASCADE_BUFFER = timedelta(minutes=10)
+_MOVABLE_TYPES = {BlockType.scheduled, BlockType.suggested}
+
+
+def _cascade_in_place(blocks: list[TimeBlock]) -> list[TimeBlock]:
+    """
+    Resolve overlaps by pushing later movable blocks forward, preserving each
+    block's position when there's no conflict. fixed/meal/instant are immovable
+    anchors; scheduled/suggested cascade around them.
+
+    Only pushes forward — a block with a gap before it keeps its own start
+    (gaps are not compacted). This mirrors the frontend's visual cascade so the
+    persisted layout matches what the user saw.
+    """
+    anchors = sorted(
+        ((b.start, b.end) for b in blocks if b.block_type not in _MOVABLE_TYPES),
+        key=lambda x: x[0],
+    )
+
+    def clear_anchors(start, dur):
+        # Push `start` forward until [start, start+dur) overlaps no anchor.
+        changed = True
+        while changed:
+            changed = False
+            for a_start, a_end in anchors:
+                if start < a_end and start + dur > a_start:
+                    start = a_end + _CASCADE_BUFFER
+                    changed = True
+        return start
+
+    out: list[TimeBlock] = []
+    cursor = None   # earliest free time as we walk left→right
+    for b in sorted(blocks, key=lambda b: b.start):
+        if b.block_type not in _MOVABLE_TYPES:
+            out.append(b)
+            end_plus = b.end + _CASCADE_BUFFER
+            cursor = end_plus if cursor is None or end_plus > cursor else cursor
+            continue
+        dur = b.end - b.start
+        start = b.start
+        if cursor is not None and start < cursor:
+            start = cursor            # previous block forces this one later
+        start = clear_anchors(start, dur)
+        end = start + dur
+        out.append(b.model_copy(update={"start": start, "end": end}))
+        cursor = end + _CASCADE_BUFFER
+    return out

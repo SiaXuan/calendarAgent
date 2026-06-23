@@ -93,6 +93,16 @@ export default function TodayPage() {
     }
   }, [isError, data, isStreaming, startStream])
 
+  // Non-destructive refresh: reload the persisted plan (NOT a re-plan).
+  const refresh = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['schedule', date] })
+  }, [qc, date])
+
+  // Regenerate is destructive (discards current arrangement) → confirm first.
+  const regenerateWithConfirm = useCallback(() => {
+    if (window.confirm(t('regenerateConfirm'))) startStream()
+  }, [t, startStream])
+
   const reclassify = useMutation({
     mutationFn: async () => {
       const result = await reclassifyTasks()
@@ -128,8 +138,9 @@ export default function TodayPage() {
           {t('today')} · {dateLabel}
         </span>
         <button
-          onClick={startStream}
+          onClick={refresh}
           disabled={isStreaming}
+          title={t('refresh')}
           className="w-8 h-8 rounded-full bg-ice border border-steel flex items-center justify-center"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none"
@@ -177,7 +188,7 @@ export default function TodayPage() {
             />
             <div className="flex gap-2">
               <button
-                onClick={startStream}
+                onClick={regenerateWithConfirm}
                 disabled={isStreaming || reclassify.isPending}
                 className="flex-1 p-3.5 rounded-2xl bg-white border border-steel text-[13px] font-medium text-blue-deep text-center active:bg-ice2 disabled:opacity-50"
               >

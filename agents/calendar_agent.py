@@ -9,7 +9,13 @@ from integrations.caldav_client import fetch_events
 from models.schedule import BlockType, FreeWindow, TimeBlock
 from models.task import CognitiveLoad
 
-_AGENT_TAG = "[agent-scheduled]"
+# Bracket-less prefix so it matches EVERY agent tag variant:
+#   bare      "[agent-scheduled:dayflow]"
+#   per-block "[agent-scheduled:dayflow:KEY]"
+# A bracketed "[agent-scheduled]" would NOT be a substring of the per-block tag
+# (the trailing "]" breaks it) → agent-synced events get misclassified as
+# `fixed`, then the same tasks get re-scheduled → every task shows up ×2.
+_AGENT_TAG = "[agent-scheduled"
 
 
 def classify_event(event: dict) -> BlockType:
@@ -17,8 +23,9 @@ def classify_event(event: dict) -> BlockType:
     Any event explicitly added to the calendar is treated as a fixed block —
     the user put it there intentionally so we should respect it regardless of
     the event title language or content.
-    Only events written by this agent (tagged [agent-scheduled]) are treated
-    as scheduled (moveable) blocks.
+    Only events written by this agent (tagged with the agent prefix) are
+    treated as scheduled (moveable) blocks — and `fetch_fixed_blocks` then
+    excludes them, so a regenerate after a calendar sync doesn't duplicate them.
     """
     description = event.get("description", "")
     if description and _AGENT_TAG in description:

@@ -39,6 +39,7 @@ _DATA_DIR = Path(__file__).parent / "data"
 _HEALTH_FILE = _DATA_DIR / "health_store.json"
 _TASKS_FILE = _DATA_DIR / "task_store.json"
 _MEMORY_FILE = _DATA_DIR / "memory_store.json"
+_SCHEDULE_FILE = _DATA_DIR / "schedule_store.json"
 
 
 # ─── In-memory stores ────────────────────────────────────────────────────────
@@ -49,8 +50,25 @@ health_store: dict[date, HealthSnapshot] = {}
 # Tasks keyed by task_id. Persisted to JSON.
 task_store: dict[str, Task] = {}
 
-# Generated DaySchedule per date. NOT persisted (regenerated on demand).
+# Generated DaySchedule per date. PERSISTED — so manual adjustments (chat
+# agent moves, drag pins, accepted proposals) survive a backend restart instead
+# of being regenerated from scratch (which would drop all of them).
 schedule_store: dict[date, DaySchedule] = {}
+
+# Monotonic version per date — bumped on every schedule mutation. Used by the
+# conversational agent for optimistic-concurrency on stale Proposals (S3).
+schedule_version: dict[date, int] = {}
+
+
+def current_version(d: date) -> int:
+    return schedule_version.get(d, 0)
+
+
+def bump_schedule_version(d: date) -> int:
+    schedule_version[d] = schedule_version.get(d, 0) + 1
+    # Persist the schedule on every mutation so a restart restores adjustments.
+    save_schedule_store()
+    return schedule_version[d]
 
 # Confirmed subtask plans from the per-task planning chat — when present,
 # they override the LLM's task decomposition. Cleared on regenerate.
@@ -71,6 +89,18 @@ memory_store: dict[str, Memory] = {}
 # shouldn't promote weeks later).
 from models.memory import Observation as _Obs   # avoid top-level circular import
 observation_log: list[_Obs] = []
+
+# Conversational-agent run logs (S3 observability). In-memory; for replay+eval.
+agent_run_log: list[dict] = []
+
+# Pending major-change Proposals awaiting user confirm, keyed by date.
+# Each: {proposal_id, base_version, staged_blocks, summary, created_at_iso}.
+pending_proposals: dict[date, dict] = {}
+
+# Conversational-agent message history per date (S3 multi-turn context).
+# [{role: "user"|"assistant", content: str}] — lets follow-ups ("我是说…")
+# build on prior turns. In-memory; cleared on full regenerate.
+chat_sessions: dict[date, list[dict]] = {}
 
 
 # ─── health_store persistence ────────────────────────────────────────────────
@@ -144,3 +174,41 @@ def load_memory_store() -> None:
         _log.info("Loaded %d memory record(s) from disk.", len(memory_store))
     except Exception as exc:
         _log.warning("Could not load memory store: %s", exc)
+
+
+# ─── schedule_store persistence (survives restart → keeps manual edits) ───────
+
+def save_schedule_store() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {
+            str(d): {
+                "schedule": sch.model_dump(mode="json"),
+                "version": schedule_version.get(d, 0),
+                "pins": {
+                    k: p.model_dump(mode="json")
+                    for k, p in subtask_pins.get(d, {}).items()
+                },
+            }
+            for d, sch in schedule_store.items()
+        }
+        _SCHEDULE_FILE.write_text(json.dumps(payload, default=str, ensure_ascii=False))
+    except Exception as exc:
+        _log.warning("Could not save schedule store: %s", exc)
+
+
+def load_schedule_store() -> None:
+    if not _SCHEDULE_FILE.exists():
+        return
+    try:
+        payload = json.loads(_SCHEDULE_FILE.read_text())
+        for date_str, entry in payload.items():
+            d = date.fromisoformat(date_str)
+            schedule_store[d] = DaySchedule.model_validate(entry["schedule"])
+            schedule_version[d] = entry.get("version", 0)
+            pins = entry.get("pins") or {}
+            if pins:
+                subtask_pins[d] = {k: PinSpec.model_validate(v) for k, v in pins.items()}
+        _log.info("Loaded %d cached schedule(s) from disk.", len(schedule_store))
+    except Exception as exc:
+        _log.warning("Could not load schedule store: %s", exc)

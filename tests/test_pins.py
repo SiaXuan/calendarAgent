@@ -295,6 +295,51 @@ async def test_pin_falls_back_to_full_graph_when_no_schedule(
     assert len(result.energy_curve) == 24
 
 
+async def test_reflow_preserves_other_blocks_no_resolve(clean_stores):
+    """
+    Regression: resizing/pinning ONE block must not relocate the others.
+    Earlier reflow re-ran the greedy scheduler, so accepting an agent plan
+    (deep work moved to afternoon) then tweaking one card's duration on Today
+    snapped the rest back to the high-energy morning. Reflow now preserves
+    positions and only cascades overlaps.
+    """
+    from datetime import datetime
+    from graphs.schedule_graph import reflow_after_pin
+    from models.schedule import BlockType, DaySchedule, TimeBlock
+    from models.task import CognitiveLoad, TaskKind
+    from storage import PinSpec, schedule_store, schedule_version, subtask_pins
+
+    d = date(2026, 6, 15)
+    curve = [0.2] * 24
+    for h in range(8, 12):
+        curve[h] = 0.9   # high-energy morning — where greedy would dump deep work
+
+    def deep(task_id, title, h0, h1):
+        return TimeBlock(
+            start=datetime(2026, 6, 15, h0, 0), end=datetime(2026, 6, 15, h1, 0),
+            block_type=BlockType.scheduled, task_id=task_id, title=title,
+            cognitive_load=CognitiveLoad.deep, task_kind=TaskKind.analytical,
+        )
+
+    # Two deep blocks the agent placed in the AFTERNOON.
+    a = deep("t1", "A", 14, 15)
+    b = deep("t2", "B", 16, 17)
+    schedule_store[d] = DaySchedule(
+        date=d, energy_curve=curve, blocks=[a, b], unscheduled=[], health_summary="",
+    )
+    schedule_version[d] = 1
+    # Pomodoro-resize A: keep its 14:00 start, grow to 90min.
+    subtask_pins[d] = {"t1::A": PinSpec(start=datetime(2026, 6, 15, 14, 0), duration_min=90)}
+
+    new = await reflow_after_pin(d)
+    by = {blk.title: blk for blk in new.blocks}
+    # A resized in place
+    assert by["A"].start == datetime(2026, 6, 15, 14, 0)
+    assert int((by["A"].end - by["A"].start).total_seconds() // 60) == 90
+    # B did NOT jump back to the morning — still in the afternoon
+    assert by["B"].start.hour >= 14
+
+
 async def test_reflow_preserves_pinned_block_position(
     client, seeded_schedule,
 ):

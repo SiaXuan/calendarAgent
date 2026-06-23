@@ -79,6 +79,38 @@ def test_save_and_load_task_store_roundtrip(isolated_storage):
     assert loaded.priority == Priority.high
 
 
+def test_schedule_store_roundtrip_survives_restart(isolated_storage, monkeypatch):
+    """
+    Regression: schedule_store wasn't persisted, so a backend restart dropped
+    all manual adjustments (chat moves, drag pins). Now it round-trips.
+    """
+    monkeypatch.setattr(storage, "_SCHEDULE_FILE", isolated_storage / "schedule_store.json")
+    from datetime import datetime
+    from models.schedule import BlockType, DaySchedule, TimeBlock
+
+    d = date(2026, 6, 15)
+    blk = TimeBlock(
+        start=datetime(2026, 6, 15, 14, 0), end=datetime(2026, 6, 15, 15, 0),
+        block_type=BlockType.scheduled, task_id="t1", title="Moved to afternoon",
+    )
+    storage.schedule_store[d] = DaySchedule(
+        date=d, energy_curve=[0.5] * 24, blocks=[blk], unscheduled=[], health_summary="ok",
+    )
+    storage.bump_schedule_version(d)   # triggers save
+    saved_version = storage.current_version(d)
+
+    # Simulate restart: wipe memory, reload from disk
+    storage.schedule_store.clear()
+    storage.schedule_version.clear()
+    storage.load_schedule_store()
+
+    assert d in storage.schedule_store
+    restored = storage.schedule_store[d]
+    assert restored.blocks[0].title == "Moved to afternoon"
+    assert restored.blocks[0].start == datetime(2026, 6, 15, 14, 0)
+    assert storage.current_version(d) == saved_version
+
+
 def test_load_with_missing_file_is_noop(isolated_storage):
     """No file on disk → load is a silent no-op (doesn't raise)."""
     assert not (isolated_storage / "health.json").exists()
