@@ -35,6 +35,7 @@
   "sync": "Sync",
   "synced": "Synced",
   "swipeToSync": "← swipe to sync",
+  "dragToReschedule": "Drag a card to reschedule · tap ↑ to sync to Calendar",
   "planningChat": "Planning chat",
   "planReady": "Plan ready to confirm",
   "subtasks": "subtasks",

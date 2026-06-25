@@ -151,15 +151,12 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
   const { t } = useTranslation()
   const type = block.block_type
 
-  // Swipe-to-sync state
-  const [offset, setOffset] = useState(0)
+  // Sync-to-calendar state. Triggered by an explicit button (not a swipe) —
+  // the old left-swipe gesture conflicted with HTML5 drag-to-reschedule on the
+  // same card: a mouse-drag fired both at once.
   const [synced, setSynced] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState(false)
-  const [isSwiping, setIsSwiping] = useState(false)
-  const touchStartX = useRef(0)
-  const mouseStartX = useRef(0)
-  const isDragging = useRef(false)
 
   const focusMin = block.focus_minutes ?? 25
   const breakMin = block.break_minutes ?? 5
@@ -169,11 +166,11 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
   const urgency = urgencyLevel(block.deadline ?? null)
 
   /**
-   * Commit a swipe — calls the sync callback (real API write), and only marks
-   * the card as synced on success. Failures bounce the card back and tint red briefly.
+   * Write this block to the calendar. Only marks the card as synced on success;
+   * a failure tints the card red briefly so the user can retry.
    */
   const commitSync = useCallback(async () => {
-    setOffset(0)
+    if (synced || syncing) return
     if (!onSync) {
       setSynced(true)
       return
@@ -188,51 +185,7 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
     } finally {
       setSyncing(false)
     }
-  }, [onSync])
-
-  // Swipe handlers
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (synced || syncing || type === 'fixed' || type === 'meal') return
-    touchStartX.current = e.touches[0].clientX
-    setIsSwiping(true)
-  }, [synced, syncing, type])
-
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!isSwiping) return
-    const delta = e.touches[0].clientX - touchStartX.current
-    setOffset(Math.max(-90, Math.min(0, delta)))
-  }, [isSwiping])
-
-  const handleTouchEnd = useCallback(() => {
-    setIsSwiping(false)
-    if (offset < -55) {
-      void commitSync()
-    } else {
-      setOffset(0)
-    }
-  }, [offset, commitSync])
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (synced || syncing || type === 'fixed' || type === 'meal') return
-    mouseStartX.current = e.clientX
-    isDragging.current = true
-  }, [synced, syncing, type])
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDragging.current) return
-    const delta = e.clientX - mouseStartX.current
-    setOffset(Math.max(-90, Math.min(0, delta)))
-  }, [])
-
-  const handleMouseUp = useCallback(() => {
-    if (!isDragging.current) return
-    isDragging.current = false
-    if (offset < -55) {
-      void commitSync()
-    } else {
-      setOffset(0)
-    }
-  }, [offset, commitSync])
+  }, [onSync, synced, syncing])
 
   // ── Colors ─────────────────────────────────────────────────────────────────
   // Fixed: always neutral grey
@@ -310,43 +263,12 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
         <div className={`w-px flex-1 min-h-1.5 ${stemCls}`} />
       </div>
 
-      {/* swipe wrapper */}
-      <div className="flex-1 my-1.5 relative overflow-hidden rounded-xl">
-        {/* sync reveal background */}
-        {!synced && type !== 'fixed' && type !== 'meal' && (
-          <div
-            className="absolute inset-0 bg-[#4CAF70] rounded-xl flex items-center justify-end pr-4"
-            style={{ opacity: Math.min(1, Math.abs(offset) / 55) }}
-          >
-            <div className="flex flex-col items-center gap-0.5">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-              <span className="text-[9px] text-white font-medium">{t('sync')}</span>
-            </div>
-          </div>
-        )}
-        {/* synced badge */}
-        {synced && (
-          <div className="absolute right-3 top-1/2 -translate-y-1/2">
-            <span className="text-[10px] text-[#5CB87A] font-medium">✓ {t('synced')}</span>
-          </div>
-        )}
-
-        {/* card face */}
+      {/* card wrapper */}
+      <div className="flex-1 my-1.5 relative rounded-xl">
+        {/* card face — whole card is the drag handle (draggable set on the
+            outer wrapper in ScheduleTimeline); sync is an explicit button below */}
         <div
-          className={`rounded-xl px-3 py-2.5 relative overflow-hidden cursor-grab active:cursor-grabbing ${cardCls}`}
-          style={{
-            transform: `translateX(${offset}px)`,
-            transition: isSwiping || isDragging.current ? 'none' : 'transform 0.25s ease',
-          }}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
+          className={`rounded-xl px-3 py-2.5 relative overflow-hidden ${isScheduled ? 'cursor-grab active:cursor-grabbing' : ''} ${cardCls}`}
         >
           <div className="absolute left-0 top-0 bottom-0 w-0.5" style={{ background: stripeColor }} />
 
@@ -363,20 +285,46 @@ function BlockCard({ block, displayStart, displayEnd, pomCount, onPomChange, onA
           {/* title row */}
           <div className="flex items-start justify-between gap-1">
             <div className="text-[13px] font-medium flex-1" style={{ color: titleColor }}>{block.title}</div>
-            {/* ★ uncertain / planning chat button */}
-            {isScheduled && (
-              <button
-                onMouseDown={e => e.stopPropagation()}
-                onTouchStart={e => e.stopPropagation()}
-                onClick={onOpenChat}
-                className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full hover:bg-ice2 transition-colors"
-                title={t('planningChat')}
-              >
-                <span className={`text-[11px] ${block.is_uncertain ? 'text-amber' : 'text-gray-text'}`}>
-                  {block.is_uncertain ? '★' : '⋯'}
-                </span>
-              </button>
-            )}
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              {/* sync-to-calendar button (replaces the old left-swipe gesture) */}
+              {isScheduled && (synced ? (
+                <span className="text-[10px] text-[#5CB87A] font-medium px-1 whitespace-nowrap">✓ {t('synced')}</span>
+              ) : (
+                <button
+                  draggable={false}
+                  onMouseDown={e => e.stopPropagation()}
+                  onTouchStart={e => e.stopPropagation()}
+                  onClick={e => { e.stopPropagation(); void commitSync() }}
+                  disabled={syncing}
+                  title={t('syncToCalendar')}
+                  className={`w-5 h-5 flex items-center justify-center rounded-full transition-colors
+                    ${syncError ? 'text-[#D35454]' : 'text-gray-text hover:bg-ice2 hover:text-[#4CAF70]'}`}
+                >
+                  {syncing ? (
+                    <span className="block w-2.5 h-2.5 rounded-full border-[1.5px] border-current border-t-transparent animate-spin" />
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 19V5M5 12l7-7 7 7"/>
+                    </svg>
+                  )}
+                </button>
+              ))}
+              {/* ★ uncertain / planning chat button */}
+              {isScheduled && (
+                <button
+                  draggable={false}
+                  onMouseDown={e => e.stopPropagation()}
+                  onTouchStart={e => e.stopPropagation()}
+                  onClick={onOpenChat}
+                  className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-ice2 transition-colors"
+                  title={t('planningChat')}
+                >
+                  <span className={`text-[11px] ${block.is_uncertain ? 'text-amber' : 'text-gray-text'}`}>
+                    {block.is_uncertain ? '★' : '⋯'}
+                  </span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* time + cognitive load + task_kind — cascaded from ScheduleTimeline */}
@@ -856,10 +804,10 @@ export default function ScheduleTimeline({ date, blocks, unscheduled = [], sched
         )}
       </div>
 
-      {/* swipe hint */}
+      {/* interaction hint */}
       {regularBlocks.some(b => b.block_type !== 'fixed' && b.block_type !== 'meal') && (
         <div className="mt-2 text-[10px] text-gray-text text-center opacity-60">
-          {t('swipeToSync')}
+          {t('dragToReschedule')}
         </div>
       )}
 

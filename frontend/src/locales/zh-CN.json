@@ -35,6 +35,7 @@
   "sync": "同步",
   "synced": "已同步",
   "swipeToSync": "← 左划同步到日历",
+  "dragToReschedule": "拖动卡片可改时间 · 点 ↑ 同步到日历",
   "planningChat": "任务规划",
   "planReady": "方案已就绪",
   "subtasks": "个子任务",
