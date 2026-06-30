@@ -170,6 +170,7 @@ export default function TodayPage() {
             <HealthCard
               healthSummary={data.health_summary}
               energyCurve={data.energy_curve}
+              energySource={data.energy_source}
               onLogSleep={() => setSleepModalOpen(true)}
             />
             <ScheduleTimeline

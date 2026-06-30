@@ -116,7 +116,9 @@ def score_windows(windows: list[FreeWindow], curve: list[float]) -> list[FreeWin
         if not hours:
             result.append(w.model_copy(update={"energy_score": 0.0}))
             continue
-        avg = sum(curve[h] for h in hours) / len(hours)
+        # curve may be empty (no health data) → fall back to a neutral 0.5 so
+        # window scoring degrades gracefully instead of IndexError-ing.
+        avg = sum((curve[h] if h < len(curve) else 0.5) for h in hours) / len(hours)
         result.append(w.model_copy(update={"energy_score": round(avg, 3)}))
     return result
 

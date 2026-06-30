@@ -33,10 +33,11 @@ export interface UnscheduledTask {
 
 export interface DaySchedule {
   date: string
-  energy_curve: number[]
+  energy_curve: number[]                          // empty when no health data
   blocks: ScheduleBlock[]
   unscheduled: UnscheduledTask[]
   health_summary: string
+  energy_source: 'today' | 'baseline' | 'none'    // drives whether the UI draws the curve
 }
 
 export interface HealthInput {

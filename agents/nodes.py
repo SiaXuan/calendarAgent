@@ -37,7 +37,7 @@ _log = logging.getLogger("dayflow")
 # ─── Module-level caches mirroring orchestrator.py ──────────────────────────
 # These keep the cache semantics intact during the migration. Once the
 # orchestrator is deleted, nodes own the caches.
-_health_cache: dict[date, tuple[list[float], str]] = {}
+_health_cache: dict[date, tuple[list[float], str, str]] = {}   # (curve, summary, source)
 _calendar_cache: dict[date, tuple[list[TimeBlock], list[FreeWindow], float]] = {}
 _CALENDAR_CACHE_TTL_S: float = 300.0
 
@@ -97,26 +97,6 @@ def _make_instant_blocks(
     return blocks
 
 
-def _default_energy_curve() -> list[float]:
-    curve = [0.0] * 24
-    for h in range(24):
-        if 7 <= h <= 9:
-            curve[h] = 0.7
-        elif 10 <= h <= 12:
-            curve[h] = 0.9
-        elif 13 <= h <= 14:
-            curve[h] = 0.6
-        elif 15 <= h <= 17:
-            curve[h] = 0.8
-        elif 18 <= h <= 20:
-            curve[h] = 0.6
-        elif 21 <= h <= 22:
-            curve[h] = 0.4
-        else:
-            curve[h] = 0.1
-    return curve
-
-
 # ─── Schedule graph nodes ───────────────────────────────────────────────────
 
 async def fetch_health_node(state: dict) -> dict:
@@ -127,14 +107,19 @@ async def fetch_health_node(state: dict) -> dict:
 
     cached = _health_cache.get(target_date)
     if cached:
-        curve, summary = cached
+        curve, summary, source = cached
     elif snapshot is None:
-        curve = _default_energy_curve()
-        summary = "No health data for today — using default energy curve."
+        # No log today → leave the curve EMPTY (scheduling runs energy-neutral)
+        # and tell the UI not to draw a fake curve. Step 2 will slot a learned
+        # baseline in here before falling through to "none".
+        curve = []
+        summary = ""
+        source = "none"
     else:
         curve = health_agent.compute_energy_curve(snapshot)
         summary = await health_agent.get_health_summary(snapshot, language)
-    _health_cache[target_date] = (curve, summary)
+        source = "today"
+    _health_cache[target_date] = (curve, summary, source)
 
     sleep_end_hour = 7
     sleep_start_hour = 23
@@ -146,6 +131,7 @@ async def fetch_health_node(state: dict) -> dict:
 
     return {
         "energy_curve": curve,
+        "energy_source": source,
         "health_summary": summary,
         "sleep_end_hour": sleep_end_hour,
         "sleep_start_hour": sleep_start_hour,
@@ -327,7 +313,7 @@ def schedule_node(state: dict) -> dict:
     free_windows = state.get("free_windows", [])
     fixed_blocks = state.get("fixed_blocks", [])
     sleep_start_hour = state.get("sleep_start_hour", 23)
-    energy_curve = state.get("energy_curve", _default_energy_curve())
+    energy_curve = state.get("energy_curve", [])   # empty → energy-neutral scheduling
 
     result = scheduler_agent.generate_schedule(
         subtasks, free_windows, fixed_blocks, target_date,
@@ -352,7 +338,8 @@ def assemble_node(state: dict) -> dict:
     )
     schedule = DaySchedule(
         date=target_date,
-        energy_curve=state.get("energy_curve", _default_energy_curve()),
+        energy_curve=state.get("energy_curve", []),
+        energy_source=state.get("energy_source", "none"),
         blocks=all_blocks,
         unscheduled=state.get("unscheduled", []),
         health_summary=state.get("health_summary", ""),
@@ -379,13 +366,15 @@ async def apply_adjustment_node(state: dict) -> dict:
     snapshot = health_store.get(target_date)
     cached_health = _health_cache.get(target_date)
     if cached_health:
-        energy_curve, health_summary = cached_health
+        energy_curve, health_summary, energy_source = cached_health
     elif snapshot:
         energy_curve = health_agent.compute_energy_curve(snapshot)
         health_summary = await health_agent.get_health_summary(snapshot, language)
+        energy_source = "today"
     else:
-        energy_curve = _default_energy_curve()
-        health_summary = "No health data — using defaults."
+        energy_curve = []          # energy-neutral; UI won't draw a fake curve
+        health_summary = ""
+        energy_source = "none"
 
     cached_calendar = _calendar_cache.get(target_date)
     fixed_blocks, free_windows = (
@@ -440,6 +429,7 @@ async def apply_adjustment_node(state: dict) -> dict:
     schedule = DaySchedule(
         date=target_date,
         energy_curve=energy_curve,
+        energy_source=energy_source,
         blocks=all_blocks,
         unscheduled=result.unscheduled,
         health_summary=health_summary,

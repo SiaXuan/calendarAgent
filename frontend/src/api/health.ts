@@ -8,7 +8,3 @@ export function postHealth(data: HealthInput) {
 export function getHealth(date: string): Promise<HealthSnapshot> {
   return apiFetch(`/health/${date}`)
 }
-
-export function getImportUrl(): Promise<{ server: string; url_template: string; lan_ip: string }> {
-  return apiFetch('/health/import-url')
-}

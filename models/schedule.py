@@ -1,5 +1,7 @@
 from datetime import date, datetime
 from enum import Enum
+from typing import Literal
+
 from pydantic import BaseModel
 
 from models.task import CognitiveLoad, Subtask, TaskKind
@@ -43,10 +45,15 @@ class FreeWindow(BaseModel):
 
 class DaySchedule(BaseModel):
     date: date
-    energy_curve: list[float]      # 24 values, index = hour (0 = midnight)
+    energy_curve: list[float]      # 24 values, index = hour (0 = midnight). EMPTY = no data.
     blocks: list[TimeBlock]
     unscheduled: list[Subtask]     # tasks that didn't fit today
     health_summary: str
+    # Where energy_curve came from, so the UI can decide whether to draw it:
+    #   "today"    — computed from today's logged snapshot
+    #   "baseline" — aggregated from the user's recent sleep history (no log today)
+    #   "none"     — no data at all; curve is empty, scheduling ran energy-neutral
+    energy_source: Literal["today", "baseline", "none"] = "none"
 
 
 class ScheduleResult(BaseModel):

@@ -28,7 +28,8 @@ class ScheduleState(TypedDict, total=False):
     tasks: list[Task]
 
     # ─── Phase A: fan-out branches each fill their own piece ───────────────
-    energy_curve: list[float]
+    energy_curve: list[float]          # EMPTY when no health data (energy-neutral)
+    energy_source: str                 # "today" | "baseline" | "none"
     health_summary: str
     fixed_blocks: list[TimeBlock]
     free_windows: list[FreeWindow]
