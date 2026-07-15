@@ -16,6 +16,32 @@ cd frontend && pnpm dev
 
 Open <http://localhost:5173>.
 
+**Stopping the backend.** If it's in the foreground, `Ctrl+C`. If you lost the terminal, kill whatever holds port 8000:
+
+```bash
+lsof -ti:8000 | xargs kill        # graceful
+lsof -ti:8000 | xargs kill -9     # force, if it won't die
+```
+
+(`--reload` runs a parent + worker, so you'll usually see two PIDs — the command above kills both.) The frontend stops the same way on port 5173.
+
+### Swift frontend (alternative native macOS client)
+
+An experimental native SwiftUI sidebar lives in `cal_swift_frontend/`. It talks to the **same** backend on :8000, so start the backend first.
+
+```bash
+# Start (from cal_swift_frontend/)
+cd cal_swift_frontend && swift run ScheduleAgentApp
+
+# Stop
+pkill -f ScheduleAgentApp
+
+# Check if it's running
+pgrep -fl ScheduleAgentApp
+```
+
+First `swift build`/`swift run` populates a local `.build/` (~270 MB of compile artifacts — not source, and should stay out of git).
+
 ## First-time setup
 
 ```bash
