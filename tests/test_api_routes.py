@@ -53,7 +53,9 @@ def test_generate_schedule_happy_path(
     assert r.status_code == 200
     data = r.json()
     assert data["date"] == "2026-05-15"
-    assert len(data["energy_curve"]) == 24
+    # No health seeded → empty curve + source 'none' (energy Step 1 behavior)
+    assert data["energy_curve"] == []
+    assert data["energy_source"] == "none"
     assert isinstance(data["blocks"], list)
 
     # Now GET /schedule/{date} should also return it

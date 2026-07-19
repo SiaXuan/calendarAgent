@@ -45,16 +45,17 @@ async def test_fetch_health_with_snapshot(clean_stores, sample_snapshot, sample_
     assert patch["sleep_start_hour"] == 23
 
 
-async def test_fetch_health_without_snapshot_uses_defaults(clean_stores, sample_date):
-    """No snapshot → default curve + boilerplate summary."""
+async def test_fetch_health_without_snapshot_returns_empty_curve(clean_stores, sample_date):
+    """No snapshot → EMPTY curve + source='none' (no fake default curve — energy Step 1)."""
     state = {
         "target_date": sample_date,
         "language": Language.en,
         "snapshot": None,
     }
     patch = await fetch_health_node(state)
-    assert len(patch["energy_curve"]) == 24
-    assert "default" in patch["health_summary"].lower()
+    assert patch["energy_curve"] == []
+    assert patch["energy_source"] == "none"
+    assert patch["health_summary"] == ""
     assert patch["sleep_end_hour"] == 7   # default wake
     assert patch["sleep_start_hour"] == 23
 

@@ -199,7 +199,8 @@
       "Bash(/opt/homebrew/bin/python3.13 -c \"import os; from dotenv import load_dotenv; load_dotenv\\('/Users/siaxuan/Desktop/calendarAgent/.env'\\); print\\('CALDAV_TARGET_CALENDAR =', repr\\(os.getenv\\('CALDAV_TARGET_CALENDAR'\\)\\)\\)\")",
       "Bash(curl -sS http://localhost:8000/openapi.json)",
       "Bash(/opt/homebrew/bin/python3.13 -c \"import sys, json; spec = json.load\\(sys.stdin\\); print\\('\\\\n'.join\\(sorted\\(p for p in spec['paths'] if 'schedule' in p\\)\\)\\)\")",
-      "Bash(curl -sS -X POST http://localhost:8000/schedule/2099-12-31/blocks/write -H \"Content-Type: application/json\" -d '{\"start\": \"2099-12-31T10:00:00\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")"
+      "Bash(curl -sS -X POST http://localhost:8000/schedule/2099-12-31/blocks/write -H \"Content-Type: application/json\" -d '{\"start\": \"2099-12-31T10:00:00\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(.venv/bin/python -m pytest tests/test_api_routes.py::test_generate_schedule_happy_path tests/test_memory_observations.py::test_rank_tasks_node_passes_memory_to_task_agent tests/test_nodes.py::test_fetch_health_without_snapshot_uses_defaults tests/test_pins.py::test_pin_falls_back_to_full_graph_when_no_schedule --tb=short)"
     ],
     "additionalDirectories": [
       "/tmp",

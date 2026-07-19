@@ -229,7 +229,15 @@ async def rank_and_decompose(
     try:
         structured_llm = sonnet.with_structured_output(_LLMSubtaskList)
         result: _LLMSubtaskList = await structured_llm.ainvoke([
-            {"role": "system", "content": system_prompt},
+            # Prompt caching: system_prompt is a large static rules block (only
+            # {language} varies), re-sent on every generation. Cache it so repeated
+            # generations (regenerate / multi-day within the TTL) reuse the prefix.
+            # NOTE: one call per generate — benefit is cross-generation, not within-call.
+            # No-ops silently if the cached prefix is under Anthropic's ~1024-token min.
+            {"role": "system", "content": [
+                {"type": "text", "text": system_prompt,
+                 "cache_control": {"type": "ephemeral"}},
+            ]},
             {"role": "user", "content": user_message},
         ])
 

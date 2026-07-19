@@ -25,7 +25,7 @@ import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import create_react_agent
@@ -216,8 +216,20 @@ async def run_chat_agent(target_date: date, user_message: str) -> AgentChatResul
     signals: dict = {"clarification": None, "blocked": None}
     tools = make_schedule_tools(scratch) + _make_signal_tools(signals)
     system_prompt = _build_system_prompt(scratch, prefs.language, memory_bullets)
+    # Prompt caching (Anthropic): mark the whole system prompt as one ephemeral
+    # cache block. Anthropic caches the prefix up to this breakpoint — i.e. tools +
+    # system together — so rounds 2..N of the ReAct loop within a turn skip
+    # re-prefilling it. The system prompt is built once per turn and is byte-identical
+    # across the loop's rounds, so this is a pure latency/cost win with no downside.
+    # (Cross-turn reuse is partial because the volatile schedule snapshot is embedded
+    # mid-prompt; splitting static/volatile is a later refinement — see ARCHITECTURE §7.)
+    system_message = SystemMessage(content=[{
+        "type": "text",
+        "text": system_prompt,
+        "cache_control": {"type": "ephemeral"},
+    }])
 
-    agent = create_react_agent(sonnet, tools, prompt=system_prompt)
+    agent = create_react_agent(sonnet, tools, prompt=system_message)
 
     try:
         result = await agent.ainvoke(

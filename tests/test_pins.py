@@ -291,8 +291,9 @@ async def test_pin_falls_back_to_full_graph_when_no_schedule(
     # No prior schedule for this date → fallback runs the full graph
     result = await reflow_after_pin(date(2026, 5, 15))
     assert result.date == date(2026, 5, 15)
-    # Full schedule was produced (energy curve length, blocks attribute exists)
-    assert len(result.energy_curve) == 24
+    # Full graph ran (fetch_health set the source); no health seeded → empty curve
+    assert result.energy_source == "none"
+    assert result.energy_curve == []
 
 
 async def test_reflow_preserves_other_blocks_no_resolve(clean_stores):

@@ -254,5 +254,8 @@ async def test_rank_tasks_node_passes_memory_to_task_agent(
     # The system prompt the LLM saw includes the memory bullet
     system_msg = mock_sonnet._structured.calls[0][0]
     assert system_msg["role"] == "system"
-    assert "KNOWN USER PREFERENCES" in system_msg["content"]
-    assert "analytical work in the morning" in system_msg["content"]
+    # content is now a cache_control block list (prompt caching) — extract the text
+    sys_content = system_msg["content"]
+    sys_text = sys_content if isinstance(sys_content, str) else sys_content[0]["text"]
+    assert "KNOWN USER PREFERENCES" in sys_text
+    assert "analytical work in the morning" in sys_text
