@@ -32,6 +32,7 @@ class TimeBlock(BaseModel):
     deadline: date | None = None       # inherited from parent task, drives urgency color
     is_uncertain: bool = False         # ★ flag — task scope unclear
     has_explicit_time: bool = True     # False = reminder has date only, no specific time
+    is_done: bool = False              # derived from completion_store; joined on read (Phase 4)
 
 
 class FreeWindow(BaseModel):

@@ -34,6 +34,9 @@ def clean_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "_TASKS_FILE", tmp_path / "task_store.json")
     monkeypatch.setattr(storage, "_MEMORY_FILE", tmp_path / "memory_store.json")
     monkeypatch.setattr(storage, "_SCHEDULE_FILE", tmp_path / "schedule_store.json")
+    monkeypatch.setattr(storage, "_PROJECT_FILE", tmp_path / "project_store.json")
+    monkeypatch.setattr(storage, "_COMPLETION_FILE", tmp_path / "completion_store.json")
+    monkeypatch.setattr(storage, "_PROJECT_PLAN_FILE", tmp_path / "project_plan_store.json")
 
     def _wipe():
         storage.health_store.clear()
@@ -47,6 +50,9 @@ def clean_stores(tmp_path, monkeypatch):
         storage.pending_proposals.clear()
         storage.agent_run_log.clear()
         storage.chat_sessions.clear()
+        storage.project_store.clear()
+        storage.completion_store.clear()
+        storage.project_plan_store.clear()
         nodes._health_cache.clear()
         nodes._calendar_cache.clear()
 

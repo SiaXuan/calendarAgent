@@ -1,0 +1,209 @@
+"""
+Project service (Phase 4 Step 1).
+
+Business logic for the project layer, kept out of the API routes so it stays
+testable: decomposition + plan snapshots, completion tracking (with calendar
+history promotion), and progress aggregation. The completion-aware replan lives
+here too once the multi-day scheduling model is settled (Step 1.6).
+"""
+import hashlib
+from datetime import date, datetime
+
+from agents import calendar_writeback as cw
+from agents import task_agent
+from api.preferences import get_current_prefs
+from models.project import (
+    CompletionRecord, CompletionStatus, PlanSnapshotItem, Project, ProjectStatus,
+)
+from models.task import Subtask, Task
+from storage import (
+    bump_schedule_version, completion_store, project_plan_store, project_store,
+    save_completion_store, save_project_plan_store, save_project_store,
+    schedule_store, task_store,
+)
+
+
+def subtask_block_key(s: Subtask) -> str:
+    """Stable identity mirroring calendar_writeback.block_key / frontend blockKey."""
+    return f"{s.parent_id}::{s.title}"
+
+
+def content_hash(s: Subtask) -> str:
+    """Signature of a subtask's schedulable content, for changed-vs-unchanged diff."""
+    raw = "|".join([
+        s.title,
+        str(s.estimated_minutes),
+        s.cognitive_load.value,
+        s.task_kind.value,
+        str(s.suggested_date),
+        str(s.phase_label),
+    ])
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def project_tasks(project_id: str) -> list[Task]:
+    return [t for t in task_store.values() if t.project_id == project_id]
+
+
+def _snapshot_item(s: Subtask, project_id: str) -> PlanSnapshotItem:
+    bkey = subtask_block_key(s)
+    rec = completion_store.get(bkey)
+    status = rec.status if rec else CompletionStatus.pending
+    return PlanSnapshotItem(
+        block_key=bkey, task_id=s.parent_id, title=s.title,
+        suggested_date=s.suggested_date, content_hash=content_hash(s), status=status,
+    )
+
+
+async def decompose_project(project_id: str) -> list[Subtask]:
+    """
+    Rank + decompose a project's tasks into subtasks (single LLM call), stamp
+    project_id onto each, and store the plan snapshot. Does NOT write the
+    calendar — this is the preview/plan step. Returns the subtasks.
+    """
+    proj = project_store[project_id]
+    tasks = project_tasks(project_id)
+    base_date = proj.start_date or date.today()
+    language = get_current_prefs().language
+    subs = await task_agent.rank_and_decompose(tasks, base_date, language)
+    for s in subs:
+        s.project_id = project_id
+    project_plan_store[project_id] = [_snapshot_item(s, project_id) for s in subs]
+    save_project_plan_store()
+    return subs
+
+
+def _find_block(target_date: date, bkey: str):
+    """Locate a TimeBlock in schedule_store[date] by its logical block_key."""
+    sched = schedule_store.get(target_date)
+    if sched is None:
+        return None
+    for b in sched.blocks:
+        if cw.block_key(b) == bkey:
+            return b
+    return None
+
+
+async def set_block_completion(
+    target_date: date, bkey: str, done: bool,
+) -> dict:
+    """
+    Mark a scheduled block done/undone. completion_store is the source of truth
+    (Apple Calendar has no done flag). On done, the calendar event is promoted
+    to the history namespace so it survives replan; on undo it's demoted back.
+
+    The completion record is always written even if the calendar op fails/isn't
+    configured — the record, not the calendar, is authoritative.
+    """
+    block = _find_block(target_date, bkey)
+    project_id = None
+    task_id = None
+    title = bkey
+    if block is not None:
+        task = task_store.get(block.task_id) if block.task_id else None
+        project_id = task.project_id if task else None
+        task_id = block.task_id
+        title = block.title
+
+    calendar: dict | None = None
+    if done:
+        completion_store[bkey] = CompletionRecord(
+            block_key=bkey, project_id=project_id, task_id=task_id, title=title,
+            scheduled_date=target_date, status=CompletionStatus.done,
+            completed_at=datetime.now(),
+        )
+        if block is not None:
+            calendar = await cw.promote_block_to_history(
+                target_date, block, datetime.now().isoformat(), project_id)
+    else:
+        completion_store.pop(bkey, None)
+        if block is not None:
+            # Demote: drop the history event, restore the active event.
+            calendar = await cw.write_block_to_calendar(target_date, block)
+
+    save_completion_store()
+    if block is not None:
+        block.is_done = done
+        bump_schedule_version(target_date)
+
+    return {"block_key": bkey, "done": done, "found_block": block is not None,
+            "calendar": calendar}
+
+
+def set_completion_status(bkey: str, status: CompletionStatus,
+                          project_id: str | None = None, title: str = "") -> CompletionRecord:
+    """Directly set/clear a completion record (metadata only, no calendar op)."""
+    if status == CompletionStatus.pending:
+        completion_store.pop(bkey, None)
+        save_completion_store()
+        return CompletionRecord(block_key=bkey, title=title or bkey,
+                                status=CompletionStatus.pending)
+    existing = completion_store.get(bkey)
+    rec = CompletionRecord(
+        block_key=bkey,
+        project_id=project_id or (existing.project_id if existing else None),
+        task_id=existing.task_id if existing else None,
+        title=title or (existing.title if existing else bkey),
+        scheduled_date=existing.scheduled_date if existing else None,
+        status=status,
+        completed_at=datetime.now() if status == CompletionStatus.done else None,
+    )
+    completion_store[bkey] = rec
+    save_completion_store()
+    return rec
+
+
+def project_progress(project_id: str) -> dict:
+    """Done/total for a project's last-planned blocks, plus per-day breakdown."""
+    snapshot = project_plan_store.get(project_id, [])
+    total = len(snapshot)
+    done = sum(
+        1 for i in snapshot
+        if (r := completion_store.get(i.block_key)) and r.status == CompletionStatus.done
+    )
+    by_day: dict[str, dict] = {}
+    for i in snapshot:
+        day = str(i.suggested_date) if i.suggested_date else "unscheduled"
+        bucket = by_day.setdefault(day, {"total": 0, "done": 0})
+        bucket["total"] += 1
+        r = completion_store.get(i.block_key)
+        if r and r.status == CompletionStatus.done:
+            bucket["done"] += 1
+    return {"project_id": project_id, "total": total, "done": done, "by_day": by_day}
+
+
+def completion_heatmap(start: date, end: date) -> dict[str, int]:
+    """Count of completed blocks per day in [start, end] — feeds the commit wall."""
+    counts: dict[str, int] = {}
+    for rec in completion_store.values():
+        if rec.status != CompletionStatus.done:
+            continue
+        d = rec.scheduled_date or (rec.completed_at.date() if rec.completed_at else None)
+        if d is None or d < start or d > end:
+            continue
+        key = str(d)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+async def delete_project(project_id: str, purge_tasks: bool = True) -> dict:
+    """
+    Remove a project: delete its calendar events across all days (active +
+    history), drop its tasks/snapshot, and forget its completion records.
+    """
+    calendar = await cw.delete_project_events(project_id)
+    proj = project_store.get(project_id)
+    if purge_tasks and proj:
+        for tid in list(task_store.keys()):
+            if task_store[tid].project_id == project_id:
+                del task_store[tid]
+        from storage import save_task_store
+        save_task_store()
+    for bkey in [k for k, r in completion_store.items() if r.project_id == project_id]:
+        del completion_store[bkey]
+    save_completion_store()
+    project_plan_store.pop(project_id, None)
+    save_project_plan_store()
+    project_store.pop(project_id, None)
+    save_project_store()
+    return {"project_id": project_id, "deleted": True, "calendar": calendar}

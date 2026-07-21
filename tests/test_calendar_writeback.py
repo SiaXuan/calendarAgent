@@ -44,11 +44,34 @@ def test_per_block_tags_distinct_per_task():
     assert _AGENT_TAG_PREFIX in a and _AGENT_TAG_PREFIX in b
 
 
-def test_block_without_task_id_uses_start_based_key():
+def test_block_without_task_id_gets_stable_distinct_tag():
+    """Blocks without a task_id still get a stable, prefixed per-block tag."""
     blk = TimeBlock(
         start=datetime(2026, 6, 15, 9, 0), end=datetime(2026, 6, 15, 10, 0),
         block_type=BlockType.scheduled, task_id=None, title="X",
     )
+    other = TimeBlock(
+        start=datetime(2026, 6, 15, 11, 0), end=datetime(2026, 6, 15, 12, 0),
+        block_type=BlockType.scheduled, task_id=None, title="X",
+    )
+    assert _AGENT_TAG_PREFIX in _block_tag(blk)
+    assert _block_tag(blk) == _block_tag(blk)          # stable
+    assert _block_tag(blk) != _block_tag(other)        # start-distinguished
+
+
+def test_title_with_bracket_does_not_break_tag():
+    """Titles containing ']' must not corrupt the tag (why we hash the key)."""
+    blk = TimeBlock(
+        start=datetime(2026, 6, 15, 9, 0), end=datetime(2026, 6, 15, 10, 0),
+        block_type=BlockType.scheduled, task_id="t1", title="Fix [bug] ]]",
+    )
     tag = _block_tag(blk)
     assert _AGENT_TAG_PREFIX in tag
-    assert "block-" in tag
+    assert tag.count("]") == 1 and tag.endswith("]")   # exactly one clean terminator
+
+
+def test_same_parent_different_subtasks_get_distinct_tags():
+    """Two subtasks of the same parent must NOT collide (the Step 0/1 key fix)."""
+    a = _block_tag(_block("t1", title="Research"))
+    b = _block_tag(_block("t1", title="Write"))
+    assert a != b

@@ -200,7 +200,11 @@
       "Bash(curl -sS http://localhost:8000/openapi.json)",
       "Bash(/opt/homebrew/bin/python3.13 -c \"import sys, json; spec = json.load\\(sys.stdin\\); print\\('\\\\n'.join\\(sorted\\(p for p in spec['paths'] if 'schedule' in p\\)\\)\\)\")",
       "Bash(curl -sS -X POST http://localhost:8000/schedule/2099-12-31/blocks/write -H \"Content-Type: application/json\" -d '{\"start\": \"2099-12-31T10:00:00\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
-      "Bash(.venv/bin/python -m pytest tests/test_api_routes.py::test_generate_schedule_happy_path tests/test_memory_observations.py::test_rank_tasks_node_passes_memory_to_task_agent tests/test_nodes.py::test_fetch_health_without_snapshot_uses_defaults tests/test_pins.py::test_pin_falls_back_to_full_graph_when_no_schedule --tb=short)"
+      "Bash(.venv/bin/python -m pytest tests/test_api_routes.py::test_generate_schedule_happy_path tests/test_memory_observations.py::test_rank_tasks_node_passes_memory_to_task_agent tests/test_nodes.py::test_fetch_health_without_snapshot_uses_defaults tests/test_pins.py::test_pin_falls_back_to_full_graph_when_no_schedule --tb=short)",
+      "Bash(.venv/bin/python -c \"from models.schedule import DaySchedule; print\\(list\\(DaySchedule.model_fields.keys\\(\\)\\)\\)\")",
+      "Bash(.venv/bin/python -c \"from models.schedule import TimeBlock; print\\({k:\\(v.is_required\\(\\)\\) for k,v in TimeBlock.model_fields.items\\(\\)}\\)\")",
+      "Bash(.venv/bin/python -m pytest -q)",
+      "Bash(grep -v \"\\\\.get\\\\|\\\\.pop\\\\|schedule_store\\\\[d\\\\]$\")"
     ],
     "additionalDirectories": [
       "/tmp",

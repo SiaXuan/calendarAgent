@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from models.health import HealthSnapshot
 from models.memory import Memory
+from models.project import CompletionRecord, PlanSnapshotItem, Project
 from models.schedule import DaySchedule
 from models.task import Subtask, Task
 
@@ -40,6 +41,9 @@ _HEALTH_FILE = _DATA_DIR / "health_store.json"
 _TASKS_FILE = _DATA_DIR / "task_store.json"
 _MEMORY_FILE = _DATA_DIR / "memory_store.json"
 _SCHEDULE_FILE = _DATA_DIR / "schedule_store.json"
+_PROJECT_FILE = _DATA_DIR / "project_store.json"
+_COMPLETION_FILE = _DATA_DIR / "completion_store.json"
+_PROJECT_PLAN_FILE = _DATA_DIR / "project_plan_store.json"
 
 
 # ─── In-memory stores ────────────────────────────────────────────────────────
@@ -78,6 +82,18 @@ subtask_overrides: dict[str, list[Subtask]] = {}
 # (block_key = "{task_id}::{title}" — matches the frontend's `blockKey`).
 # In-memory only — pinning is intentionally ephemeral; full regenerate clears.
 subtask_pins: dict[date, dict[str, PinSpec]] = {}
+
+# Projects (Phase 4). Keyed by project.id. Persisted to JSON.
+project_store: dict[str, Project] = {}
+
+# Completion records (Phase 4). Keyed by block_key ("{parent_id}::{title}").
+# The source of truth for "was this block actually done" — Apple Calendar has
+# no done flag. Feeds the heatmap, review, and completion-aware replan.
+completion_store: dict[str, CompletionRecord] = {}
+
+# Last-written decomposition per project (Phase 4). Keyed by project_id.
+# Used by replan to diff changed vs unchanged blocks. Persisted to JSON.
+project_plan_store: dict[str, list[PlanSnapshotItem]] = {}
 
 # Long-term memories (Phase C). Keyed by memory.id. Persisted to JSON.
 # Namespace lookups + retrieval helpers live in memory/store.py.
@@ -174,6 +190,74 @@ def load_memory_store() -> None:
         _log.info("Loaded %d memory record(s) from disk.", len(memory_store))
     except Exception as exc:
         _log.warning("Could not load memory store: %s", exc)
+
+
+# ─── project layer persistence (Phase 4) ─────────────────────────────────────
+
+def save_project_store() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {pid: p.model_dump(mode="json") for pid, p in project_store.items()}
+        _PROJECT_FILE.write_text(json.dumps(payload, default=str, ensure_ascii=False))
+    except Exception as exc:
+        _log.warning("Could not save project store: %s", exc)
+
+
+def load_project_store() -> None:
+    if not _PROJECT_FILE.exists():
+        return
+    try:
+        payload = json.loads(_PROJECT_FILE.read_text())
+        for pid, data in payload.items():
+            project_store[pid] = Project.model_validate(data)
+        _log.info("Loaded %d project(s) from disk.", len(project_store))
+    except Exception as exc:
+        _log.warning("Could not load project store: %s", exc)
+
+
+def save_completion_store() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {k: r.model_dump(mode="json") for k, r in completion_store.items()}
+        _COMPLETION_FILE.write_text(json.dumps(payload, default=str, ensure_ascii=False))
+    except Exception as exc:
+        _log.warning("Could not save completion store: %s", exc)
+
+
+def load_completion_store() -> None:
+    if not _COMPLETION_FILE.exists():
+        return
+    try:
+        payload = json.loads(_COMPLETION_FILE.read_text())
+        for k, data in payload.items():
+            completion_store[k] = CompletionRecord.model_validate(data)
+        _log.info("Loaded %d completion record(s) from disk.", len(completion_store))
+    except Exception as exc:
+        _log.warning("Could not load completion store: %s", exc)
+
+
+def save_project_plan_store() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {
+            pid: [item.model_dump(mode="json") for item in items]
+            for pid, items in project_plan_store.items()
+        }
+        _PROJECT_PLAN_FILE.write_text(json.dumps(payload, default=str, ensure_ascii=False))
+    except Exception as exc:
+        _log.warning("Could not save project plan store: %s", exc)
+
+
+def load_project_plan_store() -> None:
+    if not _PROJECT_PLAN_FILE.exists():
+        return
+    try:
+        payload = json.loads(_PROJECT_PLAN_FILE.read_text())
+        for pid, items in payload.items():
+            project_plan_store[pid] = [PlanSnapshotItem.model_validate(i) for i in items]
+        _log.info("Loaded plan snapshots for %d project(s) from disk.", len(project_plan_store))
+    except Exception as exc:
+        _log.warning("Could not load project plan store: %s", exc)
 
 
 # ─── schedule_store persistence (survives restart → keeps manual edits) ───────

@@ -29,11 +29,18 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+# Bounded retry on transient API errors (429 / 5xx). langchain-anthropic handles
+# the backoff; we just make the ceiling explicit so it survives iCloud/Anthropic
+# hiccups without hanging forever. 4xx (bad request) is not retried by the SDK.
+_LLM_MAX_RETRIES = 2
+
+
 # Fast classifier / ranker. Used for: task ranking, simple translations, light JSON extraction.
 haiku = ChatAnthropic(
     model=os.getenv("LLM_FAST_MODEL", "claude-haiku-4-5-20251001"),
     temperature=_env_float("LLM_FAST_TEMPERATURE", 0.0),
     max_tokens=2048,
+    max_retries=_LLM_MAX_RETRIES,
 )
 
 
@@ -42,4 +49,5 @@ sonnet = ChatAnthropic(
     model=os.getenv("LLM_REASON_MODEL", "claude-sonnet-4-6"),
     temperature=_env_float("LLM_REASON_TEMPERATURE", 0.3),
     max_tokens=4096,
+    max_retries=_LLM_MAX_RETRIES,
 )

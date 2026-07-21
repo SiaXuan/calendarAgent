@@ -7,6 +7,63 @@
 >
 > **以下事实核验于 2026-07-16。** 行号会漂,只当锚点,依赖前先重新确认。
 
+> ⚠️ **2026-07-21 架构转向(见 §0):本项目改为纯本地 + EventKit,不再走 iCloud CalDAV。**
+> 下方 §1–§9 大部分描述的是**转向前**的 CalDAV 现状,会随迁移逐步更新。以 §0 为准。
+
+---
+
+## 0. 架构转向:纯本地 · 仿原生 · EventKit(决策记录,2026-07-21)
+
+### 定位
+一个**纯本地、仿原生的 macOS 日程助理 app**。日历与提醒读写全部走本地系统能力,
+**完全不依赖 iCloud / 网络**,也不打算云端化。
+
+### 为什么改(以前怎么做 → 为什么不行)
+- **以前**:后端用 **CalDAV 联网到 iCloud** 读写日历事件;提醒因为 iCloud 的 CalDAV
+  `/reminders/` 通道被苹果封锁(PROPFIND 400),只能用 **AppleScript 读本地提醒**,而**写提醒从未实现**。
+- **为什么不行**:
+  1. iCloud 对第三方**提醒**基本不可用(连读都封),而本项目核心场景之一是「把项目节点写成待办」——CalDAV 路线做不出来。
+  2. 定位是纯本地仿原生,绕 iCloud 又慢、又要 App 专用密码、又不原生。
+  3. **实测(2026-07-21,用户 Mac)**:AppleScript 本地建/读/删「提醒」和「日历事件」全部成功;本地已有可写的 `Agent` 日历。本地路线可行。
+
+### 现在怎么做(新路线)
+- **Swift 前端(EventKit)** 承担**所有**系统日历/提醒读写:读事件与空档、写/改/删事件、读写提醒、勾选完成、申请权限。
+- **Python 后端 = 纯逻辑,永不碰系统日历**:拆解、排程、项目层、完成追踪、reconcile 策略、进度/复盘。存储仍是本地 JSON(`data/`)。
+- **数据流**:前端读本地日历 →上传「当天固定事件 + 当前 agent 事件现状」→ 后端排程 + 完成感知 reconcile → 返回**变更集 `{create, update, delete}`**(事件 + 提醒)→ 前端用 EventKit 执行 → 回报完成态。
+- **diff 在后端算,前端只执行**(已与用户确认)。逻辑全留后端,前端是"哑"执行器。
+- **身份/tag**(嵌在事件/提醒 notes 里):活动 `[agent-scheduled:dayflow:<hash>]` + `[agent-project:<pid>]`;历史 `[agent-history:dayflow:<hash>]` + `[agent-project:<pid>]` + `[agent-done:<iso>]`。`<hash>` = block_key(`{task_id}::{title}`) 的短 hash(避免标题里的 `]` 破坏匹配)。
+- **项目未来节点 = 提醒**:导入/拆解的未来节点写成带到期日 + 项目 tag 的**提醒**,不是时间块;到那天由现有「提醒→任务→排程」流水线排成当天时间块。
+- **保留 Step 0 的 reconcile 策略**(未变不动/删除先行/绝不重复/跳过已完成),现在体现为后端产出的变更集(前端先删后建),而非后端直接联网。
+
+### 经验教训
+- iCloud CalDAV 对第三方**提醒**是死路,别再试。
+- 系统日历/提醒的正规本地接口是 **EventKit**(Swift);AppleScript 能用但慢,仅作应急/参考(实测脚本见 git 历史)。
+- 正确边界:**逻辑留后端,系统 I/O 交原生前端**。
+
+### 文件去向(迁移映射)
+旧的 iCloud/CalDAV 实现**移到 `legacy/caldav/`**(不删,便于日后扩展新技术路径时复用,如真要做跨设备同步)。
+
+| 旧文件 | 去向 | 说明 |
+|---|---|---|
+| `integrations/caldav_client.py` | `legacy/caldav/` | 事件 CalDAV 读写 + 提醒 AppleScript 读,整体停用 |
+| `agents/calendar_writeback.py` 的 CalDAV 调用 | 重构为纯函数 `agents/calendar_reconcile.py` | block-diff **策略**保留为纯变更集计算 |
+| `fetch_calendar` 读日历 | 改为接收前端传入的日历数据 | 后端不再联网读日历 |
+
+> 迁移未完成前旧文件暂留原位以免破坏测试;新路径跑通并验证后即按上表移动,并把本表更新为「已完成」。
+
+### 迁移状态
+- [x] 数据模型 / 存储层 / Project CRUD / 完成追踪 / heatmap
+- [x] Step 0 block-diff 策略(待重构为纯变更集)
+- [ ] 纯函数 reconcile · 变更集接口 · `fetch_calendar` 改前端传入
+- [ ] 项目 replan → 提醒变更集 · 导入 → 提醒变更集
+- [ ] Swift EventKit 执行层
+- [ ] 移除 CalDAV 文件到 `legacy/caldav/`
+
+### 给后来 agent 的提示
+- **不要**再引入 `caldav` / iCloud / App 专用密码相关代码或依赖。
+- 读写系统日历/提醒走 Swift/EventKit(前端)或后端变更集接口,**不要**在 Python 里直接联网。
+- `legacy/caldav/` 是**存档参考**,不是活跃实现。
+
 ---
 
 ## 1. 系统是两半

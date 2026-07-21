@@ -18,6 +18,7 @@ Credentials (env vars):
 import os
 import subprocess
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -31,6 +32,76 @@ from icalendar import Calendar as ICalendar, Event as IEvent
 # "[agent-scheduled]" — this tag preserves that prefix so re-reads still classify
 # our blocks as `scheduled` (moveable) rather than `fixed` (user events).
 AGENT_DESC_TAG = "[agent-scheduled:dayflow]"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Errors + bounded retry (Step 0 hardening)
+#
+# The write path used to swallow every exception (`except: pass` → return None/0),
+# which made a failed delete indistinguishable from "nothing to delete". Combined
+# with delete-then-write that was optimistic about the delete, a transient delete
+# failure + a successful write produced DUPLICATE events, invisibly. We now:
+#   - validate args before hitting the network,
+#   - retry transient failures (network/timeout/5xx/rate-limit) a few times,
+#   - raise a structured error on hard failure so callers can report it.
+# 4xx (auth/not-found/bad-request) is NOT retried — retrying won't help.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class CalDAVError(Exception):
+    """A CalDAV network/server operation failed after exhausting retries."""
+
+
+class CalDAVNotConfigured(CalDAVError):
+    """CalDAV credentials are missing or no writable calendar is reachable."""
+
+
+_RETRY_ATTEMPTS = 3
+_RETRY_BACKOFF = (0.5, 1.0, 2.0)  # seconds to sleep before each retry
+
+
+def _status_of(exc: Exception) -> int | None:
+    """Best-effort extraction of an HTTP status code from a caldav/httpx error."""
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None)
+    if status is None:
+        status = getattr(exc, "status", None) or getattr(exc, "reason", None)
+    return status if isinstance(status, int) else None
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Retry transient failures only. Bad-request / auth / not-found are terminal."""
+    # Programmer errors and explicit not-configured are never retried.
+    if isinstance(exc, (ValueError, CalDAVNotConfigured)):
+        return False
+    try:
+        from caldav.lib import error as _cderr
+        if isinstance(exc, (_cderr.AuthorizationError, _cderr.NotFoundError,
+                            _cderr.ConsistencyError, _cderr.ETagMismatchError)):
+            return False
+        if isinstance(exc, _cderr.RateLimitError):
+            return True
+    except Exception:
+        pass
+    status = _status_of(exc)
+    if isinstance(status, int) and 400 <= status < 500 and status != 429:
+        return False
+    return True  # network/timeout/5xx/unknown → worth a retry
+
+
+def _with_retry(fn, what: str):
+    """Run `fn`, retrying transient CalDAV errors with exponential backoff."""
+    last: Exception | None = None
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 — classified by _is_retryable
+            last = exc
+            if attempt == _RETRY_ATTEMPTS - 1 or not _is_retryable(exc):
+                break
+            time.sleep(_RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)])
+    if isinstance(last, (ValueError, CalDAVError)):
+        raise last
+    raise CalDAVError(f"{what} failed: {last}") from last
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -360,22 +431,35 @@ def write_event(
     end: datetime,
     description: str = "",
     tag: str = AGENT_DESC_TAG,
-) -> str | None:
+) -> str:
     """
     Create a VEVENT on the user's iCloud calendar tagged as agent-written.
-    Returns the event UID on success, None if not configured or on failure.
+    Returns the event UID on success.
+
+    Raises:
+        ValueError            — invalid arguments (empty title, end <= start).
+        CalDAVNotConfigured   — no credentials / no writable calendar.
+        CalDAVError           — the save failed after exhausting retries.
 
     `tag` is appended to the DESCRIPTION so callers can later identify and
     remove the event. Per-block syncs use a unique tag per block so they don't
     interfere with each other; full-day syncs all share the bare AGENT_DESC_TAG
     prefix and can be cleaned in one shot.
     """
+    # ── Parameter validation (before touching the network) ──────────────────
+    if not title or not title.strip():
+        raise ValueError("write_event: title must be non-empty")
+    if not isinstance(start, datetime) or not isinstance(end, datetime):
+        raise ValueError("write_event: start and end must be datetimes")
+    if end <= start:
+        raise ValueError(f"write_event: end ({end}) must be after start ({start})")
+
     client = _make_client()
     if client is None:
-        return None
+        raise CalDAVNotConfigured("CalDAV credentials not set")
     cal = _writable_calendar(client)
     if cal is None:
-        return None
+        raise CalDAVNotConfigured("No writable iCloud calendar reachable")
 
     full_desc = f"{description}\n{tag}" if description else tag
     uid = str(uuid4())
@@ -393,43 +477,130 @@ def write_event(
     event.add("dtstamp", datetime.now())
     cal_obj.add_component(event)
 
+    _with_retry(lambda: cal.save_event(cal_obj.to_ical().decode()), "write_event")
+    return uid
+
+
+def _event_in_range(ical, start: date | None, end: date | None) -> bool:
+    """True if the event occurs within [start, end] (inclusive). None bound = unbounded."""
+    if start is None and end is None:
+        return True
+    lo = start or date(1970, 1, 1)
+    hi = (end or date(2999, 12, 31)) + timedelta(days=1)
     try:
-        cal.save_event(cal_obj.to_ical().decode())
-        return uid
+        return bool(recurring_ical_events.of(ical).between(
+            datetime(lo.year, lo.month, lo.day),
+            datetime(hi.year, hi.month, hi.day),
+        ))
     except Exception:
-        return None
+        return False
+
+
+def _event_description(ical) -> str:
+    for component in ical.walk("VEVENT"):
+        return str(component.get("DESCRIPTION", "") or "")
+    return ""
+
+
+def delete_events_by_tags(
+    match_all: list[str],
+    start: date | None = None,
+    end: date | None = None,
+) -> int:
+    """
+    Delete every event whose DESCRIPTION contains ALL substrings in `match_all`
+    and that occurs within [start, end] (inclusive; None = unbounded — used for
+    cross-day project cleanup).
+
+    Returns the number of events deleted. Raises CalDAVError if a matched event
+    could not be deleted after retries (so callers never assume a delete that
+    silently failed) or if the calendar could not be listed.
+    """
+    client = _make_client()
+    if client is None:
+        raise CalDAVNotConfigured("CalDAV credentials not set")
+    if not match_all:
+        raise ValueError("delete_events_by_tags: match_all must be non-empty")
+
+    def _run() -> int:
+        deleted = 0
+        for cal in _event_calendars(client):
+            for item in _load_objects(cal):
+                try:
+                    ical = ICalendar.from_ical(item.data)
+                except Exception:
+                    continue  # unparseable object — skip, not our event
+                description = _event_description(ical)
+                if not all(tag in description for tag in match_all):
+                    continue
+                if not _event_in_range(ical, start, end):
+                    continue
+                # A matched event MUST delete successfully — surface failures.
+                _with_retry(item.delete, "delete_event")
+                deleted += 1
+        return deleted
+
+    # Wrap the whole listing in retry too (transient PROPFIND/network failures).
+    return _with_retry(_run, "delete_events_by_tags")
 
 
 def delete_events_with_tag(target_date: date, tag: str = AGENT_DESC_TAG) -> int:
     """
     Delete all events on target_date whose DESCRIPTION contains `tag`.
-    Used before re-writing a schedule so previous agent blocks are cleared.
-    Returns the number of events deleted.
+    Thin single-date, single-tag wrapper over delete_events_by_tags.
+    Returns the number of events deleted; raises CalDAVError on hard failure.
+    """
+    return delete_events_by_tags([tag], target_date, target_date)
+
+
+def fetch_agent_events(target_date: date, prefix: str) -> list[dict]:
+    """
+    Return agent-written events on target_date whose DESCRIPTION contains a
+    per-block tag line starting with `prefix` (e.g. "[agent-scheduled:dayflow").
+
+    Each dict: {key, title, start, end, description, tag_line}. `key` is parsed
+    from the per-block tag ("[...:dayflow:<key>]" → "<key>"; bare tag → "").
+    Used by the write-back diff to decide added/changed/removed/unchanged.
+    Raises CalDAVError if the calendar could not be listed after retries.
     """
     client = _make_client()
     if client is None:
-        return 0
+        raise CalDAVNotConfigured("CalDAV credentials not set")
 
-    deleted = 0
-    try:
+    def _run() -> list[dict]:
+        found: list[dict] = []
         for cal in _event_calendars(client):
             for item in _load_objects(cal):
                 try:
                     ical = ICalendar.from_ical(item.data)
-                    if not recurring_ical_events.of(ical).at(target_date):
-                        continue
-                    description = ""
-                    for component in ical.walk("VEVENT"):
-                        description = str(component.get("DESCRIPTION", "") or "")
-                        break
-                    if tag in description:
-                        item.delete()
-                        deleted += 1
                 except Exception:
                     continue
-    except Exception:
-        pass
-    return deleted
+                if not recurring_ical_events.of(ical).at(target_date):
+                    continue
+                description = _event_description(ical)
+                tag_line = next(
+                    (ln for ln in description.splitlines() if ln.startswith(prefix)),
+                    None,
+                )
+                if tag_line is None:
+                    continue
+                ev = _parse_event(item, target_date)
+                if ev is None:
+                    continue
+                # "[...:dayflow:<key>]" → "<key>"; bare "[...:dayflow]" → ""
+                inner = tag_line[len(prefix):].rstrip("]")
+                key = inner[1:] if inner.startswith(":") else ""
+                found.append({
+                    "key": key,
+                    "title": ev["title"],
+                    "start": ev["start"],
+                    "end": ev["end"],
+                    "description": description,
+                    "tag_line": tag_line,
+                })
+        return found
+
+    return _with_retry(_run, "fetch_agent_events")
 
 
 def _writable_calendar(client: caldav.DAVClient) -> caldav.Calendar | None:

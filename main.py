@@ -11,13 +11,16 @@ from api.chat import router as chat_router
 from api.health import router as health_router
 from api.memory import router as memory_router
 from api.preferences import router as preferences_router
+from api.projects import router as projects_router
 from api.schedule import router as schedule_router
 from api.task_chat import router as task_chat_router
 from api.preferences import load_preferences
 from api.tasks import router as tasks_router
 from config import CORS_ORIGINS, DEPLOYMENT_MODE
 from storage import (
-    load_health_store, load_memory_store, load_schedule_store, load_task_store,
+    load_completion_store, load_health_store, load_memory_store,
+    load_project_plan_store, load_project_store, load_schedule_store,
+    load_task_store,
 )
 
 logger = logging.getLogger("dayflow")
@@ -30,6 +33,9 @@ async def lifespan(app: FastAPI):
     load_task_store()
     load_memory_store()
     load_schedule_store()   # restore adjusted schedules so restarts keep manual edits
+    load_project_store()
+    load_completion_store()
+    load_project_plan_store()
     load_preferences()
     # No startup sync — the first /schedule/stream call will sync via the
     # throttle in stream_day_schedule (after yielding the health card, so
@@ -59,6 +65,7 @@ app.include_router(chat_router, tags=["chat"])
 app.include_router(task_chat_router, tags=["task-chat"])
 app.include_router(preferences_router, tags=["preferences"])
 app.include_router(memory_router, tags=["memory"])
+app.include_router(projects_router, tags=["projects"])
 
 
 @app.get("/")

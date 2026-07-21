@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from agents.calendar_reconcile import reconcile_schedule
 from agents.calendar_writeback import (
     write_block_to_calendar as _writeback_block,
     write_schedule_to_calendar as _writeback_schedule,
@@ -15,8 +16,9 @@ from api.preferences import get_current_prefs
 from graphs.schedule_graph import reflow_after_pin, run_schedule_graph
 from graphs.schedule_stream import stream_schedule_events
 from integrations.caldav_client import fetch_debug_info
+from models.project import CompletionStatus
 from models.schedule import BlockType, DaySchedule
-from storage import PinSpec, schedule_store, subtask_pins
+from storage import PinSpec, completion_store, schedule_store, subtask_pins
 
 router = APIRouter()
 
@@ -101,7 +103,56 @@ async def write_schedule_to_calendar(target_date: str):
             detail=f"No schedule cached for {target_date}. Generate it first.",
         )
 
-    return await _writeback_schedule(d)
+    result = await _writeback_schedule(d)
+    # Total failure (not configured / calendar unreadable / every block failed
+    # with nothing written or deleted) → surface as an error instead of a silent
+    # {written: 0}. Partial failures return 200 with the `failed` list so the
+    # client can show which blocks didn't sync.
+    if not result.get("ok", True) and result.get("written", 0) == 0 and result.get("deleted", 0) == 0:
+        raise HTTPException(status_code=502, detail=result)
+    return result
+
+
+class CurrentEvent(BaseModel):
+    """One agent-owned event the frontend currently sees on the calendar for the
+    day (read via EventKit; identified by its per-block tag in the notes)."""
+    tag_key: str
+    title: str | None = None
+    start: str | None = None
+    end: str | None = None
+
+
+class ChangesetRequest(BaseModel):
+    current_events: list[CurrentEvent] = []
+
+
+@router.post("/schedule/{target_date}/changeset")
+async def schedule_changeset(target_date: str, payload: ChangesetRequest):
+    """
+    Local/EventKit path (see docs/ARCHITECTURE.md §0): the backend does NOT touch
+    the calendar. The frontend uploads the current agent events; we diff them
+    against the cached schedule and return a change-set {create, update, delete}
+    for the frontend to apply via EventKit. Completed blocks are skipped (they
+    live as history), never re-created.
+    """
+    try:
+        d = date.fromisoformat(target_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+    schedule = schedule_store.get(d)
+    if schedule is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No schedule cached for {target_date}. Generate it first.",
+        )
+    done_keys = {
+        k for k, r in completion_store.items() if r.status == CompletionStatus.done
+    }
+    return reconcile_schedule(
+        schedule.blocks,
+        [e.model_dump() for e in payload.current_events],
+        done_keys=done_keys,
+    )
 
 
 class BlockWriteRequest(BaseModel):
@@ -134,7 +185,10 @@ async def write_single_block(target_date: str, payload: BlockWriteRequest):
             detail=f"No block with start={payload.start} in schedule for {target_date}.",
         )
 
-    return await _writeback_block(d, target)
+    result = await _writeback_block(d, target)
+    if not result.get("ok", True) and result.get("written", 0) == 0 and result.get("deleted", 0) == 0:
+        raise HTTPException(status_code=502, detail=result)
+    return result
 
 
 # ─── Pin endpoints (drag-to-move + pomodoro +/-) ────────────────────────────
