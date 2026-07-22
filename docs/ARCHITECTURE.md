@@ -55,7 +55,8 @@
 - [x] 数据模型 / 存储层 / Project CRUD / 完成追踪 / heatmap
 - [x] Step 0 block-diff 策略(待重构为纯变更集)
 - [ ] 纯函数 reconcile · 变更集接口 · `fetch_calendar` 改前端传入
-- [ ] 项目 replan → 提醒变更集 · 导入 → 提醒变更集
+- [x] 项目 replan → **提醒变更集**（`agents/reminder_reconcile.py` 纯函数 + `POST /projects/{id}/replan`，完成感知；replan 只出提醒清单，今天的时间块交日常路径刷新，返回 `affected_dates` 提示前端刷哪天）
+- [ ] 导入 → 提醒变更集
 - [ ] Swift EventKit 执行层
 - [ ] 移除 CalDAV 文件到 `legacy/caldav/`
 

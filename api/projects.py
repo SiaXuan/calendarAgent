@@ -121,6 +121,32 @@ async def get_project_progress(project_id: str):
     return svc.project_progress(project_id)
 
 
+class CurrentReminder(BaseModel):
+    """One reminder the frontend currently owns for this project (read via
+    EventKit; identified by its per-node tag in the reminder notes)."""
+    tag_key: str
+    title: str | None = None
+    due: str | None = None
+
+
+class ReplanRequest(BaseModel):
+    current_reminders: list[CurrentReminder] = []
+
+
+@router.post("/projects/{project_id}/replan")
+async def replan_project(project_id: str, payload: ReplanRequest):
+    """
+    Completion-aware re-plan (see docs/ARCHITECTURE.md §0). Re-decomposes the
+    project and returns a reminder change-set {create, update, delete} for the
+    frontend to apply via EventKit; the backend never writes reminders. Done
+    nodes are left untouched. `affected_dates` lists days the frontend should
+    refresh on the daily path (today's time blocks re-flow there, not here).
+    """
+    _require(project_id)
+    return await svc.replan_project(
+        project_id, [r.model_dump() for r in payload.current_reminders])
+
+
 # ── Completion tracking ───────────────────────────────────────────────────────
 
 class CompleteRequest(BaseModel):

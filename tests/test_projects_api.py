@@ -115,6 +115,38 @@ def test_schedule_changeset_endpoint(clean_stores):
     assert cs2["unchanged"] == 1 and not cs2["create"] and not cs2["update"]
 
 
+def test_replan_endpoint(clean_stores, monkeypatch):
+    from models.task import (
+        CognitiveLoad, Priority, Subtask, Task, TaskKind,
+    )
+    from agents import task_agent
+
+    pid = client.post("/projects", json={"name": "P"}).json()["id"]
+    storage.task_store["t1"] = Task(
+        id="t1", title="Paper", priority=Priority.medium,
+        cognitive_load=CognitiveLoad.medium, estimated_hours=4, project_id=pid,
+    )
+
+    async def fake_decompose(tasks, base_date, language):
+        return [Subtask(
+            parent_id="t1", title="Step 1", cognitive_load=CognitiveLoad.deep,
+            task_kind=TaskKind.analytical, estimated_minutes=60,
+            suggested_date=date(2026, 8, 1),
+        )]
+    monkeypatch.setattr(task_agent, "rank_and_decompose", fake_decompose)
+
+    r = client.post(f"/projects/{pid}/replan", json={"current_reminders": []})
+    assert r.status_code == 200
+    body = r.json()
+    assert [c["title"] for c in body["reminders"]["create"]] == ["Step 1"]
+    assert "2026-08-01" in body["affected_dates"]
+    # snapshot refreshed so the next replan diffs against this plan
+    assert storage.project_plan_store[pid][0].title == "Step 1"
+
+    assert client.post("/projects/missing/replan",
+                       json={"current_reminders": []}).status_code == 404
+
+
 def test_progress_and_heatmap(clean_stores):
     pid = client.post("/projects", json={"name": "P"}).json()["id"]
     storage.project_plan_store[pid] = [

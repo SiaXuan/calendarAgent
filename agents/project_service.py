@@ -73,6 +73,48 @@ async def decompose_project(project_id: str) -> list[Subtask]:
     return subs
 
 
+async def replan_project(
+    project_id: str, current_reminders: list[dict] | None = None,
+) -> dict:
+    """
+    Completion-aware re-plan (Phase 4). Re-rank + re-decompose the project's
+    tasks (single LLM call), diff the new plan against the reminders the frontend
+    currently owns, and return a reminder change-set {create, update, delete} for
+    the frontend to apply via EventKit — the backend never writes reminders itself.
+
+    Completion-aware: done nodes are left untouched, changed nodes replaced,
+    unchanged left in place, dropped nodes deleted. The plan snapshot is refreshed
+    so the next replan diffs against this plan. `affected_dates` tells the frontend
+    which days to refresh on the daily path (today's blocks re-flow there, not here).
+    """
+    from agents import reminder_reconcile  # lazy import: breaks the module cycle
+
+    proj = project_store[project_id]
+    tasks = project_tasks(project_id)
+    base_date = proj.start_date or date.today()
+    language = get_current_prefs().language
+    new_subs = await task_agent.rank_and_decompose(tasks, base_date, language)
+    for s in new_subs:
+        s.project_id = project_id
+
+    old_snapshot = project_plan_store.get(project_id, [])
+    done_keys = {
+        k for k, r in completion_store.items()
+        if r.project_id == project_id and r.status == CompletionStatus.done
+    }
+    changeset = reminder_reconcile.reconcile_reminders(
+        new_subs, current_reminders or [], old_snapshot, done_keys)
+
+    project_plan_store[project_id] = [_snapshot_item(s, project_id) for s in new_subs]
+    save_project_plan_store()
+
+    return {
+        "project_id": project_id,
+        "reminders": changeset,
+        "affected_dates": reminder_reconcile.affected_dates(changeset, old_snapshot),
+    }
+
+
 def _find_block(target_date: date, bkey: str):
     """Locate a TimeBlock in schedule_store[date] by its logical block_key."""
     sched = schedule_store.get(target_date)
