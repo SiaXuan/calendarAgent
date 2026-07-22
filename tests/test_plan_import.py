@@ -113,3 +113,16 @@ def test_import_requires_exactly_one_input(clean_stores):
 def test_import_unknown_project_404(clean_stores):
     assert client.post("/projects/missing/import",
                        data={"text": _LONG_TEXT}).status_code == 404
+
+
+def test_extracted_plan_coerces_stringified_json():
+    # Claude sometimes returns candidate_tasks / project_meta as a JSON *string*
+    # instead of a native value; the model must decode it, not blow up (was a 500).
+    plan = ExtractedPlan.model_validate({
+        "is_plan": True,
+        "confidence": 0.8,
+        "project_meta": '{"title": "ML Course"}',
+        "candidate_tasks": '[{"title": "Read chapter one"}, {"title": "Problem set"}]',
+    })
+    assert plan.project_meta.title == "ML Course"
+    assert [c.title for c in plan.candidate_tasks] == ["Read chapter one", "Problem set"]

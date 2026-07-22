@@ -7,10 +7,11 @@ PDF, or DOCX) is parsed to plain text, then Claude extracts a structured
 agents/plan_import_agent.py + api/projects.py::import_plan); the reminder
 change-set is produced separately by the replan path.
 """
+import json
 from datetime import date
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from models.task import CognitiveLoad, Priority
 
@@ -57,3 +58,16 @@ class ExtractedPlan(BaseModel):
     has_explicit_schedule: bool = False
     project_meta: ProjectMeta = Field(default_factory=ProjectMeta)
     candidate_tasks: list[CandidateTask] = Field(default_factory=list)
+
+    @field_validator("candidate_tasks", "project_meta", mode="before")
+    @classmethod
+    def _coerce_json_string(cls, v):
+        """Claude's structured output sometimes serialises a nested list/object
+        as a JSON *string* instead of a native value; decode it before validation
+        so the whole extraction doesn't fail (was surfacing as a 500 on import)."""
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                return v
+        return v

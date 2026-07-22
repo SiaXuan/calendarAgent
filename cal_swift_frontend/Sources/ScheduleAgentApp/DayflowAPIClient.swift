@@ -609,6 +609,25 @@ struct DayflowCompleteResult: Codable {
     }
 }
 
+/// A non-2xx response that carries the body, so callers can show the server's
+/// message (e.g. a plan-import rejection reason under FastAPI's `detail`).
+struct DayflowRequestError: Error {
+    let status: Int
+    let body: Data
+
+    /// Best-effort human message from common FastAPI error shapes.
+    var message: String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return String(data: body, encoding: .utf8)
+        }
+        if let detail = obj["detail"] as? String { return detail }
+        if let detail = obj["detail"] as? [String: Any] {
+            return (detail["reason"] as? String) ?? (detail["message"] as? String)
+        }
+        return nil
+    }
+}
+
 extension DayflowAPIClient {
 
     // MARK: Project CRUD
@@ -743,7 +762,8 @@ extension DayflowAPIClient {
 
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+            // Surface the body so import rejections (422 with a reason) reach the UI.
+            throw DayflowRequestError(status: (response as? HTTPURLResponse)?.statusCode ?? -1, body: data)
         }
         return try Self.decoder.decode(T.self, from: data)
     }

@@ -3,7 +3,7 @@ import EventKit
 import Foundation
 import ScheduleAgentCore
 
-final class AppleCalendarAdapter {
+final class AppleCalendarAdapter: @unchecked Sendable {
     private let store: EKEventStore
 
     init(store: EKEventStore = EKEventStore()) {

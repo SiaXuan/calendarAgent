@@ -156,6 +156,7 @@ struct SidebarView: View {
     @State private var selectedEventID: UUID?
     @State private var isShowingHealthDetails = false
     @State private var isShowingDocumentImporter = false
+    @State private var isShowingProjects = false
     @State private var pendingAgentProposal: DayflowAgentProposal?
     @State private var pendingAgentProposalMessage: String?
     @State private var scheduleDate = Self.todayString()
@@ -228,6 +229,9 @@ struct SidebarView: View {
             if case let .success(url) = result {
                 state.startDocumentIntake(fileName: url.lastPathComponent)
             }
+        }
+        .sheet(isPresented: $isShowingProjects) {
+            ProjectsView()
         }
         .onAppear {
             startDayflowStream()
@@ -317,8 +321,8 @@ struct SidebarView: View {
 
     private var quickControls: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            controlTile(title: "Add Document", subtitle: "Syllabus, brief, PDF", systemName: "doc.badge.plus", color: taskColor) {
-                isShowingDocumentImporter = true
+            controlTile(title: "Projects", subtitle: "Import & plan", systemName: "folder", color: taskColor) {
+                isShowingProjects = true
             }
             controlTile(title: "Calendar", subtitle: "Open app", systemName: "calendar", color: calendarColor) {
                 calendarAdapter.openInCalendar(near: Date())

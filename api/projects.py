@@ -148,6 +148,14 @@ async def import_plan(
             result = await svc.import_plan(project_id, text=text, dry_run=dry_run)
     except DocumentParseError as e:
         raise HTTPException(status_code=422, detail={"code": e.code, "message": e.message})
+    except Exception:
+        # The extraction LLM can fail or return a shape we can't validate. Log the
+        # real traceback but degrade to a clean 502 instead of a raw 500.
+        _log.exception("Plan import failed for project %s", project_id)
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "extraction_failed",
+                    "message": "无法解析这份计划，请重试或换一种格式/内容。"})
     if not result.get("accepted", False):
         raise HTTPException(status_code=422, detail=result)
     return result
