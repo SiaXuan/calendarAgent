@@ -7,6 +7,7 @@ history promotion), and progress aggregation. The completion-aware replan lives
 here too once the multi-day scheduling model is settled (Step 1.6).
 """
 import hashlib
+import logging
 import uuid
 from datetime import date, datetime
 
@@ -24,6 +25,8 @@ from storage import (
     save_completion_store, save_project_plan_store, save_project_store,
     save_task_store, schedule_store, task_store,
 )
+
+_log = logging.getLogger("dayflow")
 
 _CONFIDENCE_FLOOR = 0.55  # below this, treat extraction as "not a plan"
 
@@ -119,6 +122,12 @@ async def import_plan(
             "no_input", "Provide a file or text to import.")
 
     plan = await plan_import_agent.extract_plan(raw, language)
+
+    _log.info(
+        "import_plan[%s]: %d chars → is_plan=%s conf=%.2f kind=%s tasks=%d | preview=%r",
+        project_id, len(raw), plan.is_plan, plan.confidence,
+        plan.doc_kind.value, len(plan.candidate_tasks), raw[:300],
+    )
 
     if not plan.is_plan or plan.confidence < _CONFIDENCE_FLOOR or not plan.candidate_tasks:
         return {

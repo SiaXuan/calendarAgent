@@ -35,7 +35,20 @@ def _extract_pdf(data: bytes) -> str:
             "pdf_too_long",
             f"PDF has {len(reader.pages)} pages (max {MAX_PDF_PAGES}).",
         )
-    text = "\n".join((page.extract_text() or "") for page in reader.pages)
+    parts: list[str] = []
+    for page in reader.pages:
+        # "layout" mode keeps columns/tables roughly aligned (course schedules,
+        # PRD tables) — the default mode interleaves them into unreadable text
+        # the LLM then rejects as "not a plan". Fall back per-page on any error
+        # so one bad page can't crash the whole import.
+        try:
+            parts.append(page.extract_text(extraction_mode="layout") or "")
+        except Exception:  # noqa: BLE001
+            try:
+                parts.append(page.extract_text() or "")
+            except Exception:  # noqa: BLE001
+                continue
+    text = "\n".join(parts)
     if not text.strip():
         # A scanned/image-only PDF yields no text — no OCR this pass.
         raise DocumentParseError(
