@@ -10,10 +10,11 @@ import logging
 import uuid
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from agents import project_service as svc
+from integrations.document_parser import DocumentParseError
 from models.project import CompletionStatus, Project, ProjectStatus
 from storage import (
     completion_store, project_plan_store, project_store, save_project_store,
@@ -119,6 +120,37 @@ async def get_project_plan(project_id: str):
 async def get_project_progress(project_id: str):
     _require(project_id)
     return svc.project_progress(project_id)
+
+
+@router.post("/projects/{project_id}/import")
+async def import_plan(
+    project_id: str,
+    file: UploadFile | None = File(None),
+    text: str | None = Form(None),
+    dry_run: bool = Form(False),
+):
+    """
+    Import a plan document (pasted text / .txt / .md / .pdf / .docx) into the
+    project as Tasks. Multipart form: exactly one of `file` or `text`, plus
+    optional `dry_run` (preview without persisting). Reminders come separately
+    from POST /projects/{id}/replan. 422 on unparseable input or a non-plan doc.
+    """
+    _require(project_id)
+    if (file is None) == (text is None):
+        raise HTTPException(
+            status_code=422, detail="Provide exactly one of `file` or `text`.")
+    try:
+        if file is not None:
+            result = await svc.import_plan(
+                project_id, filename=file.filename, data=await file.read(),
+                dry_run=dry_run)
+        else:
+            result = await svc.import_plan(project_id, text=text, dry_run=dry_run)
+    except DocumentParseError as e:
+        raise HTTPException(status_code=422, detail={"code": e.code, "message": e.message})
+    if not result.get("accepted", False):
+        raise HTTPException(status_code=422, detail=result)
+    return result
 
 
 class CurrentReminder(BaseModel):

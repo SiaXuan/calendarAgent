@@ -7,20 +7,33 @@ history promotion), and progress aggregation. The completion-aware replan lives
 here too once the multi-day scheduling model is settled (Step 1.6).
 """
 import hashlib
+import uuid
 from datetime import date, datetime
 
 from agents import calendar_writeback as cw
+from agents import plan_import_agent
 from agents import task_agent
 from api.preferences import get_current_prefs
+from integrations import document_parser
 from models.project import (
     CompletionRecord, CompletionStatus, PlanSnapshotItem, Project, ProjectStatus,
 )
-from models.task import Subtask, Task
+from models.task import CognitiveLoad, Priority, Subtask, Task
 from storage import (
     bump_schedule_version, completion_store, project_plan_store, project_store,
     save_completion_store, save_project_plan_store, save_project_store,
-    schedule_store, task_store,
+    save_task_store, schedule_store, task_store,
 )
+
+_CONFIDENCE_FLOOR = 0.55  # below this, treat extraction as "not a plan"
+
+# Fallback rejection text when the LLM flags not-a-plan but gives no reason.
+_DEFAULT_REJECTION = {
+    "en": "This doesn't look like a plan we can schedule.",
+    "zh-CN": "这份内容看起来不像是可以排期的计划。",
+    "zh-TW": "這份內容看起來不像是可以排程的計畫。",
+    "ja": "これはスケジュールに落とせる計画には見えません。",
+}
 
 
 def subtask_block_key(s: Subtask) -> str:
@@ -71,6 +84,84 @@ async def decompose_project(project_id: str) -> list[Subtask]:
     project_plan_store[project_id] = [_snapshot_item(s, project_id) for s in subs]
     save_project_plan_store()
     return subs
+
+
+async def import_plan(
+    project_id: str,
+    *,
+    filename: str | None = None,
+    data: bytes | None = None,
+    text: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Parse a document (pasted text / .txt / .md / .pdf / .docx), extract a plan
+    via Claude, and turn its candidate tasks into project Tasks. Import creates
+    Tasks only; the reminder change-set is produced separately by replan_project.
+
+    Layered intent gate: document_parser rejects empty/oversized/unsupported
+    input (raises DocumentParseError → 422); the LLM then rejects non-plans via
+    is_plan/confidence. On `dry_run` nothing is persisted — the caller previews
+    the tasks and confirms before a real import.
+
+    Returns {accepted, doc_kind, confidence, ...}. When accepted, includes the
+    created (or would-be-created) tasks + project_meta.
+    """
+    proj = project_store[project_id]
+    language = get_current_prefs().language
+
+    if text is not None:
+        raw = document_parser.parse_text(text)
+    elif data is not None:
+        raw = document_parser.parse_upload(filename or "", data)
+    else:
+        raise document_parser.DocumentParseError(
+            "no_input", "Provide a file or text to import.")
+
+    plan = await plan_import_agent.extract_plan(raw, language)
+
+    if not plan.is_plan or plan.confidence < _CONFIDENCE_FLOOR or not plan.candidate_tasks:
+        return {
+            "accepted": False,
+            "project_id": project_id,
+            "doc_kind": plan.doc_kind.value,
+            "confidence": plan.confidence,
+            "reason": plan.rejection_reason
+            or _DEFAULT_REJECTION.get(language.value, _DEFAULT_REJECTION["en"]),
+        }
+
+    new_tasks = [
+        Task(
+            id=str(uuid.uuid4()),
+            title=c.title,
+            description=c.description,
+            priority=c.priority or Priority.medium,
+            cognitive_load=c.cognitive_load or CognitiveLoad.medium,
+            estimated_hours=c.estimated_hours or 1.0,
+            deadline=c.explicit_deadline or c.explicit_date,
+            source="import",
+            project_id=project_id,
+        )
+        for c in plan.candidate_tasks
+    ]
+
+    if not dry_run:
+        for t in new_tasks:
+            task_store[t.id] = t
+        proj.task_ids.extend(t.id for t in new_tasks)
+        proj.updated_at = datetime.now()
+        save_task_store()
+        save_project_store()
+
+    return {
+        "accepted": True,
+        "dry_run": dry_run,
+        "project_id": project_id,
+        "doc_kind": plan.doc_kind.value,
+        "confidence": plan.confidence,
+        "project_meta": plan.project_meta.model_dump(mode="json"),
+        "tasks": [t.model_dump(mode="json") for t in new_tasks],
+    }
 
 
 async def replan_project(
