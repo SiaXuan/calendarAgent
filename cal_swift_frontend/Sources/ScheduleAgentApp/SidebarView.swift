@@ -156,7 +156,6 @@ struct SidebarView: View {
     @State private var selectedEventID: UUID?
     @State private var isShowingHealthDetails = false
     @State private var isShowingDocumentImporter = false
-    @State private var isShowingProjects = false
     @State private var pendingAgentProposal: DayflowAgentProposal?
     @State private var pendingAgentProposalMessage: String?
     @State private var scheduleDate = Self.todayString()
@@ -230,11 +229,12 @@ struct SidebarView: View {
                 state.startDocumentIntake(fileName: url.lastPathComponent)
             }
         }
-        .sheet(isPresented: $isShowingProjects) {
-            ProjectsView()
-        }
         .onAppear {
             startDayflowStream()
+            // The generate stream only carries the energy curve + summary, not the
+            // sleep times, so re-load the persisted snapshot to restore the sleep
+            // window display after a restart.
+            Task { await refreshHealthSnapshot() }
         }
         .onDisappear {
             streamTask?.cancel()
@@ -322,7 +322,7 @@ struct SidebarView: View {
     private var quickControls: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
             controlTile(title: "Projects", subtitle: "Import & plan", systemName: "folder", color: taskColor) {
-                isShowingProjects = true
+                ProjectsWindowController.shared.show()
             }
             controlTile(title: "Calendar", subtitle: "Open app", systemName: "calendar", color: calendarColor) {
                 calendarAdapter.openInCalendar(near: Date())

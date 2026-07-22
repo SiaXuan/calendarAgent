@@ -34,30 +34,30 @@ def _nth_weekday_of_month(year: int, month: int, weekday: int, nth: int) -> date
     return cand
 
 
-def _shift_one(c: CandidateTask, adj: ImportAdjustment) -> date | None:
-    orig = c.explicit_date
-    # Target weekday: explicit override, else the task's own due weekday, else the
-    # weekday the original date already falls on.
-    target_wd = adj.due_weekday
-    if target_wd is None:
-        target_wd = c.due_weekday
-    if target_wd is None and orig is not None:
-        target_wd = orig.weekday()
+def _computed_date(orig: date | None, c: CandidateTask, adj: ImportAdjustment) -> date | None:
+    """The shifted date for one field whose original value is `orig`.
+
+    The term-week model derives a date from `week_index` and so can produce one
+    even when `orig` is None (a "Week 3" item with no stated date). The year-shift
+    and week-nudge models transform an existing date, so they return None when
+    `orig` is None — the caller decides whether to fabricate."""
+    target_wd = adj.due_weekday if adj.due_weekday is not None else c.due_weekday
 
     # Term-week model — most faithful to "week 1 starts here, due every <weekday>".
     if adj.term_start_date is not None and c.week_index is not None:
-        week1_monday = _monday_of(adj.term_start_date)
-        base = week1_monday + timedelta(weeks=c.week_index - 1)
-        return base + timedelta(days=target_wd or 0)
+        wd = target_wd if target_wd is not None else (orig.weekday() if orig else 0)
+        return _monday_of(adj.term_start_date) + timedelta(weeks=c.week_index - 1, days=wd)
 
-    # Year-shift fallback — keep the Nth-weekday-of-month cadence in the new year.
-    if adj.target_year is not None and orig is not None:
-        nth = (orig.day - 1) // 7 + 1
-        wd = target_wd if target_wd is not None else orig.weekday()
-        return _nth_weekday_of_month(adj.target_year, orig.month, wd, nth)
+    if orig is None:
+        return None
+    wd = target_wd if target_wd is not None else orig.weekday()
+
+    # Year-shift — keep the Nth-weekday-of-month cadence in the new year.
+    if adj.target_year is not None:
+        return _nth_weekday_of_month(adj.target_year, orig.month, wd, (orig.day - 1) // 7 + 1)
 
     # Whole-plan nudge.
-    if adj.shift_weeks is not None and orig is not None:
+    if adj.shift_weeks is not None:
         return orig + timedelta(weeks=adj.shift_weeks)
 
     return orig
@@ -77,6 +77,15 @@ def apply_adjustment(
         return candidates
     out: list[CandidateTask] = []
     for c in candidates:
-        new_date = _shift_one(c, adjustment)
-        out.append(c.model_copy(update={"explicit_date": new_date}) if new_date != c.explicit_date else c)
+        # Shift the fields the task actually has.
+        new_date = _computed_date(c.explicit_date, c, adjustment) if c.explicit_date else None
+        new_deadline = _computed_date(c.explicit_deadline, c, adjustment) if c.explicit_deadline else None
+        # A dateless "Week N" item still gets a date from the term-week model.
+        if c.explicit_date is None and c.explicit_deadline is None:
+            new_date = _computed_date(None, c, adjustment)
+        if new_date != c.explicit_date or new_deadline != c.explicit_deadline:
+            out.append(c.model_copy(update={
+                "explicit_date": new_date, "explicit_deadline": new_deadline}))
+        else:
+            out.append(c)
     return out

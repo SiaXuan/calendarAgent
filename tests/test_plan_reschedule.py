@@ -60,6 +60,16 @@ def test_shift_weeks():
     assert out[0].explicit_date == date(2025, 9, 15)
 
 
+def test_shifts_the_deadline_field_too():
+    # Homework often carries a due date in explicit_deadline (not explicit_date).
+    # Both must shift, else Task.deadline (= explicit_deadline or explicit_date)
+    # keeps the old year. (This was the "still 2025" bug.)
+    c = CandidateTask(title="HW1", explicit_deadline=date(2025, 9, 8), week_index=2)
+    out = apply_adjustment([c], ImportAdjustment(target_year=2027))
+    assert out[0].explicit_deadline.year == 2027
+    assert out[0].explicit_date is None            # not fabricated
+
+
 def test_weekday_name_coercion():
     assert CandidateTask(title="x", due_weekday="Monday").due_weekday == 0
     assert CandidateTask(title="x", due_weekday="周三").due_weekday == 2

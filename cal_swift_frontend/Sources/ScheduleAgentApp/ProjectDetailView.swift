@@ -85,45 +85,69 @@ struct ProjectDetailView: View {
             if let preview = model.importPreview {
                 importPreviewCard(preview)
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let url = model.importFileURL {
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc").foregroundStyle(.secondary)
-                            Text(url.lastPathComponent).font(.system(size: 12))
-                            Spacer()
-                            Button("移除") { model.importFileURL = nil }
-                                .buttonStyle(.plain).foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Text("粘贴课程大纲 / PRD / 一段目标文字，或选一个文件（.txt / .md / .pdf / .docx）。")
-                            .font(.caption).foregroundStyle(.secondary)
-                        TextEditor(text: $model.importText)
-                            .font(.system(size: 12))
-                            .frame(minHeight: 80)
-                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.secondary.opacity(0.3)))
-                    }
-
-                    Text("说明（可选）")
-                        .font(.caption).foregroundStyle(.secondary)
-                    TextField("例：这是 25 年的大纲，挪到 27 年秋季学期，作业仍周一交", text: $model.importInstruction, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(1...3)
-                    Text("说明会用来平移日期（改年份/学期起点、改成周几）。日期由后端精确计算。")
-                        .font(.caption2).foregroundStyle(.secondary)
-
-                    HStack {
-                        Button("选择文件…") { isPickingFile = true }
-                        Spacer()
-                        Button("预览") {
-                            Task { await model.previewImport(project: project) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!canPreview || model.isImporting)
-                    }
-                    if model.isImporting { ProgressView().controlSize(.small) }
-                }
+                composer
             }
         }
+    }
+
+    /// Chat-style composer: an attachment chip (when a file is picked) above one
+    /// text area, with attach + preview actions below.
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let url = model.importFileURL {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.text").foregroundStyle(.blue)
+                    Text(url.lastPathComponent).font(.system(size: 12)).lineLimit(1)
+                    Spacer()
+                    Button {
+                        model.importFileURL = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(.blue.opacity(0.08)))
+            }
+
+            ZStack(alignment: .topLeading) {
+                if model.importText.isEmpty {
+                    Text(composerPlaceholder)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5).padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $model.importText)
+                    .font(.system(size: 12))
+                    .frame(minHeight: 96)
+                    .scrollContentBackground(.hidden)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.secondary.opacity(0.3)))
+
+            HStack(spacing: 10) {
+                Button {
+                    isPickingFile = true
+                } label: {
+                    Image(systemName: "paperclip").font(.system(size: 14, weight: .medium))
+                }
+                .buttonStyle(.borderless)
+                .help("附加文件（.txt / .md / .pdf / .docx）")
+
+                Spacer()
+                if model.isImporting { ProgressView().controlSize(.small) }
+                Button("预览") { Task { await model.previewImport(project: project) } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canPreview || model.isImporting)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var composerPlaceholder: String {
+        model.importFileURL == nil
+            ? "粘贴课程大纲 / PRD / 一段目标，或点回形针附加文件。想改年份或周几，直接在这写。"
+            : "对这份文件的说明（可选），例如：挪到 2027 年秋季，作业仍周一交。"
     }
 
     private func importPreviewCard(_ preview: DayflowImportResult) -> some View {

@@ -45,8 +45,11 @@ Your job:
    - needs_decomposition: true if this item is a chunk of work that should be broken
      into sessions later; false only for a single trivial action on a single date.
    - source_excerpt: the short snippet of the document this item came from.
-6. If (and only if) a USER INSTRUCTION is given below, fill `adjustment` from it —
-   this is how the user reshapes the dates (e.g. reusing an old syllabus for a new term):
+6. If the input contains a user instruction about reshaping the dates — either in a
+   dedicated USER INSTRUCTION section below, OR stated inline within the document text
+   itself (e.g. the pasted text opens with "this is a 2025 syllabus, move it to 2027,
+   homework still due Mondays") — fill `adjustment` from it and do NOT turn that note
+   into a task. This is how the user reshapes dates (e.g. reusing an old syllabus):
    - target_year: the year to move the plan to, if stated ("move to 2027" → 2027).
    - term_start_date: the week-1 anchor date, ONLY if the instruction states a concrete
      date for it; otherwise null.

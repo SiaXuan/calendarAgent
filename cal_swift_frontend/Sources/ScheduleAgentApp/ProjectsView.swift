@@ -5,7 +5,6 @@ import SwiftUI
 /// stack lives more cleanly inside a sheet than in the panel itself).
 struct ProjectsView: View {
     @StateObject private var model = ProjectsViewModel()
-    @Environment(\.dismiss) private var dismiss
 
     @State private var isCreating = false
     @State private var newProjectName = ""
@@ -24,9 +23,6 @@ struct ProjectsView: View {
             }
             .navigationTitle("项目")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("完成") { dismiss() }
-                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         newProjectName = ""

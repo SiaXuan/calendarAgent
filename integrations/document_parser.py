@@ -7,6 +7,12 @@ call. Supported this pass: pasted text, .md/.txt, .pdf (pypdf), .docx
 (python-docx). Images/vision are deferred (would add Pillow + a vision call).
 """
 import io
+import logging
+
+# pypdf logs a "Ignoring wrong pointing object …" warning for every malformed
+# cross-reference pointer it recovers from. Harmless (it still extracts the text)
+# but noisy — quiet it to errors only.
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 MAX_BYTES = 10 * 1024 * 1024      # 10 MB upload ceiling
 MAX_PDF_PAGES = 30

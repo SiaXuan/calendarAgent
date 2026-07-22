@@ -21,9 +21,11 @@ final class ProjectsViewModel: ObservableObject {
 
     // Import flow.
     @Published var importPreview: DayflowImportResult?   // dry-run result awaiting confirm
+    // One composer field. With no file it's the plan text (may embed an
+    // instruction like "move to 2027"); with a file attached it's the note about
+    // how to handle that file.
     @Published var importText: String = ""
-    @Published var importInstruction: String = ""        // e.g. "move to 2027 term, due Mondays"
-    @Published var importFileURL: URL?                   // set when a file was picked
+    @Published var importFileURL: URL?                   // set when a file was attached
     @Published var isImporting = false
     @Published var statusMessage: String?
 
@@ -99,15 +101,17 @@ final class ProjectsViewModel: ObservableObject {
         statusMessage = nil
         errorMessage = nil
         defer { isImporting = false }
-        let instruction = importInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        let composer = importText.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             let result: DayflowImportResult
             if let url = importFileURL {
+                // File is the content; the composer text is a note about it.
                 result = try await client.importPlan(
-                    id: project.id, fileURL: url, instruction: instruction, dryRun: dryRun)
+                    id: project.id, fileURL: url, instruction: composer, dryRun: dryRun)
             } else {
+                // Composer text IS the plan; the backend picks up any embedded instruction.
                 result = try await client.importPlan(
-                    id: project.id, text: importText, instruction: instruction, dryRun: dryRun)
+                    id: project.id, text: composer, dryRun: dryRun)
             }
             if dryRun {
                 importPreview = result
@@ -131,7 +135,6 @@ final class ProjectsViewModel: ObservableObject {
     private func clearImportInputs() {
         importPreview = nil
         importText = ""
-        importInstruction = ""
         importFileURL = nil
     }
 

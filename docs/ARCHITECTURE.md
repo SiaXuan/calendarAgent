@@ -186,6 +186,10 @@ env 可覆盖:`LLM_FAST_MODEL` / `LLM_REASON_MODEL` / `LLM_FAST_TEMPERATURE` / `
 - **`agent_run_log` 只写不读:** 每个终止态都记(`agent_run.py:146-154`)但从没被读、不持久化、只存一个工具调用计数(不是完整 trace)。要么接进 eval,要么砍掉。
 - **`subtask_overrides` 没持久化**,而 `subtask_pins` 持久化了 —— 大概率是疏漏;用户编辑过的拆解重启就丢。
 - **eval 很薄:** 5 个手写场景(`tests/eval/`)、真 LLM、单次跑、all-or-nothing 通过率。没有数据集、没有和硬编码基线的对照、没有 pass@k、没有回归门。
+- **前端死代码(Phase 4):** 旧的假导入流程 `MockAssistantPanelState.startDocumentIntake` + `documentIntakeModule` 还在,但入口("Add Document" 磁贴)已被 "Projects" 取代 → 点不到。真导入走 `ProjectsView`/`ProjectDetailView`。待清。
+- **提醒勾完成没回报后端:** 时间块完成走 `POST /schedule/{date}/blocks/{block_key}/complete`(前端有 block_key)。但用户在「提醒」App 里勾掉一条 agent 提醒时,前端无法回报 —— 提醒 notes 里只有 tag_key 的短 hash,反推不出 block_key。要么在提醒 notes 里也塞明文 block_key,要么完成态只认时间块那条路。
+- **没有可分发的 .app:** `cal_swift_frontend/make_app.sh` 只是把 `swift build` 产物包成 ad-hoc 签名的 `.app` 供本机 EventKit 验证(见 §10)。没有正式打包/公证/图标/自动更新。
+- **导入靠真 LLM,偶发形状问题已兜:** `ExtractedPlan` 的 `with_structured_output` 偶尔把嵌套 list/object 返回成 JSON 字符串,已用 `field_validator(mode="before")` 兜(见 §10);导入端点其余异常降级为 502 而非 500。但没有对导入抽取的 eval/回归。
 
 ---
 
@@ -202,4 +206,35 @@ env 可覆盖:`LLM_FAST_MODEL` / `LLM_REASON_MODEL` / `LLM_FAST_TEMPERATURE` / `
 | 存储 | `storage.py` |
 | Solver(未接进 agent) | `agents/solver.py`、`agents/calc.py` |
 | API 路由 | `api/*.py`(`main.py` 挂载) |
-| 前端 | `frontend/src/`(React/Vite)—— 另有实验性 Swift 客户端 `cal_swift_frontend/` |
+| 前端(**活跃**) | `cal_swift_frontend/`(原生 Swift):`SidebarView.swift` 主界面、`DayflowAPIClient.swift` 后端客户端、`AppleCalendarAdapter.swift` EventKit 执行层、`ProjectsView`/`ProjectDetailView`/`ProjectsViewModel` 项目+导入界面 |
+| 前端(旧) | `frontend/src/`(React/Vite)—— 逐步被 Swift 客户端取代 |
+
+---
+
+## 10. Phase 4 踩坑与经验(前端 EventKit + 多格式导入,2026-07-22)
+
+> 这些是实际卡住过、花时间才弄对的点。后来 agent 碰到相关改动前先读这节,省得重踩。
+
+### 10.1 EventKit 权限:必须是真 `.app` 包 + 用 `open` 启动
+macOS 的隐私系统(TCC)对日历/提醒授权极挑剔,踩坑顺序:
+1. **裸 `swift run` 二进制** → 请求直接被拒(denied),连授权框都不弹 —— 因为没有用途字符串。
+2. **给二进制内嵌 Info.plist**(Package.swift 用 linker `-sectcreate __TEXT __info_plist`)→ 有了 bundle id 和用途字符串,但**还是拒**;`tccutil reset ... <bundleid>` 报 "No such bundle identifier"。TCC 不认裸 Mach-O。
+3. **打成真正的 `.app` 包 + ad-hoc 签名**(`make_app.sh`:组 `Contents/{MacOS,Info.plist}` + `codesign --sign -`)→ `codesign -dv` 显示 "app bundle"。但**直接跑包里的二进制仍被拒** —— 请求被算到父进程(终端)头上。
+4. **`open -W ScheduleAgent.app --args ...`**(经 LaunchServices 启动)→ app 成为自己的"responsible process",**这才弹授权框、授权成功**。✅
+
+**结论/配方:** 改完 Swift → `./make_app.sh` → `open ScheduleAgent.app`(GUI)或 `open -W ScheduleAgent.app --args --verify-eventkit`(无头验证,输出写 `~/eventkit-verify.log`,因为 `open` 拉起的进程 stdout 不回终端)。**别用 `swift run` 碰 EventKit。** 用途字符串 `NSCalendars/RemindersFullAccessUsageDescription` 在 `cal_swift_frontend/Info.plist`。
+Swift 6 严格并发副作用:持有 `EKEventStore` 的 `AppleCalendarAdapter` 要标 `@unchecked Sendable`(才能从 `@MainActor` 传给 nonisolated 方法);EventKit 异步回调里 `EKReminder` 非 Sendable,用 `nonisolated(unsafe)` 局部变量过检查。
+
+### 10.2 Claude 结构化输出会把嵌套字段返回成 JSON 字符串
+`sonnet.with_structured_output(ExtractedPlan)` **偶发**(非必现)把嵌套的 `candidate_tasks`(list)/`project_meta`(object)整个序列化成一段 JSON **字符串**而不是原生值 → Pydantic 校验炸 → 500。
+**修法:** 在模型上加 `@field_validator("candidate_tasks","project_meta","adjustment", mode="before")`,是 `str` 就先 `json.loads`(见 `models/plan_import.py`)。**任何用 with_structured_output 的嵌套模型都该防这一手。** 另外导入端点把非 `DocumentParseError` 的异常降级成 502 友好错误,不再甩裸 500。
+
+### 10.3 PDF 表格:用 pypdf 的 layout 模式,别上 OCR
+课程表/PRD 这种**表格型 PDF**,pypdf 默认 `extract_text()` 会把列拆散、顺序打乱,抽出来是乱码 → LLM 判"不是计划"直接拒。**修法:** `page.extract_text(extraction_mode="layout")`(保留列对齐),逐页兜异常(`integrations/document_parser.py`)。
+**扫描件/截图(无文字层)不要上 OCR** —— 在本项目的 LLM 架构里 OCR 是错的工具;正解是把图片喂 **Claude 视觉**(同一个 `ExtractedPlan` 结构),目前延后。
+
+### 10.4 日期算术交确定性代码,LLM 只读语义
+复用旧 syllabus 到新学期(如 25→27 年、"第一周顺排、作业固定周几交、课改周三")这类需求:**不要让 LLM 算日历日期**(它会算错"第 N 个周一是几号""某日是星期几")。分工:
+- **LLM 读结构**:每个任务的 `week_index`(第几周)+ `due_weekday`(周几);把用户自然语言说明解析成 `ImportAdjustment`(target_year / term_start_date / due_weekday / shift_weeks)。**明确禁止 LLM 输出平移后的日期。**
+- **确定性代码算日期**:`agents/plan_reschedule.py::apply_adjustment` 两种模型(学期周锚点 / 换年保持"某月第 N 个周几"),纯函数、pytest 全覆盖。
+这条和项目既有铁律一致(进度数字来自 completion_store、不让 LLM 自报)。将来若要在聊天里做"整体挪一周",把这个纯函数包成 agent 工具即可,别让 agent 一步步算。
