@@ -127,13 +127,15 @@ async def import_plan(
     project_id: str,
     file: UploadFile | None = File(None),
     text: str | None = Form(None),
+    instruction: str | None = Form(None),
     dry_run: bool = Form(False),
 ):
     """
     Import a plan document (pasted text / .txt / .md / .pdf / .docx) into the
-    project as Tasks. Multipart form: exactly one of `file` or `text`, plus
-    optional `dry_run` (preview without persisting). Reminders come separately
-    from POST /projects/{id}/replan. 422 on unparseable input or a non-plan doc.
+    project as Tasks. Multipart form: exactly one of `file` or `text`, an optional
+    natural-language `instruction` (e.g. reuse an old syllabus in a new term), plus
+    optional `dry_run` (preview without persisting). Reminders come separately from
+    POST /projects/{id}/replan. 422 on unparseable input or a non-plan doc.
     """
     _require(project_id)
     if (file is None) == (text is None):
@@ -143,9 +145,10 @@ async def import_plan(
         if file is not None:
             result = await svc.import_plan(
                 project_id, filename=file.filename, data=await file.read(),
-                dry_run=dry_run)
+                instruction=instruction, dry_run=dry_run)
         else:
-            result = await svc.import_plan(project_id, text=text, dry_run=dry_run)
+            result = await svc.import_plan(
+                project_id, text=text, instruction=instruction, dry_run=dry_run)
     except DocumentParseError as e:
         raise HTTPException(status_code=422, detail={"code": e.code, "message": e.message})
     except Exception:

@@ -692,24 +692,25 @@ extension DayflowAPIClient {
     // MARK: Plan import (multipart: file XOR text)
 
     func importPlan(
-        id: String, text: String, dryRun: Bool = false
+        id: String, text: String, instruction: String? = nil, dryRun: Bool = false
     ) async throws -> DayflowImportResult {
         let boundary = "Boundary-\(UUID().uuidString)"
-        let body = Self.multipartBody(
-            boundary: boundary,
-            fields: ["text": text, "dry_run": dryRun ? "true" : "false"],
-            file: nil)
+        var fields = ["text": text, "dry_run": dryRun ? "true" : "false"]
+        if let instruction, !instruction.isEmpty { fields["instruction"] = instruction }
+        let body = Self.multipartBody(boundary: boundary, fields: fields, file: nil)
         return try await requestMultipart("/projects/\(id)/import", boundary: boundary, body: body)
     }
 
     func importPlan(
-        id: String, fileURL: URL, dryRun: Bool = false
+        id: String, fileURL: URL, instruction: String? = nil, dryRun: Bool = false
     ) async throws -> DayflowImportResult {
         let data = try Data(contentsOf: fileURL)
         let boundary = "Boundary-\(UUID().uuidString)"
+        var fields = ["dry_run": dryRun ? "true" : "false"]
+        if let instruction, !instruction.isEmpty { fields["instruction"] = instruction }
         let body = Self.multipartBody(
             boundary: boundary,
-            fields: ["dry_run": dryRun ? "true" : "false"],
+            fields: fields,
             file: (field: "file", filename: fileURL.lastPathComponent,
                    mime: "application/octet-stream", data: data))
         return try await requestMultipart("/projects/\(id)/import", boundary: boundary, body: body)

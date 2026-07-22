@@ -22,6 +22,8 @@ final class ProjectsViewModel: ObservableObject {
     // Import flow.
     @Published var importPreview: DayflowImportResult?   // dry-run result awaiting confirm
     @Published var importText: String = ""
+    @Published var importInstruction: String = ""        // e.g. "move to 2027 term, due Mondays"
+    @Published var importFileURL: URL?                   // set when a file was picked
     @Published var isImporting = false
     @Published var statusMessage: String?
 
@@ -80,43 +82,42 @@ final class ProjectsViewModel: ObservableObject {
 
     // MARK: Import (dry-run preview → confirm)
 
-    func previewImport(project: DayflowProject, fileURL: URL? = nil) async {
+    /// Pick a file for import — remembered so the confirm step re-imports the same
+    /// file (not the empty text field).
+    func selectImportFile(_ url: URL) { importFileURL = url }
+
+    func previewImport(project: DayflowProject) async {
+        await runImport(project: project, dryRun: true)
+    }
+
+    func confirmImport(project: DayflowProject) async {
+        await runImport(project: project, dryRun: false)
+    }
+
+    private func runImport(project: DayflowProject, dryRun: Bool) async {
         isImporting = true
         statusMessage = nil
         errorMessage = nil
         defer { isImporting = false }
+        let instruction = importInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             let result: DayflowImportResult
-            if let fileURL {
-                result = try await client.importPlan(id: project.id, fileURL: fileURL, dryRun: true)
+            if let url = importFileURL {
+                result = try await client.importPlan(
+                    id: project.id, fileURL: url, instruction: instruction, dryRun: dryRun)
             } else {
-                result = try await client.importPlan(id: project.id, text: importText, dryRun: true)
+                result = try await client.importPlan(
+                    id: project.id, text: importText, instruction: instruction, dryRun: dryRun)
             }
-            importPreview = result
-        } catch let e as DayflowRequestError {
-            // 422 → not a plan / unparseable: show the server's reason.
-            errorMessage = e.message ?? "无法从这份内容里读出计划。"
-        } catch {
-            errorMessage = friendly(error)
-        }
-    }
-
-    func confirmImport(project: DayflowProject, fileURL: URL? = nil) async {
-        isImporting = true
-        defer { isImporting = false }
-        do {
-            let result: DayflowImportResult
-            if let fileURL {
-                result = try await client.importPlan(id: project.id, fileURL: fileURL, dryRun: false)
+            if dryRun {
+                importPreview = result
             } else {
-                result = try await client.importPlan(id: project.id, text: importText, dryRun: false)
+                clearImportInputs()
+                statusMessage = "已导入 \(result.tasks?.count ?? 0) 个任务"
+                await loadDetail(project)
             }
-            importPreview = nil
-            importText = ""
-            statusMessage = "已导入 \(result.tasks?.count ?? 0) 个任务"
-            await loadDetail(project)
         } catch let e as DayflowRequestError {
-            errorMessage = e.message ?? "导入失败。"
+            errorMessage = e.message ?? (dryRun ? "无法从这份内容里读出计划。" : "导入失败。")
         } catch {
             errorMessage = friendly(error)
         }
@@ -124,6 +125,14 @@ final class ProjectsViewModel: ObservableObject {
 
     func cancelImportPreview() {
         importPreview = nil
+        importFileURL = nil
+    }
+
+    private func clearImportInputs() {
+        importPreview = nil
+        importText = ""
+        importInstruction = ""
+        importFileURL = nil
     }
 
     // MARK: Replan → write reminders via EventKit

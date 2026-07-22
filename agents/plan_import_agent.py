@@ -36,27 +36,50 @@ Your job:
    - explicit_date / explicit_deadline: ONLY if a concrete calendar date is stated or
      unambiguously derivable. Do NOT invent dates. Relative markers like "Week 3" with
      no anchor date → leave dates null and set needs_decomposition=true.
+   - week_index: the 1-based term week from a schedule table's "Week" column, if present.
+   - due_weekday: the day of week the item is due, as an integer 0=Monday..6=Sunday,
+     if the doc states one (e.g. "due Monday 9AM" → 0). Else null.
    - estimated_hours: rough effort if inferable, else null.
    - priority (high/medium/low) and cognitive_load (deep/medium/light): if inferable.
    - phase_label: e.g. "Phase 1 · Research" when the doc groups work into phases.
    - needs_decomposition: true if this item is a chunk of work that should be broken
      into sessions later; false only for a single trivial action on a single date.
    - source_excerpt: the short snippet of the document this item came from.
+6. If (and only if) a USER INSTRUCTION is given below, fill `adjustment` from it —
+   this is how the user reshapes the dates (e.g. reusing an old syllabus for a new term):
+   - target_year: the year to move the plan to, if stated ("move to 2027" → 2027).
+   - term_start_date: the week-1 anchor date, ONLY if the instruction states a concrete
+     date for it; otherwise null.
+   - due_weekday: an overridden due weekday (0=Mon..6=Sun), if the instruction changes it
+     ("class moved to Wednesday" → 2).
+   - shift_weeks: a whole-plan nudge in weeks ("push everything back a week" → 1).
+   CRITICAL: do NOT compute shifted calendar dates yourself and do NOT edit
+   explicit_date to the new year — only fill `adjustment`. The backend does the
+   date arithmetic deterministically. If no instruction is given, leave adjustment empty.
 
 Extract only what the document supports. Do not pad the plan with invented tasks.
 """
 
 
-async def extract_plan(text: str, language: Language = Language.en) -> ExtractedPlan:
-    """Extract a structured plan from document text. Raises on LLM/validation
-    failure (the caller maps that to a 502)."""
+async def extract_plan(
+    text: str, language: Language = Language.en, instruction: str | None = None,
+) -> ExtractedPlan:
+    """Extract a structured plan from document text. An optional user instruction
+    (natural language) is parsed into `adjustment` for date shifting. Raises on
+    LLM/validation failure (the caller maps that to a 502)."""
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(language=language.value)
+    user_content = f"Document text:\n\n{text}"
+    if instruction and instruction.strip():
+        user_content += (
+            f"\n\n---\nUSER INSTRUCTION (use it to fill `adjustment`, and honour any "
+            f"weekday/term changes it states):\n{instruction.strip()}"
+        )
     structured_llm = sonnet.with_structured_output(ExtractedPlan)
     result: ExtractedPlan = await structured_llm.ainvoke([
         {"role": "system", "content": [
             {"type": "text", "text": system_prompt,
              "cache_control": {"type": "ephemeral"}},
         ]},
-        {"role": "user", "content": f"Document text:\n\n{text}"},
+        {"role": "user", "content": user_content},
     ])
     return result

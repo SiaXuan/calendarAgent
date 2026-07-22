@@ -10,6 +10,11 @@ struct ProjectDetailView: View {
 
     @State private var isPickingFile = false
 
+    private var canPreview: Bool {
+        model.importFileURL != nil
+            || !model.importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         Form {
             progressSection
@@ -27,9 +32,8 @@ struct ProjectDetailView: View {
             isPresented: $isPickingFile,
             allowedContentTypes: [.plainText, .pdf, UTType(filenameExtension: "docx") ?? .data]
         ) { result in
-            if case let .success(url) = result {
-                Task { await model.previewImport(project: project, fileURL: url) }
-            }
+            // Select only — don't preview yet, so the user can add an instruction first.
+            if case let .success(url) = result { model.selectImportFile(url) }
         }
     }
 
@@ -82,12 +86,31 @@ struct ProjectDetailView: View {
                 importPreviewCard(preview)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("粘贴课程大纲 / PRD / 一段目标文字，或选一个文件（.txt / .md / .pdf / .docx）。")
+                    if let url = model.importFileURL {
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc").foregroundStyle(.secondary)
+                            Text(url.lastPathComponent).font(.system(size: 12))
+                            Spacer()
+                            Button("移除") { model.importFileURL = nil }
+                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("粘贴课程大纲 / PRD / 一段目标文字，或选一个文件（.txt / .md / .pdf / .docx）。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        TextEditor(text: $model.importText)
+                            .font(.system(size: 12))
+                            .frame(minHeight: 80)
+                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.secondary.opacity(0.3)))
+                    }
+
+                    Text("说明（可选）")
                         .font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $model.importText)
-                        .font(.system(size: 12))
-                        .frame(minHeight: 80)
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.secondary.opacity(0.3)))
+                    TextField("例：这是 25 年的大纲，挪到 27 年秋季学期，作业仍周一交", text: $model.importInstruction, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...3)
+                    Text("说明会用来平移日期（改年份/学期起点、改成周几）。日期由后端精确计算。")
+                        .font(.caption2).foregroundStyle(.secondary)
+
                     HStack {
                         Button("选择文件…") { isPickingFile = true }
                         Spacer()
@@ -95,7 +118,7 @@ struct ProjectDetailView: View {
                             Task { await model.previewImport(project: project) }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(model.importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isImporting)
+                        .disabled(!canPreview || model.isImporting)
                     }
                     if model.isImporting { ProgressView().controlSize(.small) }
                 }

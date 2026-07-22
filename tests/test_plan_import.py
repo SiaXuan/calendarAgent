@@ -115,6 +115,26 @@ def test_import_unknown_project_404(clean_stores):
                        data={"text": _LONG_TEXT}).status_code == 404
 
 
+def test_import_applies_date_adjustment(clean_stores, monkeypatch):
+    # A 2025 syllabus item, week 2, shifted to the 2027 term via the instruction.
+    from agents import plan_import_agent
+    from models.plan_import import ImportAdjustment
+
+    _mock_extract(monkeypatch, ExtractedPlan(
+        is_plan=True, confidence=0.9,
+        candidate_tasks=[CandidateTask(title="Homework 1",
+                                       explicit_date=date(2025, 9, 8), week_index=2)],
+        adjustment=ImportAdjustment(term_start_date=date(2027, 9, 6), due_weekday=0),
+    ))
+    pid = _new_project()
+    r = client.post(f"/projects/{pid}/import",
+                    data={"text": _LONG_TEXT, "instruction": "move to 2027 term, due Mondays"})
+    assert r.status_code == 200
+    created = [t for t in storage.task_store.values() if t.project_id == pid][0]
+    # week-2 Monday of the 2027 term (week-1 Monday + 7 days), not the 2025 date
+    assert created.deadline.year == 2027 and created.deadline.weekday() == 0
+
+
 def test_extracted_plan_coerces_stringified_json():
     # Claude sometimes returns candidate_tasks / project_meta as a JSON *string*
     # instead of a native value; the model must decode it, not blow up (was a 500).

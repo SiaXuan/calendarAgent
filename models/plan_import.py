@@ -25,6 +25,29 @@ class DocKind(str, Enum):
     other = "other"
 
 
+_WEEKDAYS = {
+    "monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "friday": 4, "fri": 4, "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+    "周一": 0, "周二": 1, "周三": 2, "周四": 3, "周五": 4, "周六": 5, "周日": 6, "周天": 6,
+}
+
+
+def _coerce_weekday(v):
+    """Accept 0..6 (Mon=0) or a weekday name (en/zh); anything else → None."""
+    if isinstance(v, str):
+        key = v.strip().lower()
+        if key in _WEEKDAYS:
+            return _WEEKDAYS[key]
+        try:
+            v = int(key)
+        except ValueError:
+            return None
+    if isinstance(v, int) and 0 <= v <= 6:
+        return v
+    return None
+
+
 class CandidateTask(BaseModel):
     """One task-like item the LLM pulled out of the document, before it becomes a
     real Task. Optional scheduling hints are honoured downstream when present."""
@@ -38,6 +61,13 @@ class CandidateTask(BaseModel):
     phase_label: str | None = None
     needs_decomposition: bool = True         # false only for a single-action item
     source_excerpt: str | None = None        # the doc snippet it came from
+    week_index: int | None = None            # 1-based term week (from a schedule table)
+    due_weekday: int | None = None           # 0=Mon..6=Sun, the day the work is due
+
+    @field_validator("due_weekday", mode="before")
+    @classmethod
+    def _wd(cls, v):
+        return _coerce_weekday(v)
 
 
 class ProjectMeta(BaseModel):
@@ -49,6 +79,23 @@ class ProjectMeta(BaseModel):
     start_date: date | None = None
 
 
+class ImportAdjustment(BaseModel):
+    """How to shift the extracted dates, parsed from the user's free-text
+    instruction (e.g. "this is a 2025 syllabus, move it to the 2027 term,
+    homework still due Mondays"). The LLM fills this from the instruction; the
+    actual date arithmetic is done deterministically in agents/plan_reschedule.py
+    — the LLM must NOT compute shifted dates itself."""
+    target_year: int | None = None          # "move to 2027"
+    term_start_date: date | None = None      # explicit week-1 anchor, if stated
+    due_weekday: int | None = None           # override the due weekday (0=Mon..6=Sun)
+    shift_weeks: int | None = None           # "push everything back one week"
+
+    @field_validator("due_weekday", mode="before")
+    @classmethod
+    def _wd(cls, v):
+        return _coerce_weekday(v)
+
+
 class ExtractedPlan(BaseModel):
     """Structured output of the extraction LLM call."""
     is_plan: bool
@@ -58,8 +105,9 @@ class ExtractedPlan(BaseModel):
     has_explicit_schedule: bool = False
     project_meta: ProjectMeta = Field(default_factory=ProjectMeta)
     candidate_tasks: list[CandidateTask] = Field(default_factory=list)
+    adjustment: ImportAdjustment = Field(default_factory=ImportAdjustment)
 
-    @field_validator("candidate_tasks", "project_meta", mode="before")
+    @field_validator("candidate_tasks", "project_meta", "adjustment", mode="before")
     @classmethod
     def _coerce_json_string(cls, v):
         """Claude's structured output sometimes serialises a nested list/object

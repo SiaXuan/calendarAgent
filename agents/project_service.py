@@ -95,6 +95,7 @@ async def import_plan(
     filename: str | None = None,
     data: bytes | None = None,
     text: str | None = None,
+    instruction: str | None = None,
     dry_run: bool = False,
 ) -> dict:
     """
@@ -121,7 +122,7 @@ async def import_plan(
         raise document_parser.DocumentParseError(
             "no_input", "Provide a file or text to import.")
 
-    plan = await plan_import_agent.extract_plan(raw, language)
+    plan = await plan_import_agent.extract_plan(raw, language, instruction=instruction)
 
     _log.info(
         "import_plan[%s]: %d chars → is_plan=%s conf=%.2f kind=%s tasks=%d | preview=%r",
@@ -139,6 +140,11 @@ async def import_plan(
             or _DEFAULT_REJECTION.get(language.value, _DEFAULT_REJECTION["en"]),
         }
 
+    # Deterministic date shift (e.g. an old syllabus moved to a new term). The LLM
+    # only parsed the instruction into plan.adjustment; the calendar math is here.
+    from agents import plan_reschedule
+    candidates = plan_reschedule.apply_adjustment(plan.candidate_tasks, plan.adjustment)
+
     new_tasks = [
         Task(
             id=str(uuid.uuid4()),
@@ -151,7 +157,7 @@ async def import_plan(
             source="import",
             project_id=project_id,
         )
-        for c in plan.candidate_tasks
+        for c in candidates
     ]
 
     if not dry_run:
