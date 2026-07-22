@@ -38,7 +38,9 @@ def _subtask_json(s: Subtask) -> dict:
     return d
 
 
-async def stream_schedule_events(target_date: date):
+async def stream_schedule_events(
+    target_date: date, calendar_events: list[dict] | None = None,
+):
     """
     Yield SSE event dicts as graph nodes complete:
       {"type": "health",    "energy_curve": [...], "health_summary": "..."}
@@ -57,6 +59,7 @@ async def stream_schedule_events(target_date: date):
         "language": get_current_prefs().language,
         "snapshot": health_store.get(target_date),
         "tasks": list(task_store.values()),
+        "calendar_events": calendar_events,
     }
 
     graph = build_schedule_graph()

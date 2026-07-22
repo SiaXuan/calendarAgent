@@ -138,11 +138,42 @@ async def fetch_health_node(state: dict) -> dict:
     }
 
 
+def _free_windows_or_whole_day(free_windows, prefs):
+    """A day with no gaps between fixed blocks still has the whole work day free."""
+    if free_windows:
+        return free_windows
+    return [FreeWindow(
+        start_hour=prefs.work_start,
+        end_hour=prefs.work_end,
+        duration_minutes=(prefs.work_end - prefs.work_start) * 60,
+    )]
+
+
 async def fetch_calendar_node(state: dict) -> dict:
-    """Fetch fixed CalDAV blocks + initial free windows for the target date."""
+    """
+    Build the day's fixed blocks + free windows.
+
+    Local/EventKit path (docs/ARCHITECTURE.md §0): when the caller supplies
+    `calendar_events` (raw event dicts the frontend read via EventKit) we derive
+    everything from those with pure functions — no network, no cache (the data is
+    already request-fresh, and caching per date would leak across requests). When
+    it's absent (None) we fall back to the legacy CalDAV fetch, retired in
+    migration step 5.
+    """
     target_date: date = state["target_date"]
     prefs = get_current_prefs()
 
+    supplied = state.get("calendar_events")
+    if supplied is not None:
+        fixed_blocks = calendar_agent.events_to_fixed_blocks(supplied, target_date)
+        free_windows = calendar_agent.extract_free_windows(
+            fixed_blocks, target_date, prefs.work_start, prefs.work_end)
+        return {
+            "fixed_blocks": fixed_blocks,
+            "free_windows": _free_windows_or_whole_day(free_windows, prefs),
+        }
+
+    # ── Legacy CalDAV fallback (no frontend calendar data supplied) ──
     cached = _calendar_cache.get(target_date)
     if cached and time.monotonic() - cached[2] < _CALENDAR_CACHE_TTL_S:
         fixed_blocks, free_windows = cached[0], cached[1]

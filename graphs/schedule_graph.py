@@ -97,12 +97,17 @@ def build_schedule_graph():
     return graph.compile()
 
 
-async def run_schedule_graph(target_date: date) -> DaySchedule:
+async def run_schedule_graph(
+    target_date: date, calendar_events: list[dict] | None = None,
+) -> DaySchedule:
     """
     Entry point that mirrors the old `orchestrator.generate_day_schedule(date)`.
 
     Loads tasks + snapshot + language from the live stores, kicks off the
     throttled reminder sync, then invokes the compiled graph.
+
+    `calendar_events` (docs/ARCHITECTURE.md §0): raw events the frontend read via
+    EventKit for this day. None → the graph falls back to reading CalDAV (legacy).
     """
     await sync_reminders_if_due()
 
@@ -116,6 +121,7 @@ async def run_schedule_graph(target_date: date) -> DaySchedule:
         "language": get_current_prefs().language,
         "snapshot": health_store.get(target_date),
         "tasks": list(task_store.values()),
+        "calendar_events": calendar_events,
     }
     final_state = await build_schedule_graph().ainvoke(initial_state)
     return final_state["final_schedule"]

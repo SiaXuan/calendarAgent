@@ -23,8 +23,21 @@ from storage import PinSpec, completion_store, schedule_store, subtask_pins
 router = APIRouter()
 
 
+class CalendarEvent(BaseModel):
+    """One event the frontend read from the local calendar via EventKit. `start`
+    /`end` are ISO datetimes; `description` (event notes) carries agent tags so
+    the backend can tell its own events from user-added ones."""
+    title: str | None = None
+    start: str
+    end: str
+    description: str | None = None
+
+
 class GenerateRequest(BaseModel):
     date: str   # YYYY-MM-DD
+    # Local/EventKit path (docs/ARCHITECTURE.md §0): the day's fixed events read
+    # by the frontend. Omit (null) to fall back to the backend reading CalDAV.
+    calendar_events: list[CalendarEvent] | None = None
 
 
 @router.post("/schedule/generate", response_model=DaySchedule)
@@ -34,7 +47,11 @@ async def generate_schedule(payload: GenerateRequest):
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
 
-    schedule = await run_schedule_graph(d)
+    events = (
+        [e.model_dump() for e in payload.calendar_events]
+        if payload.calendar_events is not None else None
+    )
+    schedule = await run_schedule_graph(d, calendar_events=events)
     return schedule
 
 
