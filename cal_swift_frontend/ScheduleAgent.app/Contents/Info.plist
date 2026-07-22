@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.dayflow.scheduleagent</string>
+    <key>CFBundleName</key>
+    <string>Schedule Agent</string>
+    <key>CFBundleDisplayName</key>
+    <string>Schedule Agent</string>
+    <key>CFBundleExecutable</key>
+    <string>ScheduleAgentApp</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <!-- Required for EventKit access on macOS. Without these the system DENIES
+         the request outright (no prompt). Both the macOS 14 full-access keys
+         and the legacy keys are set for safety. -->
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Schedule Agent reads and writes your calendar to place and update your time blocks.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Schedule Agent creates and updates reminders for your upcoming project tasks.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Schedule Agent reads and writes your calendar to place and update your time blocks.</string>
+    <key>NSRemindersUsageDescription</key>
+    <string>Schedule Agent creates and updates reminders for your upcoming project tasks.</string>
+</dict>
+</plist>

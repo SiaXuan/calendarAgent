@@ -14,7 +14,19 @@ let package = Package(
         .target(name: "ScheduleAgentCore"),
         .executableTarget(
             name: "ScheduleAgentApp",
-            dependencies: ["ScheduleAgentCore"]
+            dependencies: ["ScheduleAgentCore"],
+            linkerSettings: [
+                // Embed Info.plist into the Mach-O so macOS TCC can read the
+                // EventKit usage-description strings (a bare SwiftPM executable
+                // has no bundle). Without this, Calendar/Reminders access is
+                // denied outright. Path is relative to the package root.
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Info.plist",
+                ])
+            ]
         ),
         .testTarget(
             name: "ScheduleAgentCoreTests",

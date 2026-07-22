@@ -1,7 +1,20 @@
 import SwiftUI
 import ScheduleAgentCore
 
+/// Process entry point. `--verify-eventkit` runs a headless round-trip against
+/// the real Calendar/Reminders (see EventKitVerification) instead of launching
+/// the GUI, so the EventKit executor can be exercised on-device manually.
 @main
+enum AppEntry {
+    static func main() {
+        if CommandLine.arguments.contains("--verify-eventkit") {
+            EventKitVerification.run()
+            return
+        }
+        ScheduleAgentApp.main()
+    }
+}
+
 struct ScheduleAgentApp: App {
     var body: some Scene {
         WindowGroup {
