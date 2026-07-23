@@ -19,22 +19,17 @@ struct ProjectDetailView: View {
 
     private var canPreview: Bool {
         model.importFileURL != nil
+            || model.importImageData != nil
             || !model.importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var hasPlan: Bool { !(model.plan?.items.isEmpty ?? true) }
 
     var body: some View {
-        Form {
-            progressSection
-            planSection
-            importSection
-            writeSection
-            if let status = model.statusMessage {
-                Section { Text(status).font(.callout).foregroundStyle(.secondary) }
-            }
+        HSplitView {
+            chatPane.frame(minWidth: 280, idealWidth: 340)
+            planPane.frame(minWidth: 300)
         }
-        .formStyle(.grouped)
         .navigationTitle(project.name)
         .task {
             await model.loadDetail(project)
@@ -44,9 +39,67 @@ struct ProjectDetailView: View {
             isPresented: $isPickingFile,
             allowedContentTypes: [.plainText, .pdf, UTType(filenameExtension: "docx") ?? .data]
         ) { result in
-            // Select only — don't preview yet, so the user can add an instruction first.
             if case let .success(url) = result { model.selectImportFile(url) }
         }
+    }
+
+    // MARK: Left — conversation
+
+    private var chatPane: some View {
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        if model.chatMessages.isEmpty {
+                            Text("把课程大纲 / PRD 粘进来或附上截图，我来整理成计划；之后直接说怎么改。")
+                                .font(.callout).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 8)
+                        }
+                        ForEach(Array(model.chatMessages.enumerated()), id: \.offset) { i, m in
+                            chatBubble(m).id(i)
+                        }
+                        if model.isChatting {
+                            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("思考中…").font(.caption).foregroundStyle(.secondary) }
+                                .id("typing")
+                        }
+                    }
+                    .padding(12)
+                }
+                .onChange(of: model.chatMessages.count) { _, _ in
+                    withAnimation { proxy.scrollTo(model.chatMessages.count - 1, anchor: .bottom) }
+                }
+            }
+            Divider()
+            composer.padding(10)
+        }
+    }
+
+    private func chatBubble(_ m: DayflowChatMessage) -> some View {
+        let isUser = m.role == "user"
+        return HStack {
+            if isUser { Spacer(minLength: 24) }
+            Text(m.content)
+                .font(.system(size: 13))
+                .textSelection(.enabled)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 10)
+                    .fill(isUser ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.1)))
+                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+            if !isUser { Spacer(minLength: 24) }
+        }
+    }
+
+    // MARK: Right — plan
+
+    private var planPane: some View {
+        Form {
+            progressSection
+            planSection
+            multidaySection
+            writeSection
+        }
+        .formStyle(.grouped)
     }
 
     // MARK: Progress
@@ -84,26 +137,16 @@ struct ProjectDetailView: View {
             }
         } else {
             Section("计划节点") {
-                Text("还没有节点。先在下面导入一份计划（课程大纲 / PRD / 一段目标）。")
+                Text("还没有节点，在左边发一句或粘贴大纲。")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
     }
 
-    // MARK: Import
+    // MARK: Composer (chat input)
 
-    private var importSection: some View {
-        Section("导入计划") {
-            if let preview = model.importPreview {
-                importPreviewCard(preview)
-            } else {
-                composer
-            }
-        }
-    }
-
-    /// Chat-style composer: an attachment chip (when a file is picked) above one
-    /// text area, with attach + preview actions below.
+    /// The conversation input: attachment chip(s) above one text area, with
+    /// attach + paste-image + send below.
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let url = model.importFileURL {
@@ -122,6 +165,25 @@ struct ProjectDetailView: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(.blue.opacity(0.08)))
             }
 
+            if let data = model.importImageData, let nsImage = NSImage(data: data) {
+                HStack(spacing: 8) {
+                    Image(nsImage: nsImage)
+                        .resizable().scaledToFill()
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    Text("图片").font(.system(size: 12))
+                    Spacer()
+                    Button {
+                        model.importImageData = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(.purple.opacity(0.08)))
+            }
+
             ZStack(alignment: .topLeading) {
                 if model.importText.isEmpty {
                     Text(composerPlaceholder)
@@ -130,10 +192,11 @@ struct ProjectDetailView: View {
                         .padding(.horizontal, 5).padding(.vertical, 8)
                         .allowsHitTesting(false)
                 }
-                TextEditor(text: $model.importText)
-                    .font(.system(size: 12))
-                    .frame(minHeight: 96)
-                    .scrollContentBackground(.hidden)
+                PastingTextEditor(text: $model.importText) { png in
+                    model.importImageData = png
+                    model.importFileURL = nil
+                }
+                .frame(minHeight: 96)
             }
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.secondary.opacity(0.3)))
 
@@ -146,81 +209,96 @@ struct ProjectDetailView: View {
                 .buttonStyle(.borderless)
                 .help("附加文件（.txt / .md / .pdf / .docx）")
 
+                Button {
+                    if !model.attachClipboardImage() {
+                        model.statusMessage = "剪贴板里没有图片"
+                    }
+                } label: {
+                    Image(systemName: "photo.on.rectangle").font(.system(size: 14, weight: .medium))
+                }
+                .buttonStyle(.borderless)
+                .help("粘贴图片 / 截图（或 ⌘V）")
+
                 Spacer()
                 if model.isImporting { ProgressView().controlSize(.small) }
-                Button("预览") { Task { await model.previewImport(project: project) } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canPreview || model.isImporting)
+                Button {
+                    Task { await model.submitComposer(project: project) }
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 20))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canPreview || model.isImporting || model.isChatting)
             }
         }
         .padding(.vertical, 2)
     }
 
     private var composerPlaceholder: String {
-        model.importFileURL == nil
-            ? "粘贴课程大纲 / PRD / 一段目标，或点回形针附加文件。想改年份或周几，直接在这写。"
-            : "对这份文件的说明（可选），例如：挪到 2027 年秋季，作业仍周一交。"
-    }
-
-    private func importPreviewCard(_ preview: DayflowImportResult) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                if let kind = preview.docKind { Text(kind).font(.caption).foregroundStyle(.secondary) }
-                if let c = preview.confidence {
-                    Text("把握 \(Int(c * 100))%").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Text("将导入 \(preview.tasks?.count ?? 0) 个任务：")
-                .font(.system(size: 13, weight: .semibold))
-            ForEach(preview.tasks ?? []) { task in
-                HStack(spacing: 6) {
-                    Image(systemName: "circle").font(.system(size: 8)).foregroundStyle(.secondary)
-                    Text(task.title).font(.system(size: 12))
-                    if let d = task.deadline { Text(d).font(.caption2).foregroundStyle(.secondary) }
-                }
-            }
-            HStack {
-                Button("取消") { model.cancelImportPreview() }
-                Spacer()
-                Button("确认导入") {
-                    Task { await model.confirmImport(project: project) }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isImporting)
-            }
-            .padding(.top, 4)
+        if model.importImageData != nil || model.importFileURL != nil {
+            return "说明（可选）"
         }
-        .padding(.vertical, 2)
+        return "粘贴大纲 / PRD / 目标；或附文件、⌘V 贴截图"
     }
 
     // MARK: Write to calendar
 
     private var writeSection: some View {
-        Section("写入日历") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("复核上面的计划节点后，写成「提醒事项」App 里的待办——按项目分到一个以项目名命名的列表，用下面选的颜色标记。改过任务或勾了完成后再点一次即可重新同步（已完成的保留、变了的替换、删掉的清除）。")
-                    .font(.caption).foregroundStyle(.secondary)
-
-                HStack(spacing: 8) {
-                    ColorPicker(selection: $listColor, supportsOpacity: false) {
-                        Text("列表颜色").font(.callout)
-                    }
-                    .onChange(of: listColor) { _, newValue in
-                        Task { await model.setColor(Self.hexString(from: newValue), for: project) }
-                    }
-                    Spacer()
+        Section("写入提醒") {
+            HStack(spacing: 8) {
+                ColorPicker(selection: $listColor, supportsOpacity: false) {
+                    Text("列表颜色").font(.callout)
                 }
-
+                .onChange(of: listColor) { _, newValue in
+                    Task { await model.setColor(Self.hexString(from: newValue), for: project) }
+                }
+                Spacer()
                 Button {
                     Task { await model.writeToCalendar(project: liveProject) }
                 } label: {
-                    Label("写入日历（提醒）", systemImage: "checkmark.circle")
+                    Label("写入", systemImage: "checkmark.circle")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!hasPlan)
-                if !hasPlan {
-                    Text("先导入计划生成节点，才能写入。")
-                        .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: Multi-day distribution
+
+    @ViewBuilder private var multidaySection: some View {
+        Section("多天排程") {
+            VStack(alignment: .leading, spacing: 10) {
+                Button {
+                    Task { await model.planMultiday(project: project) }
+                } label: {
+                    if model.isPlanning {
+                        HStack(spacing: 6) { ProgressView().controlSize(.small); Text("排程中…") }
+                    } else {
+                        Label("排入多天日程", systemImage: "calendar.badge.clock")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!hasPlan || model.isPlanning)
+
+                if let byDate = model.multiday?.byDate, !byDate.isEmpty {
+                    ForEach(byDate.keys.sorted(), id: \.self) { day in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(day).font(.caption).foregroundStyle(.secondary)
+                            ForEach(Array((byDate[day] ?? []).enumerated()), id: \.offset) { _, c in
+                                HStack(spacing: 6) {
+                                    Image(systemName: "circle.fill")
+                                        .font(.system(size: 5)).foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text(c.title).font(.system(size: 12)).lineLimit(1)
+                                        Text(c.taskTitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    Spacer(minLength: 4)
+                                    Text("\(c.minutes)m").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 1)
+                    }
                 }
             }
         }
@@ -244,5 +322,90 @@ struct ProjectDetailView: View {
             red: Double((v >> 16) & 0xFF) / 255,
             green: Double((v >> 8) & 0xFF) / 255,
             blue: Double(v & 0xFF) / 255)
+    }
+}
+
+/// A plain-text editor that ALSO handles ⌘V of an image: on paste, if the
+/// clipboard holds an image it's captured via `onPasteImage` (SwiftUI's
+/// TextEditor swallows ⌘V, so we drop to an NSTextView to intercept it);
+/// otherwise it pastes text as usual.
+struct PastingTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    var onPasteImage: (Data) -> Void
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+
+        let size = scroll.contentSize
+        let textView = ImagePastingTextView(frame: NSRect(origin: .zero, size: size))
+        textView.onPasteImage = onPasteImage
+        textView.delegate = context.coordinator
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.font = .systemFont(ofSize: 12)
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 2, height: 6)
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                  height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.containerSize = NSSize(width: size.width,
+                                                       height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+        textView.string = text
+
+        scroll.documentView = textView
+        return scroll
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? ImagePastingTextView else { return }
+        textView.onPasteImage = onPasteImage
+        if textView.string != text { textView.string = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        let parent: PastingTextEditor
+        init(_ parent: PastingTextEditor) { self.parent = parent }
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            parent.text = tv.string
+        }
+    }
+}
+
+final class ImagePastingTextView: NSTextView {
+    var onPasteImage: ((Data) -> Void)?
+
+    // ⌘V (a command-key event) is dispatched through performKeyEquivalent before
+    // the text system's normal key handling — the reliable spot to catch an image
+    // paste while the field is focused. Falls through to normal text paste when
+    // the clipboard has no image.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "v",
+           let png = ProjectsViewModel.clipboardImagePNG() {
+            onPasteImage?(png)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func paste(_ sender: Any?) {
+        if let png = ProjectsViewModel.clipboardImagePNG() {
+            onPasteImage?(png)
+            return
+        }
+        super.paste(sender)
     }
 }

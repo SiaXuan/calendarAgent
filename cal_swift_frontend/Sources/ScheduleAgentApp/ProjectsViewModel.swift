@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Drives the Projects UI (list → detail → import → replan). Kept separate from
@@ -18,6 +19,10 @@ final class ProjectsViewModel: ObservableObject {
     // Detail state for the selected project.
     @Published var plan: DayflowProjectPlan?
     @Published var progress: DayflowProjectProgress?
+    @Published var multiday: DayflowMultidayPlan?      // per-day distribution
+    @Published var isPlanning = false
+    @Published var chatMessages: [DayflowChatMessage] = []   // project conversation
+    @Published var isChatting = false
 
     // Import flow.
     @Published var importPreview: DayflowImportResult?   // dry-run result awaiting confirm
@@ -26,6 +31,7 @@ final class ProjectsViewModel: ObservableObject {
     // how to handle that file.
     @Published var importText: String = ""
     @Published var importFileURL: URL?                   // set when a file was attached
+    @Published var importImageData: Data?                // set when an image was pasted/attached (PNG)
     @Published var isImporting = false
     @Published var statusMessage: String?
 
@@ -78,8 +84,60 @@ final class ProjectsViewModel: ObservableObject {
         errorMessage = nil
         async let planResult = try? client.fetchProjectPlan(id: project.id)
         async let progressResult = try? client.fetchProjectProgress(id: project.id)
+        async let multidayResult = try? client.fetchMultidayPlan(id: project.id)
+        async let chatResult = try? client.fetchProjectChat(id: project.id)
         plan = await planResult
         progress = await progressResult
+        multiday = await multidayResult
+        chatMessages = (await chatResult)?.messages ?? []
+    }
+
+    // MARK: Planning conversation
+
+    /// Send the composer as one conversation turn — text and/or an attachment
+    /// (pasted image / file). Everything goes through the planning chat; there's
+    /// no separate import step or intent gate. The plan (right pane) refreshes
+    /// when the turn changed it.
+    func submitComposer(project: DayflowProject) async {
+        let text = importText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let image = importImageData
+        let fileURL = importFileURL
+        guard !text.isEmpty || image != nil || fileURL != nil else { return }
+
+        let label = image != nil ? "［图片］" : (fileURL != nil ? "［\(fileURL!.lastPathComponent)］" : "")
+        let bubble = [label, text].filter { !$0.isEmpty }.joined(separator: " ")
+        chatMessages.append(DayflowChatMessage(role: "user", content: bubble))
+        importText = ""; importImageData = nil; importFileURL = nil
+
+        isChatting = true
+        errorMessage = nil
+        defer { isChatting = false }
+        do {
+            let reply = try await client.sendProjectChat(
+                id: project.id, message: text, imageData: image, fileURL: fileURL)
+            chatMessages.append(DayflowChatMessage(role: "assistant", content: reply.reply))
+            if reply.planChanged { await loadDetail(project) }
+        } catch {
+            errorMessage = friendly(error)
+        }
+    }
+
+    /// Distribute all active project work across days. Reads the next 30 days of
+    /// local calendar (when authorized) so the planner works around real
+    /// commitments; then reloads the detail to show the new distribution.
+    func planMultiday(project: DayflowProject) async {
+        isPlanning = true
+        statusMessage = nil
+        errorMessage = nil
+        defer { isPlanning = false }
+        let fixed = adapter.fixedMinutesByDate(from: Date(), days: 30)
+        do {
+            let result = try await client.planMultiday(fixedMinutesByDate: fixed)
+            statusMessage = "已排 \(result.chunks) 个时段"
+            await loadDetail(project)
+        } catch {
+            errorMessage = friendly(error)
+        }
     }
 
     // MARK: Import (dry-run preview → confirm)
@@ -87,6 +145,51 @@ final class ProjectsViewModel: ObservableObject {
     /// Pick a file for import — remembered so the confirm step re-imports the same
     /// file (not the empty text field).
     func selectImportFile(_ url: URL) { importFileURL = url }
+
+    /// Grab an image off the clipboard (pasted screenshot / photo) as PNG, so it
+    /// can be imported via Claude vision. Returns whether an image was found.
+    @discardableResult
+    func attachClipboardImage() -> Bool {
+        guard let png = Self.clipboardImagePNG() else { return false }
+        importImageData = png
+        importFileURL = nil
+        return true
+    }
+
+    static func clipboardImagePNG() -> Data? {
+        let pb = NSPasteboard.general
+
+        // 1) Raw image data on the pasteboard (screenshots, copied images).
+        for type in [NSPasteboard.PasteboardType.png, .tiff] where pb.data(forType: type) != nil {
+            if let data = pb.data(forType: type) {
+                if type == .png { return data }
+                if let png = pngFromTIFF(data) { return png }
+            }
+        }
+        // 2) NSImage from the pasteboard (covers more sources / representations).
+        if let image = NSImage(pasteboard: pb), let png = pngFromImage(image) { return png }
+
+        // 3) A copied image FILE (e.g. dragged/copied from Finder).
+        if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL] {
+            let exts = ["png", "jpg", "jpeg", "gif", "webp", "heic", "tiff", "bmp"]
+            for url in urls where exts.contains(url.pathExtension.lowercased()) {
+                if let data = try? Data(contentsOf: url),
+                   let image = NSImage(data: data), let png = pngFromImage(image) {
+                    return png
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func pngFromImage(_ image: NSImage) -> Data? {
+        guard let tiff = image.tiffRepresentation else { return nil }
+        return pngFromTIFF(tiff)
+    }
+
+    private static func pngFromTIFF(_ tiff: Data) -> Data? {
+        NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+    }
 
     /// Dry-run preview — no persistence, no reminder access prompt.
     func previewImport(project: DayflowProject) async {
@@ -116,7 +219,7 @@ final class ProjectsViewModel: ObservableObject {
         do {
             let result = try await callImport(project: project, composer: composer, dryRun: false)
             clearImportInputs()
-            statusMessage = "已导入 \(result.tasks?.count ?? 0) 个任务，下面复核计划后点「写入日历」"
+            statusMessage = "已导入 \(result.tasks?.count ?? 0) 个任务"
             await loadDetail(project)
         } catch let e as DayflowRequestError {
             errorMessage = e.message ?? "导入失败。"
@@ -128,6 +231,11 @@ final class ProjectsViewModel: ObservableObject {
     private func callImport(
         project: DayflowProject, composer: String, dryRun: Bool
     ) async throws -> DayflowImportResult {
+        if let image = importImageData {
+            // Pasted image → Claude vision; composer text is a note about it.
+            return try await client.importPlan(
+                id: project.id, imageData: image, instruction: composer, dryRun: dryRun)
+        }
         if let url = importFileURL {
             // File is the content; the composer text is a note about it.
             return try await client.importPlan(
@@ -140,12 +248,14 @@ final class ProjectsViewModel: ObservableObject {
     func cancelImportPreview() {
         importPreview = nil
         importFileURL = nil
+        importImageData = nil
     }
 
     private func clearImportInputs() {
         importPreview = nil
         importText = ""
         importFileURL = nil
+        importImageData = nil
     }
 
     // MARK: Write to calendar → project's reminders via EventKit
@@ -167,7 +277,7 @@ final class ProjectsViewModel: ObservableObject {
             try await adapter.applyReminderChangeset(
                 result.reminders, listName: project.name, colorHex: project.color)
             let r = result.reminders
-            statusMessage = "已写入「\(project.name)」提醒列表：新增 \(r.create.count) · 改 \(r.update.count) · 删 \(r.delete.count) · 不变 \(r.unchanged)"
+            statusMessage = "已写入：+\(r.create.count) ·改\(r.update.count) ·删\(r.delete.count)"
             await loadDetail(project)
         } catch {
             errorMessage = friendly(error)

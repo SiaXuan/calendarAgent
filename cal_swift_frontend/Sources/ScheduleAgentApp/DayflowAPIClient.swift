@@ -552,6 +552,51 @@ struct DayflowProjectProgress: Codable {
     }
 }
 
+struct DayflowMultidayResult: Codable {
+    var chunks: Int
+    var projects: Int
+}
+
+struct DayflowChatMessage: Codable {
+    var role: String        // "user" | "assistant"
+    var content: String
+}
+
+struct DayflowChatHistory: Codable {
+    var messages: [DayflowChatMessage]
+}
+
+struct DayflowChatReply: Codable {
+    var reply: String
+    var planChanged: Bool
+    enum CodingKeys: String, CodingKey {
+        case reply
+        case planChanged = "plan_changed"
+    }
+}
+
+struct DayflowMultidayPlan: Codable {
+    var projectID: String
+    var byDate: [String: [Chunk]]
+
+    struct Chunk: Codable {
+        var title: String
+        var taskTitle: String
+        var minutes: Int
+        var taskID: String
+        enum CodingKeys: String, CodingKey {
+            case title, minutes
+            case taskTitle = "task_title"
+            case taskID = "task_id"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case projectID = "project_id"
+        case byDate = "by_date"
+    }
+}
+
 struct DayflowImportedTask: Codable, Identifiable {
     var id: String
     var title: String
@@ -702,6 +747,39 @@ extension DayflowAPIClient {
         try await request("/projects/\(id)/progress", encodedBody: nil)
     }
 
+    /// Distribute all active project work across days (planner). `fixedMinutesByDate`
+    /// is per-day committed time (YYYY-MM-DD → minutes) read from the local calendar.
+    func planMultiday(fixedMinutesByDate: [String: Int]) async throws -> DayflowMultidayResult {
+        let body = try JSONSerialization.data(
+            withJSONObject: ["fixed_minutes_by_date": fixedMinutesByDate])
+        return try await request("/projects/plan-multiday", method: "POST", encodedBody: body)
+    }
+
+    func fetchMultidayPlan(id: String) async throws -> DayflowMultidayPlan {
+        try await request("/projects/\(id)/multiday", encodedBody: nil)
+    }
+
+    func fetchProjectChat(id: String) async throws -> DayflowChatHistory {
+        try await request("/projects/\(id)/chat", encodedBody: nil)
+    }
+
+    /// One planning turn (multipart): `message` plus an optional pasted image or
+    /// attached file — the backend's conversational LLM decides what to do.
+    func sendProjectChat(
+        id: String, message: String, imageData: Data? = nil, fileURL: URL? = nil
+    ) async throws -> DayflowChatReply {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var file: (field: String, filename: String, mime: String, data: Data)?
+        if let imageData {
+            file = (field: "file", filename: "pasted.png", mime: "image/png", data: imageData)
+        } else if let fileURL {
+            file = (field: "file", filename: fileURL.lastPathComponent,
+                    mime: "application/octet-stream", data: try Data(contentsOf: fileURL))
+        }
+        let body = Self.multipartBody(boundary: boundary, fields: ["message": message], file: file)
+        return try await requestMultipart("/projects/\(id)/chat", boundary: boundary, body: body)
+    }
+
     /// Completion-aware re-plan → a reminder change-set the EventKit layer applies.
     func replanProject(
         id: String, currentReminders: [DayflowCurrentReminderInput] = []
@@ -741,6 +819,20 @@ extension DayflowAPIClient {
             fields: fields,
             file: (field: "file", filename: fileURL.lastPathComponent,
                    mime: "application/octet-stream", data: data))
+        return try await requestMultipart("/projects/\(id)/import", boundary: boundary, body: body)
+    }
+
+    func importPlan(
+        id: String, imageData: Data, mime: String = "image/png",
+        instruction: String? = nil, dryRun: Bool = false
+    ) async throws -> DayflowImportResult {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var fields = ["dry_run": dryRun ? "true" : "false"]
+        if let instruction, !instruction.isEmpty { fields["instruction"] = instruction }
+        let ext = mime == "image/jpeg" ? "jpg" : "png"
+        let body = Self.multipartBody(
+            boundary: boundary, fields: fields,
+            file: (field: "file", filename: "pasted.\(ext)", mime: mime, data: imageData))
         return try await requestMultipart("/projects/\(id)/import", boundary: boundary, body: body)
     }
 

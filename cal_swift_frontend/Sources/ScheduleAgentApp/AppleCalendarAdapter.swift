@@ -181,6 +181,28 @@ extension AppleCalendarAdapter {
             }
     }
 
+    /// Committed minutes per day (YYYY-MM-DD → minutes) over the next `days`, from
+    /// real timed events (skipping all-day / subscription / birthday feeds) — the
+    /// multi-day planner subtracts these from each day's work window. Empty if
+    /// calendar access hasn't been granted.
+    func fixedMinutesByDate(from start: Date, days: Int) -> [String: Int] {
+        guard hasEventAccess else { return [:] }
+        let cal = Calendar.current
+        let startDay = cal.startOfDay(for: start)
+        guard let end = cal.date(byAdding: .day, value: days, to: startDay) else { return [:] }
+        let predicate = store.predicateForEvents(withStart: startDay, end: end, calendars: nil)
+        var out: [String: Int] = [:]
+        for event in store.events(matching: predicate) {
+            if event.isAllDay { continue }
+            let type = event.calendar.type
+            if type == .subscription || type == .birthday { continue }
+            let mins = Int(event.endDate.timeIntervalSince(event.startDate) / 60)
+            guard mins > 0 else { continue }
+            out[Self.dayKey(event.startDate), default: 0] += mins
+        }
+        return out
+    }
+
     /// The agent-owned reminders currently in Reminders for `projectID` (nil =
     /// any project), as the backend's replan input.
     func currentAgentReminders(forProject projectID: String? = nil) async -> [DayflowCurrentReminderInput] {
@@ -359,6 +381,7 @@ extension AppleCalendarAdapter {
     }()
 
     static func iso(_ date: Date) -> String { isoDateTime.string(from: date) }
+    static func dayKey(_ date: Date) -> String { isoDate.string(from: date) }
 
     static func parse(_ value: String) -> Date? {
         if value.count >= 19, let d = isoDateTime.date(from: String(value.prefix(19))) { return d }

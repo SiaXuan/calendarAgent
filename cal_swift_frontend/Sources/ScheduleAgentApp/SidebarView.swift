@@ -862,13 +862,19 @@ struct SidebarView: View {
             }
 
             if entries.isEmpty {
-                Text("Nothing upcoming.")
-                    .font(.callout)
-                    .foregroundStyle(upcomingSecondaryColor)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(9)
-                    .background(upcomingRowFill)
-                    .clipShape(RoundedRectangle(cornerRadius: 11))
+                if isLoadingBackend {
+                    // Generation in flight — don't look like an empty day.
+                    GeneratingPlaceholderView(
+                        rowFill: upcomingRowFill, textColor: upcomingSecondaryColor)
+                } else {
+                    Text("Nothing upcoming.")
+                        .font(.callout)
+                        .foregroundStyle(upcomingSecondaryColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(9)
+                        .background(upcomingRowFill)
+                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                }
             } else {
                 VStack(spacing: 7) {
                     ForEach(entries) { entry in
@@ -1839,6 +1845,43 @@ struct SidebarView: View {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.date(from: string)
+    }
+}
+
+/// Shown in the Upcoming lane while the backend is computing a schedule, so an
+/// in-flight generation doesn't read as an empty day. A spinner line + a few
+/// gently pulsing skeleton rows.
+private struct GeneratingPlaceholderView: View {
+    let rowFill: Color
+    let textColor: Color
+    @State private var pulse = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("正在为你计算今天的日程…")
+                    .font(.callout)
+                    .foregroundStyle(textColor)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(9)
+            .background(rowFill)
+            .clipShape(RoundedRectangle(cornerRadius: 11))
+
+            ForEach(0..<3, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 11)
+                    .fill(rowFill)
+                    .frame(height: 44)
+                    .opacity(pulse ? 0.45 : 0.95)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
     }
 }
 
