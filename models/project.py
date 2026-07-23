@@ -34,6 +34,8 @@ class Project(BaseModel):
     description: str | None = None
     source: str = "manual"          # "manual" | "import" | "chat"
     language: str | None = None     # locale the project text was produced in
+    color: str | None = None        # user-chosen hex (e.g. "#FF9500"); the
+                                    # per-project reminder list is tinted with it
     status: ProjectStatus = ProjectStatus.active
     deadline: date | None = None
     start_date: date | None = None

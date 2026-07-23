@@ -6,7 +6,6 @@ together), track completion, and feed the dashboard heatmap. The
 completion-aware replan endpoint is added in Step 1.6 once the multi-day
 scheduling model is settled.
 """
-import json
 import logging
 import uuid
 from datetime import date, datetime, timedelta
@@ -18,7 +17,7 @@ from agents import project_service as svc
 from integrations.document_parser import DocumentParseError
 from models.project import CompletionStatus, Project, ProjectStatus
 from storage import (
-    completion_store, project_plan_store, project_store, save_project_store,
+    completion_store, project_store, save_project_store,
 )
 
 router = APIRouter()
@@ -32,6 +31,7 @@ class ProjectCreate(BaseModel):
     description: str | None = None
     source: str = "manual"
     language: str | None = None
+    color: str | None = None
     deadline: date | None = None
     start_date: date | None = None
 
@@ -40,6 +40,7 @@ class ProjectUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     status: ProjectStatus | None = None
+    color: str | None = None
     deadline: date | None = None
     start_date: date | None = None
     notes: str | None = None
@@ -101,7 +102,7 @@ async def decompose_project(project_id: str):
 @router.get("/projects/{project_id}/plan")
 async def get_project_plan(project_id: str):
     _require(project_id)
-    snapshot = project_plan_store.get(project_id, [])
+    snapshot = svc.get_or_build_plan(project_id)
     return {
         "project_id": project_id,
         "items": [
@@ -130,40 +131,30 @@ async def import_plan(
     text: str | None = Form(None),
     instruction: str | None = Form(None),
     dry_run: bool = Form(False),
-    current_reminders: str | None = Form(None),
 ):
     """
     Import a plan document (pasted text / .txt / .md / .pdf / .docx) into the
     project. Multipart form: exactly one of `file` or `text`, an optional
     natural-language `instruction` (e.g. reuse an old syllabus in a new term),
-    optional `dry_run` (preview without persisting), and optional
-    `current_reminders` (JSON array of the reminders the frontend owns for this
-    project, so a confirmed import can diff against them).
+    and optional `dry_run` (preview without persisting).
 
-    A confirmed import writes the plan snapshot and returns a reminder change-set
-    {create, update, delete} for the frontend to apply via EventKit. 422 on
+    A confirmed import creates the project's Tasks and writes the plan snapshot
+    (so "计划节点" fills for review). Reminders are written separately: the user
+    reviews the snapshot and then confirms via POST /projects/{id}/replan. 422 on
     unparseable input or a non-plan doc.
     """
     _require(project_id)
     if (file is None) == (text is None):
         raise HTTPException(
             status_code=422, detail="Provide exactly one of `file` or `text`.")
-    reminders: list[dict] | None = None
-    if current_reminders:
-        try:
-            reminders = json.loads(current_reminders)
-        except (json.JSONDecodeError, ValueError):
-            raise HTTPException(
-                status_code=422, detail="`current_reminders` must be a JSON array.")
     try:
         if file is not None:
             result = await svc.import_plan(
                 project_id, filename=file.filename, data=await file.read(),
-                instruction=instruction, dry_run=dry_run, current_reminders=reminders)
+                instruction=instruction, dry_run=dry_run)
         else:
             result = await svc.import_plan(
-                project_id, text=text, instruction=instruction, dry_run=dry_run,
-                current_reminders=reminders)
+                project_id, text=text, instruction=instruction, dry_run=dry_run)
     except DocumentParseError as e:
         raise HTTPException(status_code=422, detail={"code": e.code, "message": e.message})
     except Exception:

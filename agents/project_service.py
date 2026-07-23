@@ -22,8 +22,8 @@ from models.project import (
 from models.task import CognitiveLoad, Priority, Subtask, Task
 from storage import (
     bump_schedule_version, completion_store, project_plan_store, project_store,
-    save_completion_store, save_project_plan_store, save_project_store,
-    save_task_store, schedule_store, task_store,
+    project_task_store, save_completion_store, save_project_plan_store,
+    save_project_store, save_project_task_store, schedule_store, task_store,
 )
 
 _log = logging.getLogger("dayflow")
@@ -58,7 +58,7 @@ def content_hash(s: Subtask) -> str:
 
 
 def project_tasks(project_id: str) -> list[Task]:
-    return [t for t in task_store.values() if t.project_id == project_id]
+    return [t for t in project_task_store.values() if t.project_id == project_id]
 
 
 def _task_as_node(t: Task) -> Subtask:
@@ -88,6 +88,25 @@ def _snapshot_item(s: Subtask, project_id: str) -> PlanSnapshotItem:
     )
 
 
+def get_or_build_plan(project_id: str) -> list[PlanSnapshotItem]:
+    """
+    The project's plan snapshot. If none is stored yet but the project already
+    has tasks (e.g. imported before snapshots were written), build the coarse
+    node-per-task snapshot on the fly and persist it — so "计划节点" is never
+    empty for a project that has tasks.
+    """
+    snapshot = project_plan_store.get(project_id)
+    if snapshot:
+        return snapshot
+    tasks = project_tasks(project_id)
+    if not tasks:
+        return []
+    snapshot = [_snapshot_item(_task_as_node(t), project_id) for t in tasks]
+    project_plan_store[project_id] = snapshot
+    save_project_plan_store()
+    return snapshot
+
+
 async def decompose_project(project_id: str) -> list[Subtask]:
     """
     Rank + decompose a project's tasks into subtasks (single LLM call), stamp
@@ -114,7 +133,6 @@ async def import_plan(
     text: str | None = None,
     instruction: str | None = None,
     dry_run: bool = False,
-    current_reminders: list[dict] | None = None,
 ) -> dict:
     """
     Parse a document (pasted text / .txt / .md / .pdf / .docx), extract a plan
@@ -199,31 +217,24 @@ async def import_plan(
     if dry_run:
         return result
 
+    # Project tasks go into the project-scoped store, NOT the global scheduling
+    # task_store — they're unconfirmed plan nodes and must not be auto-scheduled
+    # on the daily path.
     for t in new_tasks:
-        task_store[t.id] = t
+        project_task_store[t.id] = t
     proj.task_ids.extend(t.id for t in new_tasks)
     proj.updated_at = datetime.now()
-    save_task_store()
+    save_project_task_store()
     save_project_store()
 
-    # Write the plan straight from the import: every task in the project becomes a
-    # coarse node, the snapshot is refreshed (so "计划节点" fills immediately), and
-    # the nodes are diffed against the reminders the frontend owns → a change-set
-    # it applies via EventKit. The backend never touches the OS reminders itself.
-    from agents import reminder_reconcile
+    # Write the plan snapshot straight from the import so "计划节点" fills
+    # immediately for review. Reminders are NOT written here — the user reviews
+    # the snapshot on the project page and then explicitly writes it to the
+    # calendar via POST /projects/{id}/replan (which returns the change-set the
+    # frontend applies via EventKit).
     coarse = [_task_as_node(t) for t in project_tasks(project_id)]
-    old_snapshot = project_plan_store.get(project_id, [])
-    done_keys = {
-        k for k, r in completion_store.items()
-        if r.project_id == project_id and r.status == CompletionStatus.done
-    }
-    changeset = reminder_reconcile.reconcile_reminders(
-        coarse, current_reminders or [], old_snapshot, done_keys)
     project_plan_store[project_id] = [_snapshot_item(s, project_id) for s in coarse]
     save_project_plan_store()
-
-    result["reminders"] = changeset
-    result["affected_dates"] = reminder_reconcile.affected_dates(changeset, old_snapshot)
     return result
 
 
@@ -390,11 +401,10 @@ async def delete_project(project_id: str, purge_tasks: bool = True) -> dict:
     calendar = await cw.delete_project_events(project_id)
     proj = project_store.get(project_id)
     if purge_tasks and proj:
-        for tid in list(task_store.keys()):
-            if task_store[tid].project_id == project_id:
-                del task_store[tid]
-        from storage import save_task_store
-        save_task_store()
+        for tid in list(project_task_store.keys()):
+            if project_task_store[tid].project_id == project_id:
+                del project_task_store[tid]
+        save_project_task_store()
     for bkey in [k for k, r in completion_store.items() if r.project_id == project_id]:
         del completion_store[bkey]
     save_completion_store()

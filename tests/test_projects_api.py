@@ -43,7 +43,7 @@ def test_delete_project_purges_everything(clean_stores):
     pid = client.post("/projects", json={"name": "P"}).json()["id"]
     # attach a task + completion + snapshot to the project
     from models.task import Task, Priority, CognitiveLoad
-    storage.task_store["t1"] = Task(
+    storage.project_task_store["t1"] = Task(
         id="t1", title="X", priority=Priority.medium,
         cognitive_load=CognitiveLoad.medium, estimated_hours=2, project_id=pid,
     )
@@ -55,7 +55,7 @@ def test_delete_project_purges_everything(clean_stores):
     r = client.delete(f"/projects/{pid}")
     assert r.status_code == 200 and r.json()["deleted"] is True
     assert pid not in storage.project_store
-    assert "t1" not in storage.task_store            # task purged
+    assert "t1" not in storage.project_task_store     # task purged
     assert pid not in storage.project_plan_store
     assert "t1::A" not in storage.completion_store   # completion forgotten
 
@@ -115,13 +115,33 @@ def test_schedule_changeset_endpoint(clean_stores):
     assert cs2["unchanged"] == 1 and not cs2["create"] and not cs2["update"]
 
 
+def test_plan_backfills_from_tasks_without_snapshot(clean_stores):
+    """A project whose tasks exist but has no stored snapshot (imported before
+    snapshots were written) still shows 计划节点 — /plan builds it from tasks."""
+    from datetime import date
+    from models.task import CognitiveLoad, Priority, Task
+
+    pid = client.post("/projects", json={"name": "分布式系统"}).json()["id"]
+    storage.project_task_store["t1"] = Task(
+        id="t1", title="作业1：容器与并发", priority=Priority.high,
+        cognitive_load=CognitiveLoad.deep, estimated_hours=8, project_id=pid,
+        deadline=date(2026, 9, 18),
+    )
+    assert pid not in storage.project_plan_store   # nothing stored yet
+
+    body = client.get(f"/projects/{pid}/plan").json()
+    assert [i["title"] for i in body["items"]] == ["作业1：容器与并发"]
+    # snapshot got persisted so later replan diffs against it
+    assert pid in storage.project_plan_store
+
+
 def test_replan_endpoint(clean_stores):
     """Replan is a coarse, LLM-free re-sync: one reminder per project task at its
     stated date (matching import), completion-aware."""
     from models.task import CognitiveLoad, Priority, Task
 
     pid = client.post("/projects", json={"name": "P"}).json()["id"]
-    storage.task_store["t1"] = Task(
+    storage.project_task_store["t1"] = Task(
         id="t1", title="Paper", priority=Priority.medium,
         cognitive_load=CognitiveLoad.medium, estimated_hours=4, project_id=pid,
         deadline=date(2026, 8, 1),

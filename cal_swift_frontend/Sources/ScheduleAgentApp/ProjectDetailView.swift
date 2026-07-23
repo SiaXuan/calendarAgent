@@ -1,33 +1,45 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// One project: progress + planned items, plus the two headline actions —
-/// import a plan (dry-run preview → confirm) and replan (write reminders to the
-/// local Reminders app via EventKit).
+/// One project. Flow, top to bottom: import/decompose → review the plan snapshot
+/// (计划节点) → confirm-write into the Reminders app via EventKit, grouped into a
+/// list named after the project and tinted with its chosen color.
 struct ProjectDetailView: View {
     let project: DayflowProject
     @ObservedObject var model: ProjectsViewModel
 
     @State private var isPickingFile = false
+    @State private var listColor: Color = .blue
+
+    /// The project as the model currently holds it (picks up a just-saved color).
+    private var liveProject: DayflowProject {
+        model.projects.first { $0.id == project.id } ?? project
+    }
 
     private var canPreview: Bool {
         model.importFileURL != nil
             || !model.importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var hasPlan: Bool { !(model.plan?.items.isEmpty ?? true) }
+
     var body: some View {
         Form {
             progressSection
             planSection
             importSection
-            replanSection
+            writeSection
             if let status = model.statusMessage {
                 Section { Text(status).font(.callout).foregroundStyle(.secondary) }
             }
         }
         .formStyle(.grouped)
         .navigationTitle(project.name)
-        .task { await model.loadDetail(project) }
+        .task {
+            await model.loadDetail(project)
+            if let hex = liveProject.color { listColor = Self.color(fromHex: hex) }
+        }
         .fileImporter(
             isPresented: $isPickingFile,
             allowedContentTypes: [.plainText, .pdf, UTType(filenameExtension: "docx") ?? .data]
@@ -72,7 +84,7 @@ struct ProjectDetailView: View {
             }
         } else {
             Section("计划节点") {
-                Text("还没有节点。先导入一份计划，或用聊天拆解任务。")
+                Text("还没有节点。先在下面导入一份计划（课程大纲 / PRD / 一段目标）。")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -181,19 +193,56 @@ struct ProjectDetailView: View {
         .padding(.vertical, 2)
     }
 
-    // MARK: Replan
+    // MARK: Write to calendar
 
-    private var replanSection: some View {
-        Section("同步提醒") {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("导入时已按原定日期把节点写进「提醒事项」。改过任务或勾了完成后点这里重新同步（已完成的保留、变了的替换、删掉的清除）。")
+    private var writeSection: some View {
+        Section("写入日历") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("复核上面的计划节点后，写成「提醒事项」App 里的待办——按项目分到一个以项目名命名的列表，用下面选的颜色标记。改过任务或勾了完成后再点一次即可重新同步（已完成的保留、变了的替换、删掉的清除）。")
                     .font(.caption).foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    ColorPicker(selection: $listColor, supportsOpacity: false) {
+                        Text("列表颜色").font(.callout)
+                    }
+                    .onChange(of: listColor) { _, newValue in
+                        Task { await model.setColor(Self.hexString(from: newValue), for: project) }
+                    }
+                    Spacer()
+                }
+
                 Button {
-                    Task { await model.replan(project: project) }
+                    Task { await model.writeToCalendar(project: liveProject) }
                 } label: {
-                    Label("重新同步提醒", systemImage: "arrow.triangle.2.circlepath")
+                    Label("写入日历（提醒）", systemImage: "checkmark.circle")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!hasPlan)
+                if !hasPlan {
+                    Text("先导入计划生成节点，才能写入。")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
             }
         }
+    }
+
+    // MARK: Color helpers
+
+    private static func hexString(from color: Color) -> String {
+        let ns = NSColor(color).usingColorSpace(.sRGB) ?? .white
+        let r = Int((ns.redComponent * 255).rounded())
+        let g = Int((ns.greenComponent * 255).rounded())
+        let b = Int((ns.blueComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X", r, g, b)
+    }
+
+    private static func color(fromHex hex: String) -> Color {
+        var s = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        s = s.trimmingCharacters(in: .whitespaces)
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return .blue }
+        return Color(
+            red: Double((v >> 16) & 0xFF) / 255,
+            green: Double((v >> 8) & 0xFF) / 255,
+            blue: Double(v & 0xFF) / 255)
     }
 }

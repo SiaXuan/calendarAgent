@@ -401,6 +401,7 @@ struct DayflowProject: Codable, Identifiable {
     var description: String?
     var source: String?
     var language: String?
+    var color: String?          // user-chosen hex; tints the reminder list
     var status: String?
     var deadline: String?
     var startDate: String?
@@ -410,7 +411,7 @@ struct DayflowProject: Codable, Identifiable {
     var updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, description, source, language, status, deadline, notes
+        case id, name, description, source, language, color, status, deadline, notes
         case startDate = "start_date"
         case taskIDs = "task_ids"
         case createdAt = "created_at"
@@ -674,12 +675,13 @@ extension DayflowAPIClient {
     }
 
     func updateProject(
-        id: String, name: String? = nil, status: String? = nil,
+        id: String, name: String? = nil, status: String? = nil, color: String? = nil,
         deadline: String? = nil, startDate: String? = nil, notes: String? = nil
     ) async throws -> DayflowProject {
         var body: [String: String] = [:]
         if let name { body["name"] = name }
         if let status { body["status"] = status }
+        if let color { body["color"] = color }
         if let deadline { body["deadline"] = deadline }
         if let startDate { body["start_date"] = startDate }
         if let notes { body["notes"] = notes }

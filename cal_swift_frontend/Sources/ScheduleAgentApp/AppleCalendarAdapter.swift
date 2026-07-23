@@ -221,9 +221,16 @@ extension AppleCalendarAdapter {
         try store.commit()
     }
 
-    /// Apply a project's reminders change-set (delete-before-create).
-    func applyReminderChangeset(_ changeset: DayflowReminderChangeset) async throws {
-        let calendar = try reminderCalendar()
+    /// Apply a project's reminders change-set (delete-before-create). Reminders
+    /// go into a reminder list named after the project (`listName`), tinted with
+    /// the project's chosen `colorHex` — so each project's待办 group together and
+    /// read at a glance in the Reminders app.
+    func applyReminderChangeset(
+        _ changeset: DayflowReminderChangeset,
+        listName: String = "Schedule Agent",
+        colorHex: String? = nil
+    ) async throws {
+        let calendar = try reminderCalendar(named: listName, colorHex: colorHex)
         let existing = await fetchReminders()
         var byTag: [String: [EKReminder]] = [:]
         for r in existing {
@@ -296,14 +303,24 @@ extension AppleCalendarAdapter {
         return calendar
     }
 
-    private func reminderCalendar() throws -> EKCalendar {
-        let title = "Schedule Agent"
+    /// A reminder list named `title`, tinted `colorHex`. Reused if it exists
+    /// (color refreshed to the latest pick), created otherwise. Falls back to the
+    /// default reminder list if a dedicated one can't be saved.
+    private func reminderCalendar(named title: String, colorHex: String?) throws -> EKCalendar {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Schedule Agent" : title
+        let color = colorHex.flatMap(Self.cgColor(fromHex:))
         if let existing = store.calendars(for: .reminder)
-            .first(where: { $0.title == title && $0.allowsContentModifications }) {
+            .first(where: { $0.title == name && $0.allowsContentModifications }) {
+            if let color, existing.cgColor != color {
+                existing.cgColor = color
+                try? store.saveCalendar(existing, commit: false)
+            }
             return existing
         }
         let calendar = EKCalendar(for: .reminder, eventStore: store)
-        calendar.title = title
+        calendar.title = name
+        if let color { calendar.cgColor = color }
         calendar.source = store.defaultCalendarForNewReminders()?.source ?? store.sources.first
         do {
             try store.saveCalendar(calendar, commit: true)
@@ -312,6 +329,17 @@ extension AppleCalendarAdapter {
             if let fallback = store.defaultCalendarForNewReminders() { return fallback }
             throw error
         }
+    }
+
+    /// Parse "#RRGGBB" / "RRGGBB" into a CGColor (nil if malformed).
+    private static func cgColor(fromHex hex: String) -> CGColor? {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        let r = CGFloat((v >> 16) & 0xFF) / 255
+        let g = CGFloat((v >> 8) & 0xFF) / 255
+        let b = CGFloat(v & 0xFF) / 255
+        return CGColor(red: r, green: g, blue: b, alpha: 1)
     }
 
     // MARK: Date helpers (backend emits "yyyy-MM-dd'T'HH:mm:ss" or "yyyy-MM-dd")

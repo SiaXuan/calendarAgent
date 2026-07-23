@@ -96,8 +96,7 @@ final class ProjectsViewModel: ObservableObject {
         defer { isImporting = false }
         let composer = importText.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            importPreview = try await callImport(project: project, composer: composer,
-                                                 dryRun: true, currentReminders: [])
+            importPreview = try await callImport(project: project, composer: composer, dryRun: true)
         } catch let e as DayflowRequestError {
             errorMessage = e.message ?? "无法从这份内容里读出计划。"
         } catch {
@@ -105,35 +104,19 @@ final class ProjectsViewModel: ObservableObject {
         }
     }
 
-    /// Confirm — persist the plan AND write it into the Reminders app. Needs
-    /// reminders access: read the reminders we already own, let the backend diff
-    /// against them, and apply the returned change-set via EventKit.
+    /// Confirm — create the project's tasks and write the plan snapshot (fills
+    /// "计划节点" for review). Reminders are NOT written here; the user reviews the
+    /// snapshot and then presses "写入日历" (→ replan) to sync the Reminders app.
     func confirmImport(project: DayflowProject) async {
         isImporting = true
         statusMessage = nil
         errorMessage = nil
         defer { isImporting = false }
-
-        let (granted, accessError) = await adapter.requestFullAccess()
-        guard granted else {
-            errorMessage = "需要「提醒事项」权限：\(accessError?.localizedDescription ?? "被拒绝")"
-            return
-        }
-        let current = await adapter.currentAgentReminders(forProject: project.id)
         let composer = importText.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            let result = try await callImport(project: project, composer: composer,
-                                              dryRun: false, currentReminders: current)
-            if let reminders = result.reminders {
-                try await adapter.applyReminderChangeset(reminders)
-            }
+            let result = try await callImport(project: project, composer: composer, dryRun: false)
             clearImportInputs()
-            let taskN = result.tasks?.count ?? 0
-            if let r = result.reminders {
-                statusMessage = "已导入 \(taskN) 个任务并写入提醒：新增 \(r.create.count) · 改 \(r.update.count) · 删 \(r.delete.count)"
-            } else {
-                statusMessage = "已导入 \(taskN) 个任务"
-            }
+            statusMessage = "已导入 \(result.tasks?.count ?? 0) 个任务，下面复核计划后点「写入日历」"
             await loadDetail(project)
         } catch let e as DayflowRequestError {
             errorMessage = e.message ?? "导入失败。"
@@ -143,19 +126,15 @@ final class ProjectsViewModel: ObservableObject {
     }
 
     private func callImport(
-        project: DayflowProject, composer: String, dryRun: Bool,
-        currentReminders: [DayflowCurrentReminderInput]
+        project: DayflowProject, composer: String, dryRun: Bool
     ) async throws -> DayflowImportResult {
         if let url = importFileURL {
             // File is the content; the composer text is a note about it.
             return try await client.importPlan(
-                id: project.id, fileURL: url, instruction: composer,
-                dryRun: dryRun, currentReminders: currentReminders)
+                id: project.id, fileURL: url, instruction: composer, dryRun: dryRun)
         }
         // Composer text IS the plan; the backend picks up any embedded instruction.
-        return try await client.importPlan(
-            id: project.id, text: composer, dryRun: dryRun,
-            currentReminders: currentReminders)
+        return try await client.importPlan(id: project.id, text: composer, dryRun: dryRun)
     }
 
     func cancelImportPreview() {
@@ -169,9 +148,12 @@ final class ProjectsViewModel: ObservableObject {
         importFileURL = nil
     }
 
-    // MARK: Replan → write reminders via EventKit
+    // MARK: Write to calendar → project's reminders via EventKit
 
-    func replan(project: DayflowProject) async {
+    /// Write the current plan into the Reminders app: diff against the reminders
+    /// we already own for this project and apply the change-set into a list named
+    /// after the project, tinted with its color.
+    func writeToCalendar(project: DayflowProject) async {
         statusMessage = nil
         errorMessage = nil
         let (granted, accessError) = await adapter.requestFullAccess()
@@ -182,10 +164,24 @@ final class ProjectsViewModel: ObservableObject {
         do {
             let current = await adapter.currentAgentReminders(forProject: project.id)
             let result = try await client.replanProject(id: project.id, currentReminders: current)
-            try await adapter.applyReminderChangeset(result.reminders)
+            try await adapter.applyReminderChangeset(
+                result.reminders, listName: project.name, colorHex: project.color)
             let r = result.reminders
-            statusMessage = "提醒已更新：新增 \(r.create.count) · 改 \(r.update.count) · 删 \(r.delete.count) · 不变 \(r.unchanged)"
+            statusMessage = "已写入「\(project.name)」提醒列表：新增 \(r.create.count) · 改 \(r.update.count) · 删 \(r.delete.count) · 不变 \(r.unchanged)"
             await loadDetail(project)
+        } catch {
+            errorMessage = friendly(error)
+        }
+    }
+
+    /// Persist a project's chosen color (used to tint its reminder list). Updates
+    /// the in-memory list so the detail view reflects it immediately.
+    func setColor(_ hex: String, for project: DayflowProject) async {
+        do {
+            let updated = try await client.updateProject(id: project.id, color: hex)
+            if let i = projects.firstIndex(where: { $0.id == updated.id }) {
+                projects[i] = updated
+            }
         } catch {
             errorMessage = friendly(error)
         }

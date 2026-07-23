@@ -19,8 +19,8 @@ from api.tasks import router as tasks_router
 from config import CORS_ORIGINS, DEPLOYMENT_MODE
 from storage import (
     load_completion_store, load_health_store, load_memory_store,
-    load_project_plan_store, load_project_store, load_schedule_store,
-    load_task_store,
+    load_project_plan_store, load_project_store, load_project_task_store,
+    load_schedule_store, load_task_store,
 )
 
 logger = logging.getLogger("dayflow")
@@ -31,6 +31,7 @@ async def lifespan(app: FastAPI):
     # Restore persisted health data so it survives reloads
     load_health_store()
     load_task_store()
+    load_project_task_store()   # after task_store: migrates project tasks out of it
     load_memory_store()
     load_schedule_store()   # restore adjusted schedules so restarts keep manual edits
     load_project_store()

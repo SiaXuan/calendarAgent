@@ -44,6 +44,7 @@ _SCHEDULE_FILE = _DATA_DIR / "schedule_store.json"
 _PROJECT_FILE = _DATA_DIR / "project_store.json"
 _COMPLETION_FILE = _DATA_DIR / "completion_store.json"
 _PROJECT_PLAN_FILE = _DATA_DIR / "project_plan_store.json"
+_PROJECT_TASK_FILE = _DATA_DIR / "project_task_store.json"
 
 
 # ─── In-memory stores ────────────────────────────────────────────────────────
@@ -51,8 +52,18 @@ _PROJECT_PLAN_FILE = _DATA_DIR / "project_plan_store.json"
 # Snapshots keyed by date (one per day). Persisted to JSON.
 health_store: dict[date, HealthSnapshot] = {}
 
-# Tasks keyed by task_id. Persisted to JSON.
+# Tasks keyed by task_id. Persisted to JSON. This is the DAILY SCHEDULING pool:
+# the schedule graph reads it wholesale, so it must contain ONLY tasks meant to
+# be scheduled now (ad-hoc + reminder-synced). Unconfirmed project nodes live in
+# project_task_store, not here.
 task_store: dict[str, Task] = {}
+
+# Project-scoped tasks (Phase 4). Keyed by task_id. A project's plan nodes,
+# AWAITING confirmation — kept OUT of the global task_store so the daily
+# scheduler never auto-schedules unconfirmed project work. The project layer
+# (snapshot / replan / write-to-calendar) reads from here; the multi-day planner
+# (Step 1.6) will be what promotes these into the daily schedule. Persisted.
+project_task_store: dict[str, Task] = {}
 
 # Generated DaySchedule per date. PERSISTED — so manual adjustments (chat
 # agent moves, drag pins, accepted proposals) survive a backend restart instead
@@ -167,6 +178,47 @@ def load_task_store() -> None:
         _log.info("Loaded %d task(s) from disk.", len(task_store))
     except Exception as exc:
         _log.warning("Could not load task store: %s", exc)
+
+
+# ─── project_task_store persistence (Phase 4) ────────────────────────────────
+
+def save_project_task_store() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {tid: t.model_dump(mode="json") for tid, t in project_task_store.items()}
+        _PROJECT_TASK_FILE.write_text(json.dumps(payload, default=str, ensure_ascii=False))
+    except Exception as exc:
+        _log.warning("Could not save project task store: %s", exc)
+
+
+def load_project_task_store() -> None:
+    if _PROJECT_TASK_FILE.exists():
+        try:
+            payload = json.loads(_PROJECT_TASK_FILE.read_text())
+            for tid, data in payload.items():
+                project_task_store[tid] = Task.model_validate(data)
+            _log.info("Loaded %d project task(s) from disk.", len(project_task_store))
+        except Exception as exc:
+            _log.warning("Could not load project task store: %s", exc)
+    _migrate_project_tasks_out_of_task_store()
+
+
+def _migrate_project_tasks_out_of_task_store() -> None:
+    """One-time: pull any project-owned tasks out of the global scheduling
+    task_store into the project-scoped store, so unconfirmed project nodes stop
+    being auto-scheduled on the daily path. Idempotent — safe to run every boot.
+    Load task_store BEFORE calling this."""
+    moved = 0
+    for tid in list(task_store.keys()):
+        t = task_store[tid]
+        if t.project_id is not None:
+            project_task_store.setdefault(tid, t)
+            del task_store[tid]
+            moved += 1
+    if moved:
+        save_task_store()
+        save_project_task_store()
+        _log.info("Migrated %d project task(s) out of the scheduling store.", moved)
 
 
 # ─── memory_store persistence ────────────────────────────────────────────────

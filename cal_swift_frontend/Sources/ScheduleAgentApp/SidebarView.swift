@@ -829,6 +829,19 @@ struct SidebarView: View {
                     }
                 }
                 Spacer()
+                Button {
+                    regenerateToday()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(upcomingPrimaryColor)
+                        .frame(width: 28, height: 26)
+                        .background(upcomingRowFill)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoadingBackend)
+                .help("重新生成今天（按最新日历和睡眠）")
                 Button(isLoadingBackend ? "Syncing" : "Sync All") {
                     syncQueueToCalendar()
                 }

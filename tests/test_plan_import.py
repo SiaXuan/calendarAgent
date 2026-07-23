@@ -45,8 +45,9 @@ def test_import_accepted_creates_tasks(clean_stores, monkeypatch):
     assert body["accepted"] is True and body["doc_kind"] == "syllabus"
     assert [t["title"] for t in body["tasks"]] == ["Read chapter one", "Problem set 1"]
 
-    # persisted + attributed to the project
-    created = [t for t in storage.task_store.values() if t.project_id == pid]
+    # persisted to the project-scoped store (NOT the global scheduling store)
+    assert not storage.task_store
+    created = [t for t in storage.project_task_store.values() if t.project_id == pid]
     assert len(created) == 2
     assert all(t.source == "import" for t in created)
     assert set(storage.project_store[pid].task_ids) == {t.id for t in created}
@@ -55,9 +56,10 @@ def test_import_accepted_creates_tasks(clean_stores, monkeypatch):
     assert read_ch.deadline == date(2026, 8, 1)
 
 
-def test_import_writes_snapshot_and_reminder_changeset(clean_stores, monkeypatch):
-    """New-flow: a confirmed import writes the plan snapshot straight from the
-    coarse task nodes and returns a reminder change-set for the frontend."""
+def test_import_writes_snapshot_for_review(clean_stores, monkeypatch):
+    """A confirmed import writes the plan snapshot straight from the coarse task
+    nodes (so "计划节点" fills for review). Reminders are written separately via
+    replan, NOT by import."""
     _mock_extract(monkeypatch, ExtractedPlan(
         is_plan=True, doc_kind=DocKind.syllabus, confidence=0.9,
         candidate_tasks=[
@@ -72,18 +74,14 @@ def test_import_writes_snapshot_and_reminder_changeset(clean_stores, monkeypatch
     r = client.post(f"/projects/{pid}/import", data={"text": _LONG_TEXT})
     assert r.status_code == 200
     body = r.json()
-    # one reminder to CREATE per imported task, none to delete on a first import
-    assert {c["title"] for c in body["reminders"]["create"]} == {
-        "Read chapter one", "Problem set 1"}
-    assert body["reminders"]["delete"] == []
-    assert "2026-08-01" in body["affected_dates"]
+    assert "reminders" not in body        # import no longer writes reminders
 
-    # snapshot now populated → "计划节点" fills immediately
+    # snapshot now populated → "计划节点" fills immediately for review
     plan = client.get(f"/projects/{pid}/plan").json()
     assert {i["title"] for i in plan["items"]} == {"Read chapter one", "Problem set 1"}
 
     # source_excerpt persisted onto the task (grounds later daily decomposition)
-    read_ch = next(t for t in storage.task_store.values()
+    read_ch = next(t for t in storage.project_task_store.values()
                    if t.title == "Read chapter one")
     assert read_ch.source_excerpt == "Week 1: read chapter one"
 
@@ -163,7 +161,7 @@ def test_import_applies_date_adjustment(clean_stores, monkeypatch):
     r = client.post(f"/projects/{pid}/import",
                     data={"text": _LONG_TEXT, "instruction": "move to 2027 term, due Mondays"})
     assert r.status_code == 200
-    created = [t for t in storage.task_store.values() if t.project_id == pid][0]
+    created = [t for t in storage.project_task_store.values() if t.project_id == pid][0]
     # week-2 Monday of the 2027 term (week-1 Monday + 7 days), not the 2025 date
     assert created.deadline.year == 2027 and created.deadline.weekday() == 0
 
