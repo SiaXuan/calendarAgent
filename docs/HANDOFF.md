@@ -1,82 +1,93 @@
-# Phase 4 交接（2026-07-22）
+# Phase 4 交接（2026-07-23）
 
-> 明天接着干的清单。配合 [ARCHITECTURE.md](ARCHITECTURE.md)（§0 迁移状态、§8 技术债、§10 踩坑）一起看。
-> 结论/踩坑记在 ARCHITECTURE；这份是「现在卡在哪、下一步做什么」。
+> 明天接着干的清单。配合 [ARCHITECTURE.md](ARCHITECTURE.md)（§0 迁移状态最全、§10 踩坑）一起看。
+> 结论/踩坑记在 ARCHITECTURE；这份是「现在到哪了、下一步做什么」。
+> 测试：`.venv/bin/python -m pytest -q` → **276 passed**。
 
-## 现在能用的（本会话完成，已验证）
+## 本会话（2026-07-23）做完的
 
-- **后端迁移三步全绿**（`pytest -q` → 265 passed）：
-  1. 项目 replan → 提醒变更清单（`agents/reminder_reconcile.py` + `POST /projects/{id}/replan`，完成感知）
-  2. `fetch_calendar` 支持前端传入日历（`ScheduleState.calendar_events`；`POST /schedule/generate` 带 `calendar_events`）
-  3. 多格式导入（文本/.md/.txt/.pdf/.docx → 建 Task；`POST /projects/{id}/import`，dry_run 预览、意图闸门、日期平移）
-- **EventKit 执行层**（`AppleCalendarAdapter.swift`）：读事件/提醒、apply 事件&提醒变更集（先删后建）、权限。**真机验证通过**（`open -W ScheduleAgent.app --args --verify-eventkit` → `~/eventkit-verify.log` 全绿）。
-- **Projects 界面**（独立窗口，非浮窗）：列表/新建/删除、导入（chatbot 式一个输入区 + 回形针附件 + dry_run 预览确认）、日期平移说明、`重排并写入提醒`。
-- **日期平移**（`agents/plan_reschedule.py`）：LLM 只读「第几周+周几」和解析说明，日期由纯函数算（换年 / 学期周锚点 / 周几覆盖）。两个日期字段都挪。
-- **启动优先读缓存**：`onAppear` 先 `GET /schedule/{today}`（秒开、不碰 LLM/CalDAV），只有当天还没日程才走生成流。
-- **健康数据**：后端一直有存盘（`data/health_store.json`）；启动回读睡眠窗口；SSE health 事件补了 `energy_source`；流断了回退拉缓存日程恢复曲线。
+### 项目 = 一条有记忆的对话（chatbot，核心重构）
+- 项目详情页改成**两栏**：左多轮对话、右计划节点（标题+日期）+ 多天排程 + 写入提醒。
+- **一个 project 一条对话线、全程记忆**：`storage.project_chat_store`（按 project_id 存全历史，落盘）。
+- **导入并进对话、没有硬意图闸门**：`POST /projects/{id}/chat`（multipart：message + 可选 file）。图→视觉、文档→parse 成文本，一起喂给会话 LLM（`agents/project_chat.converse`）。LLM 自己判断：是计划就把**完整新任务列表**返回 → 应用到右边；不明确就**反问兜底**（「你发的像 X，想…吗？」），绝不硬拒。
+- 改计划时**同名任务保 id**（`project_service._apply_task_revision`）→ 进度/提醒不丢，重建快照。
+- 旧 `POST /import`（+ 置信度闸门，阈值已放宽到 0.4、去掉 is_plan 一票否决）还在，但前端 chatbot 不再走它；前端 `submitComposer` 一律走 `/chat`。
 
-## 已修（2026-07-23 会话）
+### 多天规划器（Step 1.6）
+- `agents/multiday_planner.py`：推理 LLM（`sonnet`，可 `LLM_REASON_MODEL` 换 opus）+ 贪心兜底 + 容量/deadline 校验。
+- **只规划 deadline 在窗口内的项目节点**（`_in_window_project_nodes`），摊到 [今天, deadline] 里。**LLM 读 source_excerpt 想清楚阶段步骤**（读材料→实现→检查→提交），每步有意义标题 + 时长（30–120min，一步不打断），能收口就一天收口——不是切等长同名 block。
+- 存 `multiday_plan_store`；每日调度 `rank_tasks_node` 注入当天 `chunk_subtasks_for_date`。
+- 端点 `POST /projects/plan-multiday`、`GET /projects/{id}/multiday`；前端「排入多天日程」按钮 + 按天展示；容量由 `AppleCalendarAdapter.fixedMinutesByDate` 读未来 30 天本地日历算。
 
-### P1 — 导入后「计划节点」空 → ✅ 改成「导入即写提醒」新流程
-- **定案（跟用户确认过）**：导入不再只建任务。确认导入后：建 Task（存 `source_excerpt` 原文片段）→ 写计划快照（节点立刻可见）→ 返回提醒变更集，前端 EventKit 落地。不用再手点 replan。
-- **reminder = 粗节点**：每条任务一个，保持大纲原始日期，**不拆子步骤**。细拆解留给「到期那天」的日常路径（`rank_and_decompose` 现在读 `source_excerpt` 给 LLM 上下文）。**不做 RAG**——单份大纲整份能进上下文，向量/检索是过度设计。
-- **连带**：`replan_project` 也改成粗节点、**无 LLM 的重新同步**（改任务/勾完成后用）；前端按钮文案改「重新同步提醒」。
-- 改动：`models/task.py`(+source_excerpt)、`agents/project_service.py`(`_task_as_node`/import_plan/replan_project)、`agents/task_agent.py`(payload+prompt)、`api/projects.py`(import 收 `current_reminders` JSON)、`DayflowAPIClient.swift`(importPlan 带 currentReminders + reminders DTO)、`ProjectsViewModel.confirmImport`(请求权限→读现有提醒→apply 变更集)。
-- 测试：`tests/test_plan_import.py::test_import_writes_snapshot_and_reminder_changeset`、`test_projects_api.py::test_replan_endpoint`（改为粗节点断言）。
+### 窗口闸门（语义校正）
+- 窗口 = **只有 deadline ≤ 今天+`SCHEDULE_HORIZON_DAYS`（默认 5 天）或过期/无日期的**任务才进当天排程。远 deadline（几个月后）现在完全不排。`agents/nodes.py::_within_horizon`（每日提醒池）+ `_in_window_project_nodes`（项目节点）。
 
-### P2 — 生成仍读 CalDAV → ✅ 新增 POST-SSE，前端上传本地日历
-- **定案**：真流式 POST-SSE。新增 **`POST /schedule/stream`**（body 带 `calendar_events`，复用 `stream_schedule_events`）；GET SSE 带不了 body 的坑绕过了。
-- 前端：`streamSchedule(date:calendarEvents:)` 有本地日历就 POST、没有退回 GET；`AppleCalendarAdapter.localCalendarEvents(on:)` 读当天全部本地事件；生成前 `requestEventAccess` 只要日历权限。`loadDayflowSchedule(generate:true)`（睡眠输入后重排）也接上了。
-- 测试：`tests/test_calendar_frontend_input.py::test_post_stream_endpoint_uses_supplied_calendar`。
-- **仍待真机验证**：GUI 里首次生成会弹日历权限；授权后确认 uvicorn 日志不再出现 CalDAV 世界杯赌博日历。
+### 项目任务与调度池分离
+- import/chat 建的项目任务进 **`project_task_store`**（独立落盘），**不进全局 `task_store`**（=每日调度池，`rank_tasks_node` 全量读它）。启动 `_migrate_project_tasks_out_of_task_store()` 把历史遗留的迁出（幂等，已迁）。`GET /plan` 没快照有任务时现建（老项目也显示）。
 
-## 打开的问题
+### reminder 按项目分组 + 颜色
+- 每项目一个提醒列表（EKCalendar，名=项目名、色=`Project.color`）。`applyReminderChangeset(listName:colorHex:)`；项目页 ColorPicker + 「写入」按钮（走 `replan_project` 粗节点重新同步）。
 
-- **导入写提醒的 GUI 端到端还没真机验证**：EventKit executor + POST-SSE 都单测过，但 GUI 里「确认导入 → 弹提醒权限 → 提醒事项 App 出现待办」整条链没在真机跑过。注意首次要授权提醒。
-- **重复导入会产生重复任务/提醒**（已知、延后）：每次导入建新 uuid 任务 → 新 block_key → `current_reminders` 对不上、不会去重。要做「文档 diff + 指令 reconcile」才能解，见下方延后清单。
+### 其它
+- **图片粘贴 → 视觉**：导入框 ⌘V 贴截图（自定义 `PastingTextEditor`/`ImagePastingTextView` 拦 `performKeyEquivalent`+`paste`，SwiftUI TextEditor 会吞 ⌘V）或 📷 按钮。后端 `plan_import_agent.extract_plan_from_image`。PDF 上限放开 25MB/60 页/80k 字。
+- **每日日程加载动画**：Upcoming 区生成中显示转圈+骨架，不再像「今天没事」。
+- **重新生成今天** 🔄：Upcoming 头 Sync All 左边的图标，强制重排（不吃缓存）。
+- **日历权限解耦**：启动**不再主动弹**日历权限（ad-hoc 签名下每次重打包会重置、老弹）；生成只在**已授权**时读本地日历（`hasEventAccess`），否则降级。权限靠导入/写入那条 full-access 流程拿。
+- **本地日历过滤**：`localCalendarEvents` / `fixedMinutesByDate` 排除 `.subscription`（节假日/节气/世界杯赛程）和 `.birthday` 及全天事件——之前「大暑」占满全天就是这个。
+- **UI 文案精简**：存了 memory `terse-ui-copy`（别把解释性长段写进 UI）。
 
-## 还没做（迁移/功能，非阻塞）
+## 下一步（明天做，用户主诉求）
 
-- **今天日程写回日历**：生成后 `currentAgentEvents` → `POST /schedule/{date}/changeset` → `applyEventChangeset`（客户端 + executor 都有，UI 没接）。
-- **热力图墙 / 复盘**界面（`GET /completions/heatmap` 已就绪）。
-- **可分发 .app**：`make_app.sh` 只做本机 ad-hoc 签名验证用；缺公证/图标/自动更新。
-- **死代码清理**：旧假导入 `MockAssistantPanelState.startDocumentIntake` + `documentIntakeModule`（入口已换成 Projects，点不到）。
-- **提醒勾完成回报后端**：提醒 notes 里只有 tag_key 短 hash，反推不出 block_key；时间块完成走 `setBlockCompletion` 那条能用。
-- **移除 CalDAV → `legacy/caldav/`**（迁移最后一步，等 EventKit 生成路跑通再做）。
-- **图片/截图导入**：走 Claude 视觉（不是 OCR），延后。
-- **重复导入 reconcile**（文档 diff + 指令）：延后。
+### 每日动态重排 + 结转记忆（Step 1.6 续）
+- **多天计划只是「确认未来放得下」**；实际**只落地/sync 当天**，第二天按最新情况重新规划。
+- **结转记忆**：用户说「作业1 学习资料还没看完」→ 模型记住未完成部分，**第二天日程自动接上「继续昨天没做完的 X」**。
+- 涉及：完成/未完成状态回流 + 接 LangMem（或复用 `project_chat_store` 的对话记忆）+ 每日重规划触发点。先想清楚「当天 sync 什么、第二天重算什么、未完成怎么结转」的数据流。
+
+## 待真机验证（都单测过，GUI 端到端没跑）
+- 项目对话整条链：贴大纲/截图 → 右边出节点 → 说「拆细/挪一挪」→ 节点变 → 「排入多天日程」→ 「写入」提醒。
+- 首次「写入」要授权提醒；首次「排入多天/生成」要授权日历。
+- 确认 uvicorn 日志不再联网读 CalDAV（世界杯赌博日历）。
+
+## 还没做（非阻塞）
+- **今天日程写回日历**：`currentAgentEvents` → `POST /schedule/{date}/changeset` → `applyEventChangeset`（客户端+executor 都有，UI 没接）。
+- **热力图墙 / 复盘**（`GET /completions/heatmap` 就绪）。
+- **可分发 .app**：`make_app.sh` 只做本机 ad-hoc 验证；缺公证/图标/自动更新（也是权限老重置的根因）。
+- **死代码清理**：旧假导入 `MockAssistantPanelState.startDocumentIntake` + `documentIntakeModule`；VM 里 chatbot 化后不再用的 `previewImport/confirmImport/importPreview/cancelImportPreview`。
+- **提醒勾完成回报后端**：提醒 notes 只有 tag_key 短 hash，反推不出 block_key。
+- **移除 CalDAV → `legacy/caldav/`**：等生成路完全不依赖 CalDAV 再做；注意 `do_sync_reminders`（AppleScript 读本地提醒）仍是每日提醒的来源，动它前要有替代（前端上传当天到期提醒）。
+- **重复导入 dedup**：chatbot 按 title 合并已大幅缓解；纯重复导入仍可能重建。
 
 ## 怎么跑
 
 ```bash
-# 后端（改后端 .py 后 uvicorn --reload 自动重载；跑前端时别一直改后端，会掐断 SSE）
+# 后端（改 .py 后 uvicorn --reload 自动重载；跑前端时别狂改后端会掐断流）
 .venv/bin/uvicorn main:app --reload
 
-# 前端：改 Swift 后必须重新打包再开；别用 swift run（EventKit 权限过不了，见 ARCHITECTURE §10）
+# 前端：改 Swift 后必须重新打包再开；别用 swift run（EventKit 权限过不了）
 cd cal_swift_frontend && ./make_app.sh && open ScheduleAgent.app
 
-# EventKit 无头验证
-open -W ScheduleAgent.app --args --verify-eventkit && cat ~/eventkit-verify.log
-
 # 测试
-.venv/bin/python -m pytest -q      # 265 passed
+.venv/bin/python -m pytest -q      # 276 passed
 ```
 
-## 关键文件（前端 Phase 4）
+## 关键文件
 
 | 干什么 | 文件 |
 |---|---|
-| 后端客户端（含 Phase 4 接口 + DTO） | `cal_swift_frontend/.../DayflowAPIClient.swift` |
-| EventKit 执行层 + tag 解析 | `cal_swift_frontend/.../AppleCalendarAdapter.swift` |
-| Projects 状态机（列表/导入/replan） | `cal_swift_frontend/.../ProjectsViewModel.swift` |
-| Projects 列表 / 详情 | `cal_swift_frontend/.../ProjectsView.swift`、`ProjectDetailView.swift` |
-| 独立窗口 | `cal_swift_frontend/.../ProjectsWindowController.swift` |
-| 主侧栏（启动/流/健康） | `cal_swift_frontend/.../SidebarView.swift` |
-| 无头验证入口 | `cal_swift_frontend/.../EventKitVerification.swift`、`ScheduleAgentApp.swift`(AppEntry) |
-| 打包脚本 / Info.plist | `cal_swift_frontend/make_app.sh`、`Info.plist` |
-
-后端关键：`agents/project_service.py`、`agents/reminder_reconcile.py`、`agents/plan_reschedule.py`、`agents/plan_import_agent.py`、`integrations/document_parser.py`、`api/projects.py`、`graphs/schedule_stream.py`。
+| 项目对话 LLM（reply + 改后任务） | `agents/project_chat.py` |
+| 项目服务（chat_about_plan / 多天 / import / replan / 快照） | `agents/project_service.py` |
+| 多天规划器 | `agents/multiday_planner.py`、`models/planning.py` |
+| 每日调度节点（窗口闸门 + 注入项目时段） | `agents/nodes.py` |
+| 导入解析（文本/pdf/docx/图片识别+大小） | `integrations/document_parser.py`、`agents/plan_import_agent.py` |
+| 存储（含 project_task/chat/multiday store + 迁移） | `storage.py`、`main.py`(lifespan) |
+| 项目 API（chat/plan/multiday/import/replan） | `api/projects.py` |
+| 前端：项目两栏详情（左对话右计划） | `cal_swift_frontend/.../ProjectDetailView.swift` |
+| 前端：项目状态机 | `cal_swift_frontend/.../ProjectsViewModel.swift` |
+| 前端：EventKit（读事件/提醒、本地日历、apply 变更集、按项目列表+色） | `cal_swift_frontend/.../AppleCalendarAdapter.swift` |
+| 前端：后端客户端 + DTO | `cal_swift_frontend/.../DayflowAPIClient.swift` |
+| 前端：主侧栏（启动/流/健康/重新生成） | `cal_swift_frontend/.../SidebarView.swift` |
+| 打包 | `cal_swift_frontend/make_app.sh` |
 
 ## git
 
-整个 Phase 4（后端迁移 + 前端 API/执行层/界面 + 真机验证）**都还没提交**。明天开工前可以先按后端/前端分几个 commit 落一下。
+整个 Phase 4（含本会话：chatbot 项目、多天规划、图片视觉、窗口闸门、存储分离等）**都还没提交**。开工前建议先按 后端 / 前端 / 文档 分几个 commit 落一下。

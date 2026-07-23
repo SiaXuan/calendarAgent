@@ -204,7 +204,15 @@
       "Bash(.venv/bin/python -c \"from models.schedule import DaySchedule; print\\(list\\(DaySchedule.model_fields.keys\\(\\)\\)\\)\")",
       "Bash(.venv/bin/python -c \"from models.schedule import TimeBlock; print\\({k:\\(v.is_required\\(\\)\\) for k,v in TimeBlock.model_fields.items\\(\\)}\\)\")",
       "Bash(.venv/bin/python -m pytest -q)",
-      "Bash(grep -v \"\\\\.get\\\\|\\\\.pop\\\\|schedule_store\\\\[d\\\\]$\")"
+      "Bash(grep -v \"\\\\.get\\\\|\\\\.pop\\\\|schedule_store\\\\[d\\\\]$\")",
+      "Bash(./make_app.sh)",
+      "Bash(.venv/bin/python -m pytest tests/test_multiday_planner.py::test_plan_multiday_only_plans_in_window_deadlines -q)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(swift build *)",
+      "Bash(curl -s -m 30 -X POST http://localhost:8000/projects/plan-multiday -H \"Content-Type: application/json\" -d '{\"fixed_minutes_by_date\":{}}')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('时段:', d.get\\('chunks'\\), '| 项目:', d.get\\('projects'\\), '\\(窗口外的作业不再排 → 应为0\\)'\\)\")",
+      "Bash(.venv/bin/python -m pytest tests/test_document_parser.py tests/test_plan_import.py -q)",
+      "Bash(.venv/bin/python -m pytest tests/test_plan_import.py tests/test_document_parser.py -q)"
     ],
     "additionalDirectories": [
       "/tmp",
