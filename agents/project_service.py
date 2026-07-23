@@ -9,7 +9,7 @@ here too once the multi-day scheduling model is settled (Step 1.6).
 import hashlib
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from agents import calendar_writeback as cw
 from agents import plan_import_agent
@@ -20,15 +20,17 @@ from models.project import (
     CompletionRecord, CompletionStatus, PlanSnapshotItem, Project, ProjectStatus,
 )
 from models.task import CognitiveLoad, Priority, Subtask, Task
+from models.planning import PlannedChunk
 from storage import (
-    bump_schedule_version, completion_store, project_plan_store, project_store,
-    project_task_store, save_completion_store, save_project_plan_store,
+    bump_schedule_version, completion_store, multiday_plan_store, project_chat_store,
+    project_plan_store, project_store, project_task_store, save_completion_store,
+    save_multiday_plan_store, save_project_chat_store, save_project_plan_store,
     save_project_store, save_project_task_store, schedule_store, task_store,
 )
 
 _log = logging.getLogger("dayflow")
 
-_CONFIDENCE_FLOOR = 0.55  # below this, treat extraction as "not a plan"
+_CONFIDENCE_FLOOR = 0.4   # below this, treat extraction as "not a plan"
 
 # Fallback rejection text when the LLM flags not-a-plan but gives no reason.
 _DEFAULT_REJECTION = {
@@ -107,6 +109,188 @@ def get_or_build_plan(project_id: str) -> list[PlanSnapshotItem]:
     return snapshot
 
 
+# ── Multi-day planning (Step 1.6) ─────────────────────────────────────────────
+
+_MEAL_BUFFER_MIN = 90         # rough lunch+dinner carve-out from a day's work window
+
+
+def _in_window_project_nodes(today: date) -> list[Task]:
+    """Project nodes eligible for scheduling NOW — not done, and with a deadline
+    inside the scheduling window. Far-deadline nodes stay off the radar until
+    their deadline approaches; undated nodes aren't scheduled (no deadline pull)."""
+    from agents.nodes import SCHEDULE_HORIZON_DAYS
+    window_end = today + timedelta(days=SCHEDULE_HORIZON_DAYS)
+    out: list[Task] = []
+    for t in project_task_store.values():
+        if not t.deadline or t.deadline > window_end:
+            continue
+        rec = completion_store.get(f"{t.id}::{t.title}")
+        if rec and rec.status == CompletionStatus.done:
+            continue
+        out.append(t)
+    return out
+
+
+async def run_multiday_plan(
+    fixed_minutes_by_date: dict[date, int] | None = None,
+) -> dict:
+    """Distribute the project nodes whose deadline is inside the scheduling window
+    across the days up to those deadlines (reasoning LLM + greedy fallback),
+    respecting each day's free capacity. Far-deadline nodes are intentionally left
+    out — they enter only as their deadline approaches. `fixed_minutes_by_date` is
+    the committed time per day the frontend read from the local calendar."""
+    from agents import multiday_planner
+    from agents.nodes import SCHEDULE_HORIZON_DAYS
+
+    today = date.today()
+    nodes = _in_window_project_nodes(today)
+    multiday_plan_store.clear()
+    if not nodes:
+        save_multiday_plan_store()
+        return {"chunks": 0, "projects": 0, "by_project": {}}
+
+    prefs = get_current_prefs()
+    work_minutes = max(0, (prefs.work_end - prefs.work_start) * 60 - _MEAL_BUFFER_MIN)
+    horizon_end = today + timedelta(days=SCHEDULE_HORIZON_DAYS)
+    capacities = multiday_planner.build_capacities(
+        today, horizon_end, work_minutes, fixed_minutes_by_date)
+
+    language = get_current_prefs().language
+    chunks = await multiday_planner.plan_project_work(nodes, capacities, today, language)
+
+    by_project: dict[str, list[PlannedChunk]] = {}
+    for c in chunks:
+        by_project.setdefault(c.project_id, []).append(c)
+    multiday_plan_store.update(by_project)
+    save_multiday_plan_store()
+
+    return {
+        "chunks": len(chunks),
+        "projects": len(by_project),
+        "by_project": {pid: len(cs) for pid, cs in by_project.items()},
+    }
+
+
+def chunk_subtasks_for_date(target_date: date) -> list[Subtask]:
+    """The planned project work sessions for `target_date`, as Subtasks ready to
+    drop into that day's schedule (alongside the day's ad-hoc/reminder tasks)."""
+    out: list[Subtask] = []
+    for chunks in multiday_plan_store.values():
+        for c in chunks:
+            if c.date != target_date:
+                continue
+            out.append(Subtask(
+                parent_id=c.task_id, title=c.title, cognitive_load=c.cognitive_load,
+                estimated_minutes=c.minutes, suggested_date=target_date,
+                phase_label=c.task_title, project_id=c.project_id))
+    return out
+
+
+# ── Per-project planning conversation ─────────────────────────────────────────
+
+def _plan_context(project_id: str) -> str:
+    import json
+    rows = [
+        {
+            "title": t.title,
+            "estimated_hours": t.estimated_hours,
+            "deadline": t.deadline.isoformat() if t.deadline else None,
+            "context": t.source_excerpt or t.description,
+        }
+        for t in project_tasks(project_id)
+    ]
+    return json.dumps(rows, ensure_ascii=False, indent=2) if rows else "(还没有任务)"
+
+
+def _apply_task_revision(project_id: str, candidates) -> None:
+    """Replace the project's tasks with the chat's revised set, preserving a
+    task's id when its title is unchanged (so completion/reminders survive), then
+    rebuild the plan snapshot."""
+    proj = project_store[project_id]
+    existing = {t.title: t for t in project_tasks(project_id)}
+    kept: dict[str, Task] = {}
+    for c in candidates:
+        deadline = c.explicit_deadline or c.explicit_date
+        if c.title in existing:
+            t = existing[c.title]
+            if c.description is not None:
+                t.description = c.description
+            if c.estimated_hours:
+                t.estimated_hours = c.estimated_hours
+            if deadline:
+                t.deadline = deadline
+            if c.priority:
+                t.priority = c.priority
+            if c.cognitive_load:
+                t.cognitive_load = c.cognitive_load
+            if c.source_excerpt:
+                t.source_excerpt = c.source_excerpt
+            kept[t.id] = t
+        else:
+            t = Task(
+                id=str(uuid.uuid4()), title=c.title, description=c.description,
+                priority=c.priority or Priority.medium,
+                cognitive_load=c.cognitive_load or CognitiveLoad.medium,
+                estimated_hours=c.estimated_hours or 1.0, deadline=deadline,
+                source="chat", project_id=project_id, source_excerpt=c.source_excerpt)
+            kept[t.id] = t
+    for t in list(project_task_store.values()):
+        if t.project_id == project_id and t.id not in kept:
+            del project_task_store[t.id]
+    for t in kept.values():
+        project_task_store[t.id] = t
+    proj.task_ids = list(kept.keys())
+    proj.updated_at = datetime.now()
+    save_project_task_store()
+    save_project_store()
+    project_plan_store.pop(project_id, None)   # rebuilt below from the new tasks
+    get_or_build_plan(project_id)
+
+
+async def chat_about_plan(
+    project_id: str, message: str,
+    doc_text: str | None = None, image: tuple[bytes, str] | None = None,
+) -> dict:
+    """One turn of the project's planning conversation. The turn may carry an
+    attached document's text or an image (pasting a syllabus IS just a message).
+    The LLM replies and, when the content describes schedulable work or the user
+    asks for a change, revises the plan — but never hard-rejects; unclear input
+    gets a clarifying reply. Persists both turns. Returns {reply, plan_changed}."""
+    from agents import project_chat
+
+    proj = project_store[project_id]
+    language = get_current_prefs().language
+    history = project_chat_store.get(project_id, [])
+    result = await project_chat.converse(
+        proj.name, _plan_context(project_id), history, message, language,
+        doc_text=doc_text, image=image)
+
+    changed = result.tasks is not None
+    if changed:
+        _apply_task_revision(project_id, result.tasks)
+
+    # What to store as the user's turn — the typed text, or a note when it was
+    # attachment-only (the doc/image bytes themselves aren't kept in history).
+    user_turn = message.strip()
+    if not user_turn:
+        user_turn = "（发来一张图片）" if image is not None else "（发来一份文档）"
+    project_chat_store[project_id] = history + [
+        {"role": "user", "content": user_turn},
+        {"role": "assistant", "content": result.reply},
+    ]
+    save_project_chat_store()
+    return {"reply": result.reply, "plan_changed": changed}
+
+
+def record_chat_turn(project_id: str, role: str, content: str) -> None:
+    """Append one turn to the project conversation — e.g. an import, so the chat
+    reflects what happened outside a typed chat turn."""
+    turns = project_chat_store.get(project_id, [])
+    turns.append({"role": role, "content": content})
+    project_chat_store[project_id] = turns
+    save_project_chat_store()
+
+
 async def decompose_project(project_id: str) -> list[Subtask]:
     """
     Rank + decompose a project's tasks into subtasks (single LLM call), stamp
@@ -158,15 +342,22 @@ async def import_plan(
     proj = project_store[project_id]
     language = get_current_prefs().language
 
-    if text is not None:
-        raw = document_parser.parse_text(text)
-    elif data is not None:
-        raw = document_parser.parse_upload(filename or "", data)
+    # Image upload (pasted screenshot / photo) → Claude vision, no text parse.
+    image_mime = document_parser.image_mime(filename or "") if data is not None else None
+    if image_mime:
+        document_parser.check_size(data)
+        raw = "(image)"
+        plan = await plan_import_agent.extract_plan_from_image(
+            data, image_mime, language, instruction=instruction)
     else:
-        raise document_parser.DocumentParseError(
-            "no_input", "Provide a file or text to import.")
-
-    plan = await plan_import_agent.extract_plan(raw, language, instruction=instruction)
+        if text is not None:
+            raw = document_parser.parse_text(text)
+        elif data is not None:
+            raw = document_parser.parse_upload(filename or "", data)
+        else:
+            raise document_parser.DocumentParseError(
+                "no_input", "Provide a file or text to import.")
+        plan = await plan_import_agent.extract_plan(raw, language, instruction=instruction)
 
     _log.info(
         "import_plan[%s]: %d chars → is_plan=%s conf=%.2f kind=%s tasks=%d | preview=%r",
@@ -174,7 +365,11 @@ async def import_plan(
         plan.doc_kind.value, len(plan.candidate_tasks), raw[:300],
     )
 
-    if not plan.is_plan or plan.confidence < _CONFIDENCE_FLOOR or not plan.candidate_tasks:
+    # Trust the extraction: if it pulled out schedulable items with non-trivial
+    # confidence, accept — even if the model's own `is_plan` meta-flag was
+    # conservative (a bare TOC / reading list the user wants to get through is a
+    # plan). Reject only when there's genuinely nothing to schedule.
+    if not plan.candidate_tasks or plan.confidence < _CONFIDENCE_FLOOR:
         return {
             "accepted": False,
             "project_id": project_id,
@@ -235,6 +430,12 @@ async def import_plan(
     coarse = [_task_as_node(t) for t in project_tasks(project_id)]
     project_plan_store[project_id] = [_snapshot_item(s, project_id) for s in coarse]
     save_project_plan_store()
+
+    titles = "、".join(t.title for t in new_tasks[:6])
+    more = "…" if len(new_tasks) > 6 else ""
+    record_chat_turn(
+        project_id, "assistant",
+        f"已整理出 {len(new_tasks)} 个计划节点：{titles}{more}。要调整就直接说。")
     return result
 
 
@@ -410,6 +611,10 @@ async def delete_project(project_id: str, purge_tasks: bool = True) -> dict:
     save_completion_store()
     project_plan_store.pop(project_id, None)
     save_project_plan_store()
+    if multiday_plan_store.pop(project_id, None) is not None:
+        save_multiday_plan_store()
+    if project_chat_store.pop(project_id, None) is not None:
+        save_project_chat_store()
     project_store.pop(project_id, None)
     save_project_store()
     return {"project_id": project_id, "deleted": True, "calendar": calendar}

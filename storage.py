@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from models.health import HealthSnapshot
 from models.memory import Memory
+from models.planning import PlannedChunk
 from models.project import CompletionRecord, PlanSnapshotItem, Project
 from models.schedule import DaySchedule
 from models.task import Subtask, Task
@@ -45,6 +46,8 @@ _PROJECT_FILE = _DATA_DIR / "project_store.json"
 _COMPLETION_FILE = _DATA_DIR / "completion_store.json"
 _PROJECT_PLAN_FILE = _DATA_DIR / "project_plan_store.json"
 _PROJECT_TASK_FILE = _DATA_DIR / "project_task_store.json"
+_MULTIDAY_PLAN_FILE = _DATA_DIR / "multiday_plan_store.json"
+_PROJECT_CHAT_FILE = _DATA_DIR / "project_chat_store.json"
 
 
 # ─── In-memory stores ────────────────────────────────────────────────────────
@@ -105,6 +108,16 @@ completion_store: dict[str, CompletionRecord] = {}
 # Last-written decomposition per project (Phase 4). Keyed by project_id.
 # Used by replan to diff changed vs unchanged blocks. Persisted to JSON.
 project_plan_store: dict[str, list[PlanSnapshotItem]] = {}
+
+# Multi-day plan (Phase 4, Step 1.6). Keyed by project_id → the PlannedChunks the
+# planner distributed across days. The daily schedule pulls a given day's chunks
+# from here. Persisted to JSON.
+multiday_plan_store: dict[str, list[PlannedChunk]] = {}
+
+# Per-project planning conversation (Phase 4). Keyed by project_id → the full
+# message history [{role, content}]. A project is one long conversation with
+# memory; the planning chat reads it all. Persisted to JSON.
+project_chat_store: dict[str, list[dict]] = {}
 
 # Long-term memories (Phase C). Keyed by memory.id. Persisted to JSON.
 # Namespace lookups + retrieval helpers live in memory/store.py.
@@ -219,6 +232,54 @@ def _migrate_project_tasks_out_of_task_store() -> None:
         save_task_store()
         save_project_task_store()
         _log.info("Migrated %d project task(s) out of the scheduling store.", moved)
+
+
+# ─── multiday_plan_store persistence (Phase 4, Step 1.6) ─────────────────────
+
+def save_multiday_plan_store() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {
+            pid: [c.model_dump(mode="json") for c in chunks]
+            for pid, chunks in multiday_plan_store.items()
+        }
+        _MULTIDAY_PLAN_FILE.write_text(json.dumps(payload, default=str, ensure_ascii=False))
+    except Exception as exc:
+        _log.warning("Could not save multiday plan store: %s", exc)
+
+
+def load_multiday_plan_store() -> None:
+    if not _MULTIDAY_PLAN_FILE.exists():
+        return
+    try:
+        payload = json.loads(_MULTIDAY_PLAN_FILE.read_text())
+        for pid, chunks in payload.items():
+            multiday_plan_store[pid] = [PlannedChunk.model_validate(c) for c in chunks]
+        _log.info("Loaded multi-day plans for %d project(s) from disk.", len(multiday_plan_store))
+    except Exception as exc:
+        _log.warning("Could not load multiday plan store: %s", exc)
+
+
+# ─── project_chat_store persistence (Phase 4) ────────────────────────────────
+
+def save_project_chat_store() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        _PROJECT_CHAT_FILE.write_text(
+            json.dumps(project_chat_store, default=str, ensure_ascii=False))
+    except Exception as exc:
+        _log.warning("Could not save project chat store: %s", exc)
+
+
+def load_project_chat_store() -> None:
+    if not _PROJECT_CHAT_FILE.exists():
+        return
+    try:
+        payload = json.loads(_PROJECT_CHAT_FILE.read_text())
+        project_chat_store.update(payload)
+        _log.info("Loaded chat for %d project(s) from disk.", len(project_chat_store))
+    except Exception as exc:
+        _log.warning("Could not load project chat store: %s", exc)
 
 
 # ─── memory_store persistence ────────────────────────────────────────────────

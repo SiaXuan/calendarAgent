@@ -23,7 +23,11 @@ a course syllabus, a PRD, a project roadmap, a schedule table, or a freeform goa
 Your job:
 1. Decide if this is actually a plan we can schedule (is_plan) and how sure you are
    (confidence, 0..1). A plan describes work items — assignments, milestones, phases,
-   deliverables, readings — usually with dates or an ordering.
+   deliverables, readings — usually with dates or an ordering. Dates are NOT
+   required: a table of contents, a chapter/reading list, a checklist, or a bare
+   list of topics the user wants to get through IS a plan — each item becomes a
+   task (e.g. "阅读第 3 章"). If the user says they want to work through / finish /
+   study it (even without dates), treat it as a plan and extract the items.
    NOT plans: invoices, receipts, marketing pages, articles, resumes, random notes.
    If it is not a plan, set is_plan=false and write a short, friendly rejection_reason
    in {language} explaining what you saw instead, and leave candidate_tasks empty.
@@ -84,5 +88,38 @@ async def extract_plan(
              "cache_control": {"type": "ephemeral"}},
         ]},
         {"role": "user", "content": user_content},
+    ])
+    return result
+
+
+async def extract_plan_from_image(
+    image_bytes: bytes, mime: str, language: Language = Language.en,
+    instruction: str | None = None,
+) -> ExtractedPlan:
+    """Same extraction, but from an image (pasted screenshot / photo of a
+    syllabus, whiteboard, schedule table, …) via Claude vision — no OCR. Same
+    rules block + structured output as the text path; the model reads the image
+    directly. Raises on LLM/validation failure (caller maps to 502)."""
+    import base64
+
+    b64 = base64.standard_b64encode(image_bytes).decode()
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(language=language.value)
+    text = ("The image below is a plan (a screenshot or photo of a syllabus / PRD / "
+            "schedule / a written list of goals). Read it and extract the plan.")
+    if instruction and instruction.strip():
+        text += (
+            f"\n\n---\nUSER INSTRUCTION (use it to fill `adjustment`, and honour any "
+            f"weekday/term changes it states):\n{instruction.strip()}"
+        )
+    structured_llm = sonnet.with_structured_output(ExtractedPlan)
+    result: ExtractedPlan = await structured_llm.ainvoke([
+        {"role": "system", "content": [
+            {"type": "text", "text": system_prompt,
+             "cache_control": {"type": "ephemeral"}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+        ]},
     ])
     return result

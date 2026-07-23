@@ -14,9 +14,9 @@ import logging
 # but noisy — quiet it to errors only.
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
-MAX_BYTES = 10 * 1024 * 1024      # 10 MB upload ceiling
-MAX_PDF_PAGES = 30
-MAX_CHARS = 40_000                # ~ what fits comfortably in one extraction call
+MAX_BYTES = 25 * 1024 * 1024      # 25 MB upload ceiling
+MAX_PDF_PAGES = 60
+MAX_CHARS = 80_000                # ~ what fits comfortably in one extraction call
 MIN_CHARS = 20                    # below this there's nothing to plan from
 
 
@@ -88,6 +88,27 @@ def _validate_text(text: str) -> str:
     if len(text) > MAX_CHARS:
         text = text[:MAX_CHARS]     # truncate rather than reject; keep the head
     return text
+
+
+# Image uploads don't go through text parsing — they're read by Claude vision
+# (see agents/plan_import_agent.extract_plan_from_image).
+_IMAGE_MIME = {
+    "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "gif": "image/gif", "webp": "image/webp",
+}
+
+
+def image_mime(filename: str) -> str | None:
+    """The image MIME for `filename` if it's a supported image, else None."""
+    ext = (filename or "").rsplit(".", 1)[-1].lower()
+    return _IMAGE_MIME.get(ext)
+
+
+def check_size(data: bytes) -> None:
+    """Enforce the upload ceiling (used by the image path, which skips parse_upload)."""
+    if len(data) > MAX_BYTES:
+        raise DocumentParseError(
+            "too_large", f"File is larger than {MAX_BYTES // (1024 * 1024)} MB.")
 
 
 def parse_text(text: str) -> str:

@@ -38,11 +38,15 @@ def clean_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "_COMPLETION_FILE", tmp_path / "completion_store.json")
     monkeypatch.setattr(storage, "_PROJECT_PLAN_FILE", tmp_path / "project_plan_store.json")
     monkeypatch.setattr(storage, "_PROJECT_TASK_FILE", tmp_path / "project_task_store.json")
+    monkeypatch.setattr(storage, "_MULTIDAY_PLAN_FILE", tmp_path / "multiday_plan_store.json")
+    monkeypatch.setattr(storage, "_PROJECT_CHAT_FILE", tmp_path / "project_chat_store.json")
 
     def _wipe():
         storage.health_store.clear()
         storage.task_store.clear()
         storage.project_task_store.clear()
+        storage.multiday_plan_store.clear()
+        storage.project_chat_store.clear()
         storage.schedule_store.clear()
         storage.subtask_overrides.clear()
         storage.subtask_pins.clear()

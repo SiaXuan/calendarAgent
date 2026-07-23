@@ -46,6 +46,19 @@ _calendar_lock = asyncio.Lock()
 _last_sync_ts: float = 0.0
 _SYNC_THROTTLE_S: float = 60.0
 
+# Scheduling window. Only work whose deadline falls within this many days enters
+# scheduling at all (overdue + undated always in); far-deadline items (a syllabus
+# assignment due in months) stay off the radar until their deadline approaches.
+# The multi-day planner distributes an in-window task across the days up to its
+# deadline so it gets done gradually rather than last-minute.
+SCHEDULE_HORIZON_DAYS: int = 5
+
+
+def _within_horizon(task, target_date: date) -> bool:
+    if task.deadline is None:
+        return True
+    return task.deadline <= target_date + timedelta(days=SCHEDULE_HORIZON_DAYS)
+
 
 # ─── Pure helpers (lifted from orchestrator) ────────────────────────────────
 
@@ -213,8 +226,10 @@ async def rank_tasks_node(state: dict) -> dict:
     """
     from memory import retrieval
 
-    tasks = state.get("tasks", [])
     target_date: date = state["target_date"]
+    # Only schedule work due within the lookahead window (+ overdue / undated) —
+    # far-future items wait for their day instead of being crammed onto today.
+    tasks = [t for t in state.get("tasks", []) if _within_horizon(t, target_date)]
     language = state["language"]
     memory_context = retrieval.for_task_ranking()
 
@@ -222,6 +237,13 @@ async def rank_tasks_node(state: dict) -> dict:
         tasks, target_date, language, memory_context=memory_context,
     )
     all_subtasks = _apply_overrides(all_subtasks)
+
+    # Multi-day planner (Step 1.6): project work is distributed across days by the
+    # planner, not decomposed here — inject today's allocated chunks alongside the
+    # day's ad-hoc/reminder subtasks.
+    from agents import project_service
+    all_subtasks += project_service.chunk_subtasks_for_date(target_date)
+
     return {"subtasks": all_subtasks, "user_memory": memory_context}
 
 
@@ -421,7 +443,7 @@ async def apply_adjustment_node(state: dict) -> dict:
             for w in scored_windows
         ]
 
-    tasks = list(task_store.values())
+    tasks = [t for t in task_store.values() if _within_horizon(t, target_date)]
     all_subtasks = await task_agent.rank_and_decompose(tasks, target_date, language)
     all_subtasks = _apply_overrides(all_subtasks)
 

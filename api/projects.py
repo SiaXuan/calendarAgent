@@ -14,10 +14,12 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from agents import project_service as svc
+from integrations import document_parser
 from integrations.document_parser import DocumentParseError
 from models.project import CompletionStatus, Project, ProjectStatus
 from storage import (
-    completion_store, project_store, save_project_store,
+    completion_store, multiday_plan_store, project_chat_store, project_store,
+    save_project_store,
 )
 
 router = APIRouter()
@@ -194,6 +196,87 @@ async def replan_project(project_id: str, payload: ReplanRequest):
     _require(project_id)
     return await svc.replan_project(
         project_id, [r.model_dump() for r in payload.current_reminders])
+
+
+# ── Multi-day planning (Step 1.6) ─────────────────────────────────────────────
+
+class MultidayPlanRequest(BaseModel):
+    """Committed minutes per day (YYYY-MM-DD → minutes) the frontend read from the
+    local calendar, subtracted from each day's work window. Empty → every day is
+    treated as a full work window."""
+    fixed_minutes_by_date: dict[str, int] = {}
+
+
+@router.post("/projects/plan-multiday")
+async def plan_multiday(payload: MultidayPlanRequest = MultidayPlanRequest()):
+    """Distribute all active project nodes across the days up to their deadlines,
+    respecting each day's free capacity. Returns a per-project chunk summary; the
+    daily schedule then surfaces each day's chunks."""
+    fixed: dict[date, int] = {}
+    for k, v in payload.fixed_minutes_by_date.items():
+        try:
+            fixed[date.fromisoformat(k)] = int(v)
+        except (ValueError, TypeError):
+            continue
+    return await svc.run_multiday_plan(fixed or None)
+
+
+@router.get("/projects/{project_id}/multiday")
+async def get_multiday_plan(project_id: str):
+    """The project's distributed work sessions (per-day chunks), grouped by date —
+    for showing the plan on the project page."""
+    _require(project_id)
+    by_date: dict[str, list[dict]] = {}
+    for c in multiday_plan_store.get(project_id, []):
+        by_date.setdefault(str(c.date), []).append({
+            "title": c.title, "task_title": c.task_title,
+            "minutes": c.minutes, "task_id": c.task_id})
+    return {"project_id": project_id, "by_date": dict(sorted(by_date.items()))}
+
+
+# ── Per-project planning conversation ─────────────────────────────────────────
+
+@router.get("/projects/{project_id}/chat")
+async def get_project_chat(project_id: str):
+    """The project's full conversation history [{role, content}]."""
+    _require(project_id)
+    return {"project_id": project_id, "messages": project_chat_store.get(project_id, [])}
+
+
+@router.post("/projects/{project_id}/chat")
+async def post_project_chat(
+    project_id: str,
+    message: str = Form(""),
+    file: UploadFile | None = File(None),
+):
+    """One planning turn (multipart). `message` plus an optional attached `file`
+    (image → vision; .txt/.md/.pdf/.docx → parsed to text). Pasting a syllabus is
+    just a message here — the conversational LLM decides what to do; there's no
+    hard intent gate. Returns {reply, plan_changed}; the frontend refetches the
+    plan."""
+    _require(project_id)
+    msg = message.strip()
+    doc_text = None
+    image = None
+    if file is not None:
+        data = await file.read()
+        try:
+            mime = document_parser.image_mime(file.filename or "")
+            if mime:
+                document_parser.check_size(data)
+                image = (data, mime)
+            else:
+                doc_text = document_parser.parse_upload(file.filename or "", data)
+        except DocumentParseError as e:
+            raise HTTPException(status_code=422, detail={"code": e.code, "message": e.message})
+    if not msg and file is None:
+        raise HTTPException(status_code=422, detail="Empty message.")
+    try:
+        return await svc.chat_about_plan(project_id, msg, doc_text=doc_text, image=image)
+    except Exception:
+        _log.exception("Plan chat failed for project %s", project_id)
+        raise HTTPException(status_code=502, detail={
+            "code": "chat_failed", "message": "对话出错了，请重试。"})
 
 
 # ── Completion tracking ───────────────────────────────────────────────────────

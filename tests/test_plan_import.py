@@ -86,6 +86,26 @@ def test_import_writes_snapshot_for_review(clean_stores, monkeypatch):
     assert read_ch.source_excerpt == "Week 1: read chapter one"
 
 
+def test_import_image_uses_vision(clean_stores, monkeypatch):
+    """A pasted image is routed to Claude vision (extract_plan_from_image), not
+    the text parser."""
+    monkeypatch.setattr(plan_import_agent, "extract_plan_from_image", AsyncMock(
+        return_value=ExtractedPlan(
+            is_plan=True, doc_kind=DocKind.schedule_table, confidence=0.9,
+            candidate_tasks=[CandidateTask(title="From screenshot", estimated_hours=1)],
+        )))
+    # If the image path is wrong this would hit the text extractor → make it blow up.
+    monkeypatch.setattr(plan_import_agent, "extract_plan",
+                        AsyncMock(side_effect=AssertionError("text path used for an image")))
+    pid = _new_project()
+
+    r = client.post(f"/projects/{pid}/import",
+                    files={"file": ("shot.png", b"\x89PNG\r\n\x1a\n fake", "image/png")})
+    assert r.status_code == 200
+    assert [t["title"] for t in r.json()["tasks"]] == ["From screenshot"]
+    assert any(t.title == "From screenshot" for t in storage.project_task_store.values())
+
+
 def test_import_dry_run_does_not_persist(clean_stores, monkeypatch):
     _mock_extract(monkeypatch, ExtractedPlan(
         is_plan=True, confidence=0.8,
@@ -116,7 +136,7 @@ def test_import_rejects_non_plan(clean_stores, monkeypatch):
 
 def test_import_low_confidence_rejected(clean_stores, monkeypatch):
     _mock_extract(monkeypatch, ExtractedPlan(
-        is_plan=True, confidence=0.4,
+        is_plan=True, confidence=0.2,
         candidate_tasks=[CandidateTask(title="Maybe a task")],
     ))
     pid = _new_project()
