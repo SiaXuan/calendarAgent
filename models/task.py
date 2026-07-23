@@ -44,6 +44,8 @@ class Task(BaseModel):
     is_uncertain: bool = False   # triggers ★ planning chat in frontend
     is_instant: bool = False     # quick action (< 10 min), skip decomposition
     project_id: str | None = None   # groups tasks imported/decomposed together (Phase 4)
+    source_excerpt: str | None = None   # doc snippet this task came from — grounds
+                                        # daily decomposition of an imported plan node
 
 
 class Subtask(BaseModel):

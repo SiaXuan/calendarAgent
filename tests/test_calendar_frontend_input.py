@@ -85,3 +85,37 @@ async def test_generate_endpoint_uses_supplied_calendar(
     titles = [b["title"] for b in r.json()["blocks"]]
     assert "Client call" in titles                 # supplied fixed event kept
     assert "Lunch meeting" not in titles           # CalDAV stub NOT consulted
+
+
+async def test_post_stream_endpoint_uses_supplied_calendar(
+    clean_stores, mock_sonnet, mock_reminders_sync, sample_task,
+):
+    """POST /schedule/stream carries calendar_events in the body (GET SSE can't)
+    and streams the supplied fixed event without reading CalDAV."""
+    import json
+
+    from storage import task_store
+    task_store[sample_task.id] = sample_task
+    mock_sonnet.set_structured_response(_LLMSubtaskList(subtasks=[
+        _LLMSubtask(
+            parent_id=sample_task.id, title="Deep work",
+            estimated_minutes=60, cognitive_load=CognitiveLoad.deep,
+            task_kind=TaskKind.analytical, suggested_date=date(2026, 5, 15),
+        ),
+    ]))
+
+    r = client.post("/schedule/stream", json={
+        "date": "2026-05-15",
+        "calendar_events": [
+            {"title": "Client call", "start": "2026-05-15T11:00:00",
+             "end": "2026-05-15T12:00:00"},
+        ],
+    })
+    assert r.status_code == 200
+    events = [json.loads(line[len("data:"):].strip())
+              for line in r.text.splitlines() if line.startswith("data:")]
+    types = [e["type"] for e in events]
+    assert types[-1] == "done"
+    fixed = next(e for e in events if e["type"] == "fixed")
+    assert "Client call" in [b["title"] for b in fixed["blocks"]]
+    assert all("Lunch meeting" not in b["title"] for b in fixed["blocks"])

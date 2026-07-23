@@ -162,12 +162,29 @@ final class DayflowAPIClient: @unchecked Sendable {
         return try await request("/health", method: "POST", body: body)
     }
 
-    func streamSchedule(date: String) -> AsyncThrowingStream<DayflowStreamEvent, Error> {
+    /// Stream health → fixed → schedule → done. When `calendarEvents` is given,
+    /// POST them to /schedule/stream so the backend schedules around the local
+    /// calendar (GET SSE can't carry a body); otherwise GET the plain stream.
+    func streamSchedule(
+        date: String, calendarEvents: [DayflowCalendarEventInput]? = nil
+    ) -> AsyncThrowingStream<DayflowStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var request = URLRequest(url: baseURL.appending(path: "/schedule/stream/\(date)"))
-                    request.httpMethod = "GET"
+                    var request: URLRequest
+                    if let calendarEvents {
+                        request = URLRequest(url: baseURL.appending(path: "/schedule/stream"))
+                        request.httpMethod = "POST"
+                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        let payload: [String: Any] = [
+                            "date": date,
+                            "calendar_events": calendarEvents.map { $0.jsonObject },
+                        ]
+                        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+                    } else {
+                        request = URLRequest(url: baseURL.appending(path: "/schedule/stream/\(date)"))
+                        request.httpMethod = "GET"
+                    }
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
 
                     let (bytes, response) = try await session.bytes(for: request)
@@ -556,13 +573,18 @@ struct DayflowImportResult: Codable {
     var confidence: Double?
     var reason: String?
     var tasks: [DayflowImportedTask]?
+    // Present only on a confirmed (non dry-run) import: the reminder change-set
+    // the EventKit layer applies, plus the days it touches.
+    var reminders: DayflowReminderChangeset?
+    var affectedDates: [String]?
 
     enum CodingKeys: String, CodingKey {
         case accepted
         case dryRun = "dry_run"
         case projectID = "project_id"
         case docKind = "doc_kind"
-        case confidence, reason, tasks
+        case confidence, reason, tasks, reminders
+        case affectedDates = "affected_dates"
     }
 }
 
@@ -692,28 +714,45 @@ extension DayflowAPIClient {
     // MARK: Plan import (multipart: file XOR text)
 
     func importPlan(
-        id: String, text: String, instruction: String? = nil, dryRun: Bool = false
+        id: String, text: String, instruction: String? = nil, dryRun: Bool = false,
+        currentReminders: [DayflowCurrentReminderInput] = []
     ) async throws -> DayflowImportResult {
         let boundary = "Boundary-\(UUID().uuidString)"
         var fields = ["text": text, "dry_run": dryRun ? "true" : "false"]
         if let instruction, !instruction.isEmpty { fields["instruction"] = instruction }
+        Self.attachReminders(currentReminders, to: &fields)
         let body = Self.multipartBody(boundary: boundary, fields: fields, file: nil)
         return try await requestMultipart("/projects/\(id)/import", boundary: boundary, body: body)
     }
 
     func importPlan(
-        id: String, fileURL: URL, instruction: String? = nil, dryRun: Bool = false
+        id: String, fileURL: URL, instruction: String? = nil, dryRun: Bool = false,
+        currentReminders: [DayflowCurrentReminderInput] = []
     ) async throws -> DayflowImportResult {
         let data = try Data(contentsOf: fileURL)
         let boundary = "Boundary-\(UUID().uuidString)"
         var fields = ["dry_run": dryRun ? "true" : "false"]
         if let instruction, !instruction.isEmpty { fields["instruction"] = instruction }
+        Self.attachReminders(currentReminders, to: &fields)
         let body = Self.multipartBody(
             boundary: boundary,
             fields: fields,
             file: (field: "file", filename: fileURL.lastPathComponent,
                    mime: "application/octet-stream", data: data))
         return try await requestMultipart("/projects/\(id)/import", boundary: boundary, body: body)
+    }
+
+    /// Serialise the reminders the frontend owns into the `current_reminders`
+    /// multipart field (a JSON array) so a confirmed import can diff against them.
+    private static func attachReminders(
+        _ reminders: [DayflowCurrentReminderInput], to fields: inout [String: String]
+    ) {
+        guard !reminders.isEmpty,
+              let data = try? JSONSerialization.data(
+                withJSONObject: reminders.map { $0.jsonObject }),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        fields["current_reminders"] = json
     }
 
     // MARK: Completion tracking + dashboard

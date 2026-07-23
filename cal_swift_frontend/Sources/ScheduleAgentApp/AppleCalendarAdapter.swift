@@ -117,6 +117,24 @@ extension AppleCalendarAdapter {
         }
     }
 
+    /// Request calendar (events) access only — used by schedule generation, which
+    /// reads the local calendar but doesn't touch reminders.
+    func requestEventAccess() async -> Bool {
+        await withCheckedContinuation { continuation in
+            self.requestAccess { granted, _ in continuation.resume(returning: granted) }
+        }
+    }
+
+    /// True when calendar (event) access is ALREADY granted. Lets generation read
+    /// the local calendar without ever triggering a permission prompt mid-run —
+    /// blocking the schedule (and its energy curve) on a dialog is the wrong
+    /// coupling. The prompt is requested up front elsewhere (onAppear).
+    var hasEventAccess: Bool {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        if #available(macOS 14.0, *) { return status == .fullAccess }
+        return status == .authorized
+    }
+
     // MARK: Reads → upload to the backend
 
     /// The agent-owned events currently on the calendar for `date`, as the
@@ -131,6 +149,36 @@ extension AppleCalendarAdapter {
                 start: Self.iso(event.startDate),
                 end: Self.iso(event.endDate))
         }
+    }
+
+    /// All events on the local calendar for `date`, as the backend's generation
+    /// input. Uploaded so the scheduler works around the user's real fixed events
+    /// (meetings/classes) via local EventKit instead of reading CalDAV. Notes are
+    /// passed as `description` so the backend can tell its own agent-written
+    /// events (tagged [agent-scheduled:…]) from user events.
+    func localCalendarEvents(on date: Date) -> [DayflowCalendarEventInput] {
+        let interval = Self.dayInterval(date)
+        let predicate = store.predicateForEvents(
+            withStart: interval.start, end: interval.end, calendars: nil)
+        return store.events(matching: predicate)
+            // Only the user's own scheduling commitments count as fixed blocks.
+            // Exclude:
+            //  • subscribed feeds (节假日 / 节气 / 世界杯赛程 … `.subscription`) and
+            //    birthday calendars — informational, not personal time.
+            //  • all-day events — they'd become 0:00–23:59 blocks swallowing the
+            //    whole day (this is how 大暑 filled the schedule).
+            .filter { event in
+                let type = event.calendar.type
+                guard type != .subscription, type != .birthday else { return false }
+                return !event.isAllDay
+            }
+            .map { event in
+                DayflowCalendarEventInput(
+                    title: event.title,
+                    start: Self.iso(event.startDate),
+                    end: Self.iso(event.endDate),
+                    description: event.notes)
+            }
     }
 
     /// The agent-owned reminders currently in Reminders for `projectID` (nil =

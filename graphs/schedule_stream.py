@@ -74,6 +74,7 @@ async def stream_schedule_events(
                     "type": "health",
                     "energy_curve": patch.get("energy_curve", []),
                     "health_summary": patch.get("health_summary", ""),
+                    "energy_source": patch.get("energy_source", "none"),
                 }
             elif node_name == "fetch_calendar" and not fired_fixed:
                 # Emit the raw fixed_blocks here (meals haven't merged in yet).

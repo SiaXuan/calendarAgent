@@ -230,14 +230,15 @@ struct SidebarView: View {
             }
         }
         .onAppear {
-            startDayflowStream()
-            // The generate stream only carries the energy curve + summary, not the
-            // sleep times, so re-load the persisted snapshot to restore the sleep
-            // window display after a restart.
-            Task { await refreshHealthSnapshot() }
+            // Don't prompt for calendar access on launch — the reminders
+            // full-access flow (import / replan) grants it, and generation reads
+            // the local calendar only when it's already authorized. Prompting
+            // here re-fires every launch under ad-hoc signing (TCC resets).
+            loadTodaySchedulePreferringCache()
         }
         .onDisappear {
             streamTask?.cancel()
+            streamTask = nil   // else the guard in startDayflowStream blocks a restart
         }
     }
 
@@ -328,6 +329,15 @@ struct SidebarView: View {
                 calendarAdapter.openInCalendar(near: Date())
             }
         }
+    }
+
+    /// Force a fresh generation of today's schedule (reads the current local
+    /// calendar + health), streaming the result so the energy curve refreshes.
+    private func regenerateToday() {
+        guard !isLoadingBackend else { return }
+        streamTask?.cancel()
+        streamTask = nil   // clear the guard in startDayflowStream
+        startDayflowStream()
     }
 
     private var energyCurveModule: some View {
@@ -1232,8 +1242,9 @@ struct SidebarView: View {
         state.statusMessage = generate ? "Loading Dayflow agent schedule..." : "Refreshing Dayflow schedule..."
         Task {
             do {
+                let calendarEvents = generate ? localCalendarEventsForCurrentDate() : nil
                 let schedule = try await (generate
-                    ? dayflowClient.generateSchedule(date: scheduleDate)
+                    ? dayflowClient.generateSchedule(date: scheduleDate, calendarEvents: calendarEvents)
                     : dayflowClient.fetchSchedule(date: scheduleDate))
                 await MainActor.run {
                     state.applyDayflowSchedule(schedule, now: Date())
@@ -1249,13 +1260,53 @@ struct SidebarView: View {
         }
     }
 
+    /// Startup: reuse today's cached schedule if the backend already has one (a
+    /// fast GET, no LLM / CalDAV / regeneration). Only generate via the stream
+    /// when there's no schedule for today yet (first open of the day) — matching
+    /// the "don't re-run the LLM when nothing changed" design. Explicit
+    /// regeneration still goes through loadDayflowSchedule(generate:true).
+    private func loadTodaySchedulePreferringCache() {
+        guard !isLoadingBackend else { return }
+        isLoadingBackend = true
+        Task {
+            do {
+                let schedule = try await dayflowClient.fetchSchedule(date: scheduleDate)
+                await MainActor.run {
+                    state.applyDayflowSchedule(schedule, now: Date())
+                    isLoadingBackend = false
+                }
+                await refreshHealthSnapshot()
+            } catch {
+                // No cached schedule for today → generate it once via the stream.
+                await MainActor.run { isLoadingBackend = false }
+                startDayflowStream()
+            }
+        }
+    }
+
+    /// Read the day's local calendar (requesting event access) so generation
+    /// schedules around the user's real events via EventKit instead of CalDAV.
+    /// Returns nil if access is denied or the date can't be parsed — callers then
+    /// fall back to the no-calendar path (backend reads CalDAV).
+    private func localCalendarEventsForCurrentDate() -> [DayflowCalendarEventInput]? {
+        // Only read when access is ALREADY granted — never prompt here, or a
+        // pending permission dialog would stall the schedule (and its energy
+        // curve). The prompt is fired once in onAppear.
+        guard calendarAdapter.hasEventAccess else { return nil }
+        guard let day = Self.date(from: scheduleDate) else { return nil }
+        return calendarAdapter.localCalendarEvents(on: day)
+    }
+
     private func startDayflowStream() {
         guard streamTask == nil else { return }
         isLoadingBackend = true
         state.beginDayflowStream()
         streamTask = Task {
+            // Upload the local calendar so the backend works around real events.
+            let calendarEvents = localCalendarEventsForCurrentDate()
             do {
-                for try await event in dayflowClient.streamSchedule(date: scheduleDate) {
+                for try await event in dayflowClient.streamSchedule(
+                    date: scheduleDate, calendarEvents: calendarEvents) {
                     await MainActor.run {
                         switch event {
                         case let .health(energyCurve, healthSummary, energySource):
@@ -1284,9 +1335,10 @@ struct SidebarView: View {
                             isLoadingBackend = false
                             streamTask = nil
                         case let .error(message):
-                            state.clearForBackendError("Dayflow stream failed: \(message)")
                             isLoadingBackend = false
                             streamTask = nil
+                            Task { await recoverWithCachedSchedule(
+                                reason: "Dayflow stream failed: \(message)") }
                         }
                     }
                 }
@@ -1296,10 +1348,13 @@ struct SidebarView: View {
                 }
             } catch {
                 await MainActor.run {
-                    state.clearForBackendError("Dayflow stream unavailable: \(error.localizedDescription)")
                     isLoadingBackend = false
                     streamTask = nil
                 }
+                // A stream hiccup (e.g. backend reload) shouldn't wipe the energy
+                // curve — fall back to the last cached schedule, which carries it.
+                await recoverWithCachedSchedule(
+                    reason: "Dayflow stream unavailable: \(error.localizedDescription)")
             }
         }
     }
@@ -1571,6 +1626,19 @@ struct SidebarView: View {
         }
     }
 
+    /// The energy curve only arrives via the generate stream; if that stream
+    /// fails, recover it from the last cached schedule (which includes the curve
+    /// + energy source) so we never end up with sleep data but a blank curve.
+    private func recoverWithCachedSchedule(reason: String) async {
+        do {
+            let schedule = try await dayflowClient.fetchSchedule(date: scheduleDate)
+            await MainActor.run { state.applyDayflowSchedule(schedule, now: Date()) }
+            await refreshHealthSnapshot()
+        } catch {
+            await MainActor.run { state.statusMessage = reason }
+        }
+    }
+
     private func refreshHealthSnapshot() async {
         do {
             let snapshot = try await dayflowClient.fetchHealthSnapshot(date: scheduleDate)
@@ -1749,6 +1817,15 @@ struct SidebarView: View {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: Date())
+    }
+
+    /// Parse a "yyyy-MM-dd" schedule date to a local Date (used to read that day's
+    /// calendar for generation).
+    private static func date(from string: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: string)
     }
 }
 

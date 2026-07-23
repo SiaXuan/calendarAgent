@@ -90,6 +90,35 @@ async def stream_schedule(target_date: str):
     return EventSourceResponse(generator())
 
 
+@router.post("/schedule/stream")
+async def stream_schedule_post(payload: GenerateRequest):
+    """
+    POST variant of the SSE stream — same health → fixed → schedule → done
+    events, but the request body can carry `calendar_events` (the local calendar
+    the frontend read via EventKit). GET SSE can't take a body, so the local
+    /EventKit generation path uses this one; the backend only falls back to
+    reading CalDAV when `calendar_events` is omitted.
+    """
+    try:
+        d = date.fromisoformat(payload.date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    events = (
+        [e.model_dump() for e in payload.calendar_events]
+        if payload.calendar_events is not None else None
+    )
+
+    async def generator():
+        try:
+            async for event in stream_schedule_events(d, calendar_events=events):
+                yield {"data": json.dumps(event, default=str)}
+        except Exception as exc:
+            yield {"data": json.dumps({"type": "error", "message": str(exc)})}
+
+    return EventSourceResponse(generator())
+
+
 @router.get("/schedule/{target_date}", response_model=DaySchedule)
 async def get_schedule(target_date: str):
     try:

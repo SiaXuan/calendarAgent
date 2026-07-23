@@ -61,6 +61,23 @@ def project_tasks(project_id: str) -> list[Task]:
     return [t for t in task_store.values() if t.project_id == project_id]
 
 
+def _task_as_node(t: Task) -> Subtask:
+    """One coarse plan node = the whole task at its stated date, WITHOUT
+    decomposition. Import writes these straight to reminders (the syllabus/PRD in
+    its original planned form); the fine daily breakdown happens later on the due
+    day via the reminder→task→schedule pipeline, grounded by source_excerpt."""
+    return Subtask(
+        parent_id=t.id,
+        title=t.title,
+        cognitive_load=t.cognitive_load,
+        estimated_minutes=max(25, int(round((t.estimated_hours or 1.0) * 60))),
+        suggested_date=t.deadline,
+        deadline=t.deadline,
+        due_datetime=t.deadline_dt,
+        project_id=t.project_id,
+    )
+
+
 def _snapshot_item(s: Subtask, project_id: str) -> PlanSnapshotItem:
     bkey = subtask_block_key(s)
     rec = completion_store.get(bkey)
@@ -97,19 +114,28 @@ async def import_plan(
     text: str | None = None,
     instruction: str | None = None,
     dry_run: bool = False,
+    current_reminders: list[dict] | None = None,
 ) -> dict:
     """
     Parse a document (pasted text / .txt / .md / .pdf / .docx), extract a plan
-    via Claude, and turn its candidate tasks into project Tasks. Import creates
-    Tasks only; the reminder change-set is produced separately by replan_project.
+    via Claude, and turn its candidate tasks into project Tasks.
+
+    New-flow (Phase 4): a confirmed import writes the plan directly. Each task
+    becomes ONE coarse plan node at its stated date — the syllabus/PRD kept in
+    its original planned form, NOT decomposed. We write the plan snapshot (so the
+    nodes show immediately) and diff the coarse nodes against the reminders the
+    frontend currently owns (`current_reminders`), returning a reminder
+    change-set the frontend applies via EventKit. Fine daily breakdown happens
+    later on each node's due day, grounded by the stored source_excerpt.
 
     Layered intent gate: document_parser rejects empty/oversized/unsupported
     input (raises DocumentParseError → 422); the LLM then rejects non-plans via
-    is_plan/confidence. On `dry_run` nothing is persisted — the caller previews
-    the tasks and confirms before a real import.
+    is_plan/confidence. On `dry_run` nothing is persisted and no reminders are
+    produced — the caller previews the tasks and confirms before a real import.
 
     Returns {accepted, doc_kind, confidence, ...}. When accepted, includes the
-    created (or would-be-created) tasks + project_meta.
+    created (or would-be-created) tasks + project_meta; a confirmed import also
+    includes the reminder change-set + affected_dates.
     """
     proj = project_store[project_id]
     language = get_current_prefs().language
@@ -156,19 +182,12 @@ async def import_plan(
             deadline=c.explicit_deadline or c.explicit_date,
             source="import",
             project_id=project_id,
+            source_excerpt=c.source_excerpt,
         )
         for c in candidates
     ]
 
-    if not dry_run:
-        for t in new_tasks:
-            task_store[t.id] = t
-        proj.task_ids.extend(t.id for t in new_tasks)
-        proj.updated_at = datetime.now()
-        save_task_store()
-        save_project_store()
-
-    return {
+    result = {
         "accepted": True,
         "dry_run": dry_run,
         "project_id": project_id,
@@ -177,6 +196,35 @@ async def import_plan(
         "project_meta": plan.project_meta.model_dump(mode="json"),
         "tasks": [t.model_dump(mode="json") for t in new_tasks],
     }
+    if dry_run:
+        return result
+
+    for t in new_tasks:
+        task_store[t.id] = t
+    proj.task_ids.extend(t.id for t in new_tasks)
+    proj.updated_at = datetime.now()
+    save_task_store()
+    save_project_store()
+
+    # Write the plan straight from the import: every task in the project becomes a
+    # coarse node, the snapshot is refreshed (so "计划节点" fills immediately), and
+    # the nodes are diffed against the reminders the frontend owns → a change-set
+    # it applies via EventKit. The backend never touches the OS reminders itself.
+    from agents import reminder_reconcile
+    coarse = [_task_as_node(t) for t in project_tasks(project_id)]
+    old_snapshot = project_plan_store.get(project_id, [])
+    done_keys = {
+        k for k, r in completion_store.items()
+        if r.project_id == project_id and r.status == CompletionStatus.done
+    }
+    changeset = reminder_reconcile.reconcile_reminders(
+        coarse, current_reminders or [], old_snapshot, done_keys)
+    project_plan_store[project_id] = [_snapshot_item(s, project_id) for s in coarse]
+    save_project_plan_store()
+
+    result["reminders"] = changeset
+    result["affected_dates"] = reminder_reconcile.affected_dates(changeset, old_snapshot)
+    return result
 
 
 async def replan_project(
@@ -192,16 +240,16 @@ async def replan_project(
     unchanged left in place, dropped nodes deleted. The plan snapshot is refreshed
     so the next replan diffs against this plan. `affected_dates` tells the frontend
     which days to refresh on the daily path (today's blocks re-flow there, not here).
+
+    Nodes are COARSE — one per task at its stated date, matching import. Reminders
+    are the plan in its original form; the fine daily breakdown happens on each
+    node's due day (grounded by source_excerpt), not here. So a replan is a cheap,
+    LLM-free re-sync after tasks/completions change.
     """
     from agents import reminder_reconcile  # lazy import: breaks the module cycle
 
-    proj = project_store[project_id]
     tasks = project_tasks(project_id)
-    base_date = proj.start_date or date.today()
-    language = get_current_prefs().language
-    new_subs = await task_agent.rank_and_decompose(tasks, base_date, language)
-    for s in new_subs:
-        s.project_id = project_id
+    new_subs = [_task_as_node(t) for t in tasks]
 
     old_snapshot = project_plan_store.get(project_id, [])
     done_keys = {

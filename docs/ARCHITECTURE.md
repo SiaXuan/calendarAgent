@@ -56,8 +56,12 @@
 - [x] Step 0 block-diff 策略(待重构为纯变更集)
 - [x] 纯函数 reconcile · 变更集接口（`calendar_reconcile.reconcile_schedule` + `POST /schedule/{date}/changeset`）· `fetch_calendar` 改前端传入（`ScheduleState.calendar_events`；`fetch_calendar_node` 收到就用纯函数算、不联网，`None` 才降级读 CalDAV；`POST /schedule/generate` 加 `calendar_events`。CalDAV 仍作兜底，第 5 步才删）
 - [x] 项目 replan → **提醒变更集**（`agents/reminder_reconcile.py` 纯函数 + `POST /projects/{id}/replan`，完成感知；replan 只出提醒清单，今天的时间块交日常路径刷新，返回 `affected_dates` 提示前端刷哪天）
-- [x] 多格式导入（文本/.md/.txt/.pdf/.docx）→ 建项目 Task（`integrations/document_parser.py` + `agents/plan_import_agent.py` + `models/plan_import.py` + `POST /projects/{id}/import`，支持 dry_run 预览、意图闸门 is_plan/confidence≥0.55、超限/非计划 422）。导入只建任务，提醒清单走上面的 replan。图片/视觉与「重复导入 doc-diff+指令 reconcile」留后续。
-- [ ] Swift EventKit 执行层
+- [x] 多格式导入（文本/.md/.txt/.pdf/.docx）→ 建项目 Task（`integrations/document_parser.py` + `agents/plan_import_agent.py` + `models/plan_import.py` + `POST /projects/{id}/import`，支持 dry_run 预览、意图闸门 is_plan/confidence≥0.55、超限/非计划 422）。图片/视觉与「重复导入 doc-diff+指令 reconcile」留后续。
+- [x] **导入即写提醒（2026-07-23 流程定案）**：确认导入直接写计划快照 + 返回提醒变更集，前端 EventKit 落地——不再要用户手点 replan。**reminder = 粗节点（每条任务一个，保持大纲原始日期），不做子步骤拆解**；细拆解留给「到期那天」的日常路径，靠任务上存的 `source_excerpt`（原文片段）给 LLM 上下文。因此 `replan` 也改成粗节点、**无 LLM 的重新同步**（改任务/勾完成后用）。不做 RAG：单份大纲能整份进上下文，向量/检索是过度设计。相关：`project_service.import_plan/_task_as_node/replan_project`、`task_agent.rank_and_decompose`（payload 加 `source_excerpt`）、`Task.source_excerpt`。
+- [x] Swift EventKit 执行层（`AppleCalendarAdapter`：读事件/提醒、apply 事件&提醒变更集、`localCalendarEvents(on:)` 读当天本地日历供生成用；真机验证通过）
+- [x] **生成走本地 EventKit（P2，2026-07-23）**：GET SSE 带不了 body，新增 **`POST /schedule/stream`**（真流式 POST-SSE，body 带 `calendar_events`）。前端 `streamSchedule(date:calendarEvents:)` 有本地日历就 POST、没有就退回 GET。规避了世界杯赌博日历那种 CalDAV 联网读。
+  - **坑（改后即修）**：读本地日历要按**日历类型**排除订阅流——`.subscription`（中国/加拿大节假日、节气、世界杯赛程…）和 `.birthday` 是信息流不是个人占用；再叠加过滤 `isAllDay`。只按 `isAllDay` 不够（节气事件不一定标全天，用户报「大暑」仍占满全天）。见 `AppleCalendarAdapter.localCalendarEvents`。
+  - **坑（改后即修）**：**生成绝不能在中途 `await` 日历权限弹窗**——一开始把 `requestEventAccess()` 放进 `loadDayflowSchedule(generate:true)`（睡眠输入后重排那条），权限弹窗把整个重新生成挂住，能量曲线永远不刷新（`applyManualSleepWindow` 乐观设了 `energySource=.today` 但不设曲线，所以表现为「有睡眠标签、曲线空白、无报错」）。改为：`onAppear` fire-and-forget 请求一次权限；生成只用 `hasEventAccess`（非弹窗检查）已授权才读本地日历，否则降级。
 - [ ] 移除 CalDAV 文件到 `legacy/caldav/`
 
 ### 给后来 agent 的提示

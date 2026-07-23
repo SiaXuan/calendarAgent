@@ -6,6 +6,7 @@ together), track completion, and feed the dashboard heatmap. The
 completion-aware replan endpoint is added in Step 1.6 once the multi-day
 scheduling model is settled.
 """
+import json
 import logging
 import uuid
 from datetime import date, datetime, timedelta
@@ -129,26 +130,40 @@ async def import_plan(
     text: str | None = Form(None),
     instruction: str | None = Form(None),
     dry_run: bool = Form(False),
+    current_reminders: str | None = Form(None),
 ):
     """
     Import a plan document (pasted text / .txt / .md / .pdf / .docx) into the
-    project as Tasks. Multipart form: exactly one of `file` or `text`, an optional
-    natural-language `instruction` (e.g. reuse an old syllabus in a new term), plus
-    optional `dry_run` (preview without persisting). Reminders come separately from
-    POST /projects/{id}/replan. 422 on unparseable input or a non-plan doc.
+    project. Multipart form: exactly one of `file` or `text`, an optional
+    natural-language `instruction` (e.g. reuse an old syllabus in a new term),
+    optional `dry_run` (preview without persisting), and optional
+    `current_reminders` (JSON array of the reminders the frontend owns for this
+    project, so a confirmed import can diff against them).
+
+    A confirmed import writes the plan snapshot and returns a reminder change-set
+    {create, update, delete} for the frontend to apply via EventKit. 422 on
+    unparseable input or a non-plan doc.
     """
     _require(project_id)
     if (file is None) == (text is None):
         raise HTTPException(
             status_code=422, detail="Provide exactly one of `file` or `text`.")
+    reminders: list[dict] | None = None
+    if current_reminders:
+        try:
+            reminders = json.loads(current_reminders)
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(
+                status_code=422, detail="`current_reminders` must be a JSON array.")
     try:
         if file is not None:
             result = await svc.import_plan(
                 project_id, filename=file.filename, data=await file.read(),
-                instruction=instruction, dry_run=dry_run)
+                instruction=instruction, dry_run=dry_run, current_reminders=reminders)
         else:
             result = await svc.import_plan(
-                project_id, text=text, instruction=instruction, dry_run=dry_run)
+                project_id, text=text, instruction=instruction, dry_run=dry_run,
+                current_reminders=reminders)
     except DocumentParseError as e:
         raise HTTPException(status_code=422, detail={"code": e.code, "message": e.message})
     except Exception:

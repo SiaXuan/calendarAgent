@@ -88,43 +88,74 @@ final class ProjectsViewModel: ObservableObject {
     /// file (not the empty text field).
     func selectImportFile(_ url: URL) { importFileURL = url }
 
+    /// Dry-run preview — no persistence, no reminder access prompt.
     func previewImport(project: DayflowProject) async {
-        await runImport(project: project, dryRun: true)
-    }
-
-    func confirmImport(project: DayflowProject) async {
-        await runImport(project: project, dryRun: false)
-    }
-
-    private func runImport(project: DayflowProject, dryRun: Bool) async {
         isImporting = true
         statusMessage = nil
         errorMessage = nil
         defer { isImporting = false }
         let composer = importText.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            let result: DayflowImportResult
-            if let url = importFileURL {
-                // File is the content; the composer text is a note about it.
-                result = try await client.importPlan(
-                    id: project.id, fileURL: url, instruction: composer, dryRun: dryRun)
-            } else {
-                // Composer text IS the plan; the backend picks up any embedded instruction.
-                result = try await client.importPlan(
-                    id: project.id, text: composer, dryRun: dryRun)
-            }
-            if dryRun {
-                importPreview = result
-            } else {
-                clearImportInputs()
-                statusMessage = "已导入 \(result.tasks?.count ?? 0) 个任务"
-                await loadDetail(project)
-            }
+            importPreview = try await callImport(project: project, composer: composer,
+                                                 dryRun: true, currentReminders: [])
         } catch let e as DayflowRequestError {
-            errorMessage = e.message ?? (dryRun ? "无法从这份内容里读出计划。" : "导入失败。")
+            errorMessage = e.message ?? "无法从这份内容里读出计划。"
         } catch {
             errorMessage = friendly(error)
         }
+    }
+
+    /// Confirm — persist the plan AND write it into the Reminders app. Needs
+    /// reminders access: read the reminders we already own, let the backend diff
+    /// against them, and apply the returned change-set via EventKit.
+    func confirmImport(project: DayflowProject) async {
+        isImporting = true
+        statusMessage = nil
+        errorMessage = nil
+        defer { isImporting = false }
+
+        let (granted, accessError) = await adapter.requestFullAccess()
+        guard granted else {
+            errorMessage = "需要「提醒事项」权限：\(accessError?.localizedDescription ?? "被拒绝")"
+            return
+        }
+        let current = await adapter.currentAgentReminders(forProject: project.id)
+        let composer = importText.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let result = try await callImport(project: project, composer: composer,
+                                              dryRun: false, currentReminders: current)
+            if let reminders = result.reminders {
+                try await adapter.applyReminderChangeset(reminders)
+            }
+            clearImportInputs()
+            let taskN = result.tasks?.count ?? 0
+            if let r = result.reminders {
+                statusMessage = "已导入 \(taskN) 个任务并写入提醒：新增 \(r.create.count) · 改 \(r.update.count) · 删 \(r.delete.count)"
+            } else {
+                statusMessage = "已导入 \(taskN) 个任务"
+            }
+            await loadDetail(project)
+        } catch let e as DayflowRequestError {
+            errorMessage = e.message ?? "导入失败。"
+        } catch {
+            errorMessage = friendly(error)
+        }
+    }
+
+    private func callImport(
+        project: DayflowProject, composer: String, dryRun: Bool,
+        currentReminders: [DayflowCurrentReminderInput]
+    ) async throws -> DayflowImportResult {
+        if let url = importFileURL {
+            // File is the content; the composer text is a note about it.
+            return try await client.importPlan(
+                id: project.id, fileURL: url, instruction: composer,
+                dryRun: dryRun, currentReminders: currentReminders)
+        }
+        // Composer text IS the plan; the backend picks up any embedded instruction.
+        return try await client.importPlan(
+            id: project.id, text: composer, dryRun: dryRun,
+            currentReminders: currentReminders)
     }
 
     func cancelImportPreview() {

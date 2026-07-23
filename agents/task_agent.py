@@ -51,6 +51,10 @@ You are a task planning assistant. All text fields (e.g. "title") must be writte
 
 Analyze each task and decompose it into appropriately-sized subtasks. Follow these guidelines:
 
+CONTEXT — when a task has a "source_excerpt" (the snippet of an imported document
+it came from), use it to understand what a terse title actually refers to and to
+break the work down faithfully; do not invent scope beyond what it implies.
+
 CRITICAL — DO NOT mark tasks as instant unless they are trivially quick (< 5 min, zero thinking):
 - is_instant=true ONLY for: pay a bill, click submit on a COMPLETED form, send a short email,
   make a quick phone call, buy something online. These require NO preparation or thinking.
@@ -197,6 +201,9 @@ async def rank_and_decompose(
             "id": t.id,
             "title": t.title,
             "description": t.description,
+            # source_excerpt grounds decomposition of an imported plan node: the
+            # original doc snippet tells the LLM what a terse reminder title means.
+            "source_excerpt": t.source_excerpt,
             "priority": t.priority.value,
             "cognitive_load": t.cognitive_load.value,
             "estimated_hours": t.estimated_hours,

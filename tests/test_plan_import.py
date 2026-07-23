@@ -55,6 +55,39 @@ def test_import_accepted_creates_tasks(clean_stores, monkeypatch):
     assert read_ch.deadline == date(2026, 8, 1)
 
 
+def test_import_writes_snapshot_and_reminder_changeset(clean_stores, monkeypatch):
+    """New-flow: a confirmed import writes the plan snapshot straight from the
+    coarse task nodes and returns a reminder change-set for the frontend."""
+    _mock_extract(monkeypatch, ExtractedPlan(
+        is_plan=True, doc_kind=DocKind.syllabus, confidence=0.9,
+        candidate_tasks=[
+            CandidateTask(title="Read chapter one", estimated_hours=2,
+                          explicit_date=date(2026, 8, 1),
+                          source_excerpt="Week 1: read chapter one"),
+            CandidateTask(title="Problem set 1", estimated_hours=3),
+        ],
+    ))
+    pid = _new_project()
+
+    r = client.post(f"/projects/{pid}/import", data={"text": _LONG_TEXT})
+    assert r.status_code == 200
+    body = r.json()
+    # one reminder to CREATE per imported task, none to delete on a first import
+    assert {c["title"] for c in body["reminders"]["create"]} == {
+        "Read chapter one", "Problem set 1"}
+    assert body["reminders"]["delete"] == []
+    assert "2026-08-01" in body["affected_dates"]
+
+    # snapshot now populated → "计划节点" fills immediately
+    plan = client.get(f"/projects/{pid}/plan").json()
+    assert {i["title"] for i in plan["items"]} == {"Read chapter one", "Problem set 1"}
+
+    # source_excerpt persisted onto the task (grounds later daily decomposition)
+    read_ch = next(t for t in storage.task_store.values()
+                   if t.title == "Read chapter one")
+    assert read_ch.source_excerpt == "Week 1: read chapter one"
+
+
 def test_import_dry_run_does_not_persist(clean_stores, monkeypatch):
     _mock_extract(monkeypatch, ExtractedPlan(
         is_plan=True, confidence=0.8,

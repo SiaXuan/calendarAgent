@@ -184,14 +184,14 @@ struct ProjectDetailView: View {
     // MARK: Replan
 
     private var replanSection: some View {
-        Section("排入提醒") {
+        Section("同步提醒") {
             VStack(alignment: .leading, spacing: 6) {
-                Text("按当前计划重排，把未来节点写成「提醒事项」App 里的待办（已完成的保留、变了的替换）。")
+                Text("导入时已按原定日期把节点写进「提醒事项」。改过任务或勾了完成后点这里重新同步（已完成的保留、变了的替换、删掉的清除）。")
                     .font(.caption).foregroundStyle(.secondary)
                 Button {
                     Task { await model.replan(project: project) }
                 } label: {
-                    Label("重排并写入提醒", systemImage: "arrow.triangle.2.circlepath")
+                    Label("重新同步提醒", systemImage: "arrow.triangle.2.circlepath")
                 }
             }
         }
