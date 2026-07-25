@@ -38,6 +38,22 @@ class GenerateRequest(BaseModel):
     # Local/EventKit path (docs/ARCHITECTURE.md §0): the day's fixed events read
     # by the frontend. Omit (null) to fall back to the backend reading CalDAV.
     calendar_events: list[CalendarEvent] | None = None
+    # Committed minutes per future day (YYYY-MM-DD → minutes), read from the local
+    # calendar over the scheduling horizon. Drives the automatic multi-day planning
+    # that runs before generation; absent → future days treated as fully free.
+    fixed_minutes_by_date: dict[str, int] | None = None
+
+
+def _parse_fixed_minutes(raw: dict[str, int] | None) -> dict[date, int] | None:
+    if not raw:
+        return None
+    out: dict[date, int] = {}
+    for k, v in raw.items():
+        try:
+            out[date.fromisoformat(k)] = int(v)
+        except (ValueError, TypeError):
+            continue
+    return out or None
 
 
 @router.post("/schedule/generate", response_model=DaySchedule)
@@ -51,6 +67,11 @@ async def generate_schedule(payload: GenerateRequest):
         [e.model_dump() for e in payload.calendar_events]
         if payload.calendar_events is not None else None
     )
+    # Auto multi-day planning: fold any project nodes that have newly entered the
+    # window into the plan before generating (replaces the old manual button).
+    from agents import project_service
+    await project_service.ensure_multiday_plan(
+        d, _parse_fixed_minutes(payload.fixed_minutes_by_date))
     schedule = await run_schedule_graph(d, calendar_events=events)
     return schedule
 
@@ -108,6 +129,9 @@ async def stream_schedule_post(payload: GenerateRequest):
         [e.model_dump() for e in payload.calendar_events]
         if payload.calendar_events is not None else None
     )
+    from agents import project_service
+    await project_service.ensure_multiday_plan(
+        d, _parse_fixed_minutes(payload.fixed_minutes_by_date))
 
     async def generator():
         try:

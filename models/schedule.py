@@ -33,6 +33,8 @@ class TimeBlock(BaseModel):
     is_uncertain: bool = False         # ★ flag — task scope unclear
     has_explicit_time: bool = True     # False = reminder has date only, no specific time
     is_done: bool = False              # derived from completion_store; joined on read (Phase 4)
+    carried_over: bool = False         # unfinished project chunk rolled from a past day
+                                       # ("继续…"); the frontend prefixes the label
 
 
 class FreeWindow(BaseModel):

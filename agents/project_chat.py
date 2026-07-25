@@ -7,6 +7,8 @@ and, when asked to change something, returns the revised task list. The
 orchestration (history, applying the revision, persistence) lives in
 agents/project_service.chat_about_plan; this module is just the LLM call.
 """
+from typing import Literal
+
 from pydantic import BaseModel
 
 from agents.llm import sonnet
@@ -14,11 +16,22 @@ from models.plan_import import CandidateTask
 from models.user import Language
 
 
+class TaskProgress(BaseModel):
+    """The user reporting how far along a task is, in conversation ("作业1 交了" /
+    "论文还没写完"). `done` marks the whole task finished (its planned work stops
+    being scheduled/carried); `in_progress` keeps it flowing (the default)."""
+    task_title: str
+    status: Literal["done", "in_progress"]
+
+
 class PlanChatResult(BaseModel):
     reply: str
     # When the plan changes, the COMPLETE new task list (every task that should
     # exist after the change). null when the turn didn't change the plan.
     tasks: list[CandidateTask] | None = None
+    # When the user reports progress on existing tasks (finished / still going).
+    # null when the turn reports no progress.
+    progress: list[TaskProgress] | None = None
 
 
 _SYSTEM_PROMPT = """\
@@ -41,6 +54,11 @@ conversation — the plan gets shaped gradually across turns. Reply in {language
   (e.g. "这看起来像一份 X，你是想把它排成计划，还是…?").
 - When the user is only asking a question or you're clarifying, leave `tasks`
   null (no plan change).
+- When the user REPORTS PROGRESS on existing work ("作业1 交了 / 做完了",
+  "论文那部分还没写完 / 还在弄"), fill `progress` with `{task_title, status}`
+  using the matching task's exact title: `done` when they finished the whole
+  task, `in_progress` when it's still ongoing. `progress` is independent of
+  `tasks` — a pure progress report doesn't change the plan (leave `tasks` null).
 - Ground everything in the project's source material; don't invent scope.
 """
 

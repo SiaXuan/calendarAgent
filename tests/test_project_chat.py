@@ -32,7 +32,8 @@ def test_chat_reply_without_change_keeps_plan(clean_stores, monkeypatch):
 
     r = client.post(f"/projects/{pid}/chat", data={"message": "作业1 要多久？"})
     assert r.status_code == 200
-    assert r.json() == {"reply": "作业1 大概 4 小时。", "plan_changed": False}
+    assert r.json() == {"reply": "作业1 大概 4 小时。", "plan_changed": False,
+                        "progress_applied": 0}
 
     # both turns persisted as the project's memory
     msgs = client.get(f"/projects/{pid}/chat").json()["messages"]

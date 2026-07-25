@@ -131,58 +131,125 @@ def _in_window_project_nodes(today: date) -> list[Task]:
     return out
 
 
-async def run_multiday_plan(
+def _chunk_block_key(c: PlannedChunk) -> str:
+    """A chunk's stable completion identity — mirrors calendar_writeback.block_key
+    once it becomes a Subtask/TimeBlock ("{task_id}::{title}"). This is what
+    completion_store keys on, so a chunk's done-ness survives across days."""
+    return f"{c.task_id}::{c.title}"
+
+
+def _chunk_done(c: PlannedChunk) -> bool:
+    rec = completion_store.get(_chunk_block_key(c))
+    return bool(rec and rec.status == CompletionStatus.done)
+
+
+def _prune_stale_chunks() -> bool:
+    """Drop chunks whose task no longer exists, or whose task's chunks are ALL
+    done (nothing left to schedule/carry). Returns True if anything changed."""
+    changed = False
+    for pid in list(multiday_plan_store.keys()):
+        kept = [
+            c for c in multiday_plan_store[pid]
+            if c.task_id in project_task_store and not _chunk_done(c)
+        ]
+        if len(kept) != len(multiday_plan_store[pid]):
+            changed = True
+        if kept:
+            multiday_plan_store[pid] = kept
+        else:
+            del multiday_plan_store[pid]
+    return changed
+
+
+async def ensure_multiday_plan(
+    anchor_date: date,
     fixed_minutes_by_date: dict[date, int] | None = None,
+    *,
+    force: bool = False,
 ) -> dict:
-    """Distribute the project nodes whose deadline is inside the scheduling window
-    across the days up to those deadlines (reasoning LLM + greedy fallback),
-    respecting each day's free capacity. Far-deadline nodes are intentionally left
-    out — they enter only as their deadline approaches. `fixed_minutes_by_date` is
-    the committed time per day the frontend read from the local calendar."""
+    """Incrementally keep the multi-day plan current, called before generating a
+    day's schedule. Only project nodes that have NEWLY entered the scheduling
+    window (in-window but not yet planned) get the LLM planner; already-planned
+    projects are left untouched — their unfinished chunks carry forward via
+    `chunk_subtasks_for_date`. This is the automatic trigger that replaced the
+    old manual "plan multi-day" button.
+
+    `anchor_date` is the day being generated (the window front); "a new day
+    arrived" simply means the window rolled forward and more nodes fell in.
+    `fixed_minutes_by_date` is the committed time per day the frontend read from
+    the local calendar (absent → future days treated as fully free).
+    `force=True` replans ALL in-window nodes from scratch (manual override /
+    dev backdoor); it clears their existing chunks first.
+    """
     from agents import multiday_planner
     from agents.nodes import SCHEDULE_HORIZON_DAYS
 
-    today = date.today()
-    nodes = _in_window_project_nodes(today)
-    multiday_plan_store.clear()
-    if not nodes:
-        save_multiday_plan_store()
-        return {"chunks": 0, "projects": 0, "by_project": {}}
+    changed = _prune_stale_chunks()
+
+    in_window = _in_window_project_nodes(anchor_date)
+    if force:
+        for t in in_window:
+            multiday_plan_store.pop(t.id, None)
+
+    planned_tasks = {c.task_id for cs in multiday_plan_store.values() for c in cs}
+    new_nodes = [t for t in in_window if t.id not in planned_tasks]
+
+    if not new_nodes:
+        if changed:
+            save_multiday_plan_store()
+        return {"planned": 0, "new_nodes": 0, "by_project": {}}
 
     prefs = get_current_prefs()
     work_minutes = max(0, (prefs.work_end - prefs.work_start) * 60 - _MEAL_BUFFER_MIN)
-    horizon_end = today + timedelta(days=SCHEDULE_HORIZON_DAYS)
-    capacities = multiday_planner.build_capacities(
-        today, horizon_end, work_minutes, fixed_minutes_by_date)
+    horizon_end = anchor_date + timedelta(days=SCHEDULE_HORIZON_DAYS)
 
-    language = get_current_prefs().language
-    chunks = await multiday_planner.plan_project_work(nodes, capacities, today, language)
+    # Subtract time already committed to previously-planned chunks so the new
+    # nodes only take each day's REMAINING capacity (no double-booking).
+    effective_fixed: dict[date, int] = dict(fixed_minutes_by_date or {})
+    for cs in multiday_plan_store.values():
+        for c in cs:
+            effective_fixed[c.date] = effective_fixed.get(c.date, 0) + c.minutes
+    capacities = multiday_planner.build_capacities(
+        anchor_date, horizon_end, work_minutes, effective_fixed)
+
+    chunks = await multiday_planner.plan_project_work(
+        new_nodes, capacities, anchor_date, prefs.language)
 
     by_project: dict[str, list[PlannedChunk]] = {}
     for c in chunks:
+        multiday_plan_store.setdefault(c.project_id, []).append(c)
         by_project.setdefault(c.project_id, []).append(c)
-    multiday_plan_store.update(by_project)
     save_multiday_plan_store()
 
     return {
-        "chunks": len(chunks),
-        "projects": len(by_project),
+        "planned": len(chunks),
+        "new_nodes": len(new_nodes),
         "by_project": {pid: len(cs) for pid, cs in by_project.items()},
     }
 
 
 def chunk_subtasks_for_date(target_date: date) -> list[Subtask]:
-    """The planned project work sessions for `target_date`, as Subtasks ready to
-    drop into that day's schedule (alongside the day's ad-hoc/reminder tasks)."""
+    """The planned project work sessions to place on `target_date`, as Subtasks —
+    both the chunks scheduled FOR that day and any past-day chunks left unfinished
+    (carried forward, marked `carried_over` so the day shows "继续昨天没做完的 X").
+    A chunk marked done in completion_store is dropped; its title is kept verbatim
+    so the carried block_key matches the original and completing it collapses the
+    carry."""
     out: list[Subtask] = []
     for chunks in multiday_plan_store.values():
         for c in chunks:
-            if c.date != target_date:
+            if c.date > target_date:      # future day handles it when it arrives
                 continue
+            if _chunk_done(c):            # already finished — nothing to schedule
+                continue
+            carried = c.date < target_date
+            parent = project_task_store.get(c.task_id)
             out.append(Subtask(
                 parent_id=c.task_id, title=c.title, cognitive_load=c.cognitive_load,
                 estimated_minutes=c.minutes, suggested_date=target_date,
-                phase_label=c.task_title, project_id=c.project_id))
+                deadline=parent.deadline if parent else None,
+                phase_label=c.task_title, project_id=c.project_id,
+                carried_over=carried))
     return out
 
 
@@ -269,6 +336,10 @@ async def chat_about_plan(
     if changed:
         _apply_task_revision(project_id, result.tasks)
 
+    progress_applied = 0
+    if result.progress:
+        progress_applied = _apply_chat_progress(project_id, result.progress)
+
     # What to store as the user's turn — the typed text, or a note when it was
     # attachment-only (the doc/image bytes themselves aren't kept in history).
     user_turn = message.strip()
@@ -279,7 +350,37 @@ async def chat_about_plan(
         {"role": "assistant", "content": result.reply},
     ]
     save_project_chat_store()
-    return {"reply": result.reply, "plan_changed": changed}
+    return {"reply": result.reply, "plan_changed": changed,
+            "progress_applied": progress_applied}
+
+
+def _apply_chat_progress(project_id: str, progress) -> int:
+    """Reflect a chat-reported progress update onto the multi-day plan's chunks.
+    `done` marks every chunk of the matching task complete (so it stops being
+    scheduled/carried and counts on the heatmap); `in_progress` clears any done
+    record so it keeps flowing. Matches tasks by title within this project.
+    Returns the number of chunks touched."""
+    title_to_task = {t.title: t for t in project_tasks(project_id)}
+    touched = 0
+    for p in progress:
+        task = title_to_task.get(p.task_title)
+        if not task:
+            continue
+        chunks = [c for c in multiday_plan_store.get(project_id, [])
+                  if c.task_id == task.id]
+        for c in chunks:
+            bkey = _chunk_block_key(c)
+            if p.status == "done":
+                completion_store[bkey] = CompletionRecord(
+                    block_key=bkey, project_id=project_id, task_id=task.id,
+                    title=c.title, scheduled_date=c.date,
+                    status=CompletionStatus.done, completed_at=datetime.now())
+            else:  # in_progress — make sure it isn't stuck marked done
+                completion_store.pop(bkey, None)
+            touched += 1
+    if touched:
+        save_completion_store()
+    return touched
 
 
 def record_chat_turn(project_id: str, role: str, content: str) -> None:

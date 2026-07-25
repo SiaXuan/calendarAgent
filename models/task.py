@@ -60,3 +60,5 @@ class Subtask(BaseModel):
     phase_label: str | None = None   # e.g. "Phase 1 · Research"
     is_instant: bool = False         # pass-through quick action, skip scheduling
     project_id: str | None = None    # inherited from parent task (Phase 4)
+    carried_over: bool = False       # a past-day project chunk left unfinished,
+                                     # rolled into today ("继续昨天没做完的 X")

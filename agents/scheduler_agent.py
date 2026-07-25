@@ -266,6 +266,7 @@ def generate_schedule(
                 pomodoro_count=pomodoro_count,
                 deadline=subtask.deadline,
                 is_uncertain=False,
+                carried_over=subtask.carried_over,
             ))
             # Advance the cursor for this interval (task + buffer)
             intervals[interval_idx][0] = block_end + timedelta(minutes=_BUFFER_MINUTES)

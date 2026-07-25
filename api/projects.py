@@ -209,16 +209,17 @@ class MultidayPlanRequest(BaseModel):
 
 @router.post("/projects/plan-multiday")
 async def plan_multiday(payload: MultidayPlanRequest = MultidayPlanRequest()):
-    """Distribute all active project nodes across the days up to their deadlines,
-    respecting each day's free capacity. Returns a per-project chunk summary; the
-    daily schedule then surfaces each day's chunks."""
+    """Force a full multi-day replan of all in-window project nodes (manual
+    override / dev backdoor). The normal path is automatic: each daily generate
+    calls `ensure_multiday_plan`, which incrementally picks up newly-in-window
+    nodes. Kept so a just-edited outline can be redistributed immediately."""
     fixed: dict[date, int] = {}
     for k, v in payload.fixed_minutes_by_date.items():
         try:
             fixed[date.fromisoformat(k)] = int(v)
         except (ValueError, TypeError):
             continue
-    return await svc.run_multiday_plan(fixed or None)
+    return await svc.ensure_multiday_plan(date.today(), fixed or None, force=True)
 
 
 @router.get("/projects/{project_id}/multiday")

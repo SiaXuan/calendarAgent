@@ -78,7 +78,7 @@ def test_plan_multiday_only_plans_in_window_deadlines(clean_stores, monkeypatch)
     monkeypatch.setattr(mp, "plan_project_work", fake_plan)
 
     r = client.post("/projects/plan-multiday", json={"fixed_minutes_by_date": {}})
-    assert r.status_code == 200 and r.json()["chunks"] > 0
+    assert r.status_code == 200 and r.json()["planned"] > 0
 
     planned_ids = {c.task_id for cs in storage.multiday_plan_store.values() for c in cs}
     assert "near" in planned_ids
