@@ -1,8 +1,8 @@
-# Phase 4 交接（2026-07-23）
+# Phase 4 交接（2026-07-24）
 
 > 明天接着干的清单。配合 [ARCHITECTURE.md](ARCHITECTURE.md)（§0 迁移状态最全、§10 踩坑）一起看。
 > 结论/踩坑记在 ARCHITECTURE；这份是「现在到哪了、下一步做什么」。
-> 测试：`.venv/bin/python -m pytest -q` → **276 passed**。
+> 测试：`.venv/bin/python -m pytest -q` → **286 passed**。
 
 ## 本会话（2026-07-23）做完的
 
@@ -36,12 +36,27 @@
 - **本地日历过滤**：`localCalendarEvents` / `fixedMinutesByDate` 排除 `.subscription`（节假日/节气/世界杯赛程）和 `.birthday` 及全天事件——之前「大暑」占满全天就是这个。
 - **UI 文案精简**：存了 memory `terse-ui-copy`（别把解释性长段写进 UI）。
 
-## 下一步（明天做，用户主诉求）
+## 本会话（2026-07-24）做完的：每日动态重排（自动多天规划）+ 结转记忆
 
-### 每日动态重排 + 结转记忆（Step 1.6 续）
-- **多天计划只是「确认未来放得下」**；实际**只落地/sync 当天**，第二天按最新情况重新规划。
-- **结转记忆**：用户说「作业1 学习资料还没看完」→ 模型记住未完成部分，**第二天日程自动接上「继续昨天没做完的 X」**。
-- 涉及：完成/未完成状态回流 + 接 LangMem（或复用 `project_chat_store` 的对话记忆）+ 每日重规划触发点。先想清楚「当天 sync 什么、第二天重算什么、未完成怎么结转」的数据流。
+**触发点搬进每日生成（改掉了手动按钮）**：多天规划不再是项目页按钮，改为每日生成前**自动增量**跑
+`project_service.ensure_multiday_plan(anchor_date, fixed_minutes_by_date)`——剪枝（删/全完成的 chunk）→
+找「窗口内但还没排过」的新节点跑 LLM（**只排新节点**）→ 容量扣掉已排 chunk 占用。`POST /schedule/generate|stream`
+跑图前先调它（`GenerateRequest` 加 `fixed_minutes_by_date`；前端 generate/stream 带 `fixedMinutesByDate(from:days:30)`）。
+旧 `POST /projects/plan-multiday` 保留改 `force=True`（dev 后门，前端按钮 + `VM.planMultiday` 已删）。
+
+**结转叠加层**：`multiday_plan_store`=底稿（不改），`completion_store`=完成叠加。`chunk_subtasks_for_date` 改为注入
+「`date ≤ today` 且没勾完成」的 chunk——过去未完成的自动上浮，标 `carried_over`（前端 `displayTitle` 加「继续：」）。
+**结转块保持原 title** → block_key 稳定 → 勾一次即收口不无限结转。
+
+**对话可补充**：项目对话说「X 做完了/还没做完」→ `PlanChatResult.progress` → `_apply_chat_progress` 写/清完成记录。
+
+测试 286 passed（新增 `tests/test_carryover.py` 10 个）。Swift `swift build` 通过。**后端逻辑全单测过，GUI 端到端没跑。**
+
+### 待真机验证（本会话新增）
+- 项目节点 deadline 滚进 5 天窗口 → 「重新生成今天」自动排入、**无需去项目点按钮**；项目页「多天排程」区自动显示分布。
+- 今天不勾完成的项目时段 → 次日「重新生成」自动出现「继续：X」。
+- 项目对话说「作业1 交了」→ 次日不再出现；说「还没做完」→ 继续结转。
+- 确认 generate/stream 真的带上了 `fixed_minutes_by_date`（未授权日历时降级为 null，后端按满工时算）。
 
 ## 待真机验证（都单测过，GUI 端到端没跑）
 - 项目对话整条链：贴大纲/截图 → 右边出节点 → 说「拆细/挪一挪」→ 节点变 → 「排入多天日程」→ 「写入」提醒。

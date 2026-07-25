@@ -63,7 +63,22 @@
 - [x] **窗口闸门（2026-07-23，语义已校正）**：窗口 = **只有 deadline 落在今天+`SCHEDULE_HORIZON_DAYS`（默认 5 天）内的**任务才进排程（过期/无日期的普通提醒也进）。远 deadline（几个月后的作业）**现在完全不排**，等 deadline 临近才进。`agents/nodes.py::_within_horizon` 管 task_store 每日提醒；`project_service._in_window_project_nodes` 管项目节点。
 - [x] **多天调度模型（Step 1.6，2026-07-23）**：`agents/multiday_planner.py` — 推理 LLM（`sonnet`，可 `LLM_REASON_MODEL` 换 opus）+ 贪心兜底 + 容量/deadline 校验。**只规划窗口内 deadline 的项目节点**，把它们摊到 [今天, deadline] 里逐步做完。**关键：不是把任务切成同名等长 block**——LLM 读 `source_excerpt`/描述想清楚任务要哪几个**阶段步骤**（读材料→实现→检查→提交…），每步一个有意义的标题 + 时长（30–120 分钟，一步一坐不打断），能收口就一天收口。输出 `PlannedChunk`（`task_title` 父任务 + `title` 具体步骤），存 `multiday_plan_store`（按 project_id）。每日调度 `rank_tasks_node` 注入当天 `chunk_subtasks_for_date`。端点 `POST /projects/plan-multiday`、`GET /projects/{id}/multiday`。前端：ProjectDetailView「排入多天日程」按钮 + 按天分布展示（步骤+父任务）；容量由 `fixedMinutesByDate` 读未来 30 天本地日历算。贪心兜底只能出「第 k/n 段」通用标题（LLM 失败时）。
 - [x] **项目 = 一条有记忆的对话（2026-07-23）**：项目详情页改成两栏——左多轮对话、右计划节点（标题+日期）。`project_chat_store`（按 project_id 存全历史，落盘）+ `agents/project_chat.converse`（sonnet，reply + 可选改后任务列表）+ `project_service.chat_about_plan`（应用改动：同名任务保 id→进度/提醒不丢，重建快照）。**导入并进对话、无硬意图闸门**：`POST /projects/{id}/chat` 是 multipart（message + 可选 file：图走视觉、文档 parse 成文本），会话 LLM 自己判断——是计划就抽进右边，不明确就反问兜底（「你发的像 X，想…吗？」），绝不硬拒。旧 `POST /import` + 置信度闸门仍在（阈值放宽到 0.4、去掉 is_plan 一票否决）但前端 chatbot 不再走它。前端 `submitComposer` 一律走 `/chat`。
-- [ ] **每日动态重排 + 结转记忆（Step 1.6 续，下一步，用户主诉求）**：多天计划只是「确认未来放得下」；**实际只 sync/落地当天**，第二天重新按最新情况规划。要接 LangMem：用户说「作业1 学习资料还没看完」→ 模型记住未完成部分，**第二天日程自动接上「继续做昨天没做完的 X」**。涉及：完成/未完成状态回流 + 对话记忆 + 每日重规划触发。
+- [x] **每日动态重排 + 结转记忆（Step 1.6 续，2026-07-24，用户主诉求）**：
+  - **触发点搬进每日生成（关键纠正）**：多天规划**不再是项目页手动按钮**，改为每日生成日程前**自动增量**跑。
+    `project_service.ensure_multiday_plan(anchor_date, fixed_minutes_by_date, force=False)`：先剪枝（任务已删/全完成的 chunk），
+    再找**在窗口内但 store 里还没有任何 chunk 的**任务（=新滚进 5 天窗口的节点）跑 LLM，**只排新节点、不重跑已排的**；
+    容量按 `effective_fixed = 前端固定分钟 + 已排 chunk 分钟`扣减，新节点排在剩余空档、不双重占用。`anchor_date`=生成的目标日期，
+    「到了新的一天」= 窗口自然前移、新节点入窗。`POST /schedule/generate` 和 `POST /schedule/stream` 跑图前先调它
+    （`GenerateRequest` 加 `fixed_minutes_by_date`；前端 generate/stream 带 `fixedMinutesByDate(from:days:30)`）。
+    旧 `POST /projects/plan-multiday` 保留但改成 `force=True` 全量重排（dev/覆盖后门，前端不再调；已删项目页按钮 + VM.planMultiday）。
+  - **结转叠加层**：`multiday_plan_store`=计划底稿（结转不改它），`completion_store`=完成叠加层。
+    `chunk_subtasks_for_date(target)` 改为注入「`c.date ≤ target` 且未勾完成」的 chunk——**过去未完成的自动上浮到今天**，
+    标 `carried_over=True`（Subtask/TimeBlock 新字段，scheduler 透传；前端 `displayTitle` 加「继续：」前缀）。
+    **结转块保持原 title 不变** → `block_key={task_id}::{title}` 稳定 → 勾一次完成即收口，不无限结转。容量溢出交现有 scheduler 进 `unscheduled`。
+  - **对话可补充**：`project_chat.PlanChatResult` 加 `progress:[{task_title,status:done|in_progress}]`；用户在项目对话说
+    「X 做完了 / 还没做完」→ `project_service._apply_chat_progress` 给该任务的 chunk 写/清完成记录（done→停止结转+进 heatmap）。
+  - **不引 LangMem**：复用 `completion_store` + `project_chat_store` 已够，不做向量检索；不加 chunk 级 remaining_minutes（v1 按整 chunk 结转）。
+  - 单测 `tests/test_carryover.py`（10）+ 改 `test_multiday_planner`/`test_project_chat` 各 1 处断言（返回字段变化）。286 passed。
 - [x] Swift EventKit 执行层（`AppleCalendarAdapter`：读事件/提醒、apply 事件&提醒变更集、`localCalendarEvents(on:)` 读当天本地日历供生成用；真机验证通过）
 - [x] **生成走本地 EventKit（P2，2026-07-23）**：GET SSE 带不了 body，新增 **`POST /schedule/stream`**（真流式 POST-SSE，body 带 `calendar_events`）。前端 `streamSchedule(date:calendarEvents:)` 有本地日历就 POST、没有就退回 GET。规避了世界杯赌博日历那种 CalDAV 联网读。
   - **坑（改后即修）**：读本地日历要按**日历类型**排除订阅流——`.subscription`（中国/加拿大节假日、节气、世界杯赛程…）和 `.birthday` 是信息流不是个人占用；再叠加过滤 `isAllDay`。只按 `isAllDay` 不够（节气事件不一定标全天，用户报「大暑」仍占满全天）。见 `AppleCalendarAdapter.localCalendarEvents`。
