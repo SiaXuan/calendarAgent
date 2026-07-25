@@ -114,17 +114,19 @@ final class DayflowAPIClient: @unchecked Sendable {
     }
 
     func generateSchedule(
-        date: String, calendarEvents: [DayflowCalendarEventInput]? = nil
+        date: String, calendarEvents: [DayflowCalendarEventInput]? = nil,
+        fixedMinutesByDate: [String: Int]? = nil
     ) async throws -> DayflowSchedule {
         // Local/EventKit path: when the frontend has read the day's real events,
         // upload them so the backend schedules around them without reading CalDAV.
-        guard let calendarEvents else {
+        // `fixedMinutesByDate` (future-day committed minutes) drives the automatic
+        // multi-day planning the backend runs before generating.
+        if calendarEvents == nil && fixedMinutesByDate == nil {
             return try await request("/schedule/generate", method: "POST", body: ["date": date])
         }
-        let payload: [String: Any] = [
-            "date": date,
-            "calendar_events": calendarEvents.map { $0.jsonObject },
-        ]
+        var payload: [String: Any] = ["date": date]
+        if let calendarEvents { payload["calendar_events"] = calendarEvents.map { $0.jsonObject } }
+        if let fixedMinutesByDate { payload["fixed_minutes_by_date"] = fixedMinutesByDate }
         let body = try JSONSerialization.data(withJSONObject: payload)
         return try await request("/schedule/generate", method: "POST", encodedBody: body)
     }
@@ -166,20 +168,20 @@ final class DayflowAPIClient: @unchecked Sendable {
     /// POST them to /schedule/stream so the backend schedules around the local
     /// calendar (GET SSE can't carry a body); otherwise GET the plain stream.
     func streamSchedule(
-        date: String, calendarEvents: [DayflowCalendarEventInput]? = nil
+        date: String, calendarEvents: [DayflowCalendarEventInput]? = nil,
+        fixedMinutesByDate: [String: Int]? = nil
     ) -> AsyncThrowingStream<DayflowStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     var request: URLRequest
-                    if let calendarEvents {
+                    if calendarEvents != nil || fixedMinutesByDate != nil {
                         request = URLRequest(url: baseURL.appending(path: "/schedule/stream"))
                         request.httpMethod = "POST"
                         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                        let payload: [String: Any] = [
-                            "date": date,
-                            "calendar_events": calendarEvents.map { $0.jsonObject },
-                        ]
+                        var payload: [String: Any] = ["date": date]
+                        if let calendarEvents { payload["calendar_events"] = calendarEvents.map { $0.jsonObject } }
+                        if let fixedMinutesByDate { payload["fixed_minutes_by_date"] = fixedMinutesByDate }
                         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
                     } else {
                         request = URLRequest(url: baseURL.appending(path: "/schedule/stream/\(date)"))

@@ -266,20 +266,10 @@ struct ProjectDetailView: View {
     // MARK: Multi-day distribution
 
     @ViewBuilder private var multidaySection: some View {
+        // Distribution is filled automatically when a day's schedule is generated
+        // (nodes entering the 5-day window get planned) — no manual button.
         Section("多天排程") {
             VStack(alignment: .leading, spacing: 10) {
-                Button {
-                    Task { await model.planMultiday(project: project) }
-                } label: {
-                    if model.isPlanning {
-                        HStack(spacing: 6) { ProgressView().controlSize(.small); Text("排程中…") }
-                    } else {
-                        Label("排入多天日程", systemImage: "calendar.badge.clock")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!hasPlan || model.isPlanning)
-
                 if let byDate = model.multiday?.byDate, !byDate.isEmpty {
                     ForEach(byDate.keys.sorted(), id: \.self) { day in
                         VStack(alignment: .leading, spacing: 2) {

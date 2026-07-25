@@ -20,7 +20,6 @@ final class ProjectsViewModel: ObservableObject {
     @Published var plan: DayflowProjectPlan?
     @Published var progress: DayflowProjectProgress?
     @Published var multiday: DayflowMultidayPlan?      // per-day distribution
-    @Published var isPlanning = false
     @Published var chatMessages: [DayflowChatMessage] = []   // project conversation
     @Published var isChatting = false
 
@@ -123,22 +122,9 @@ final class ProjectsViewModel: ObservableObject {
     }
 
     /// Distribute all active project work across days. Reads the next 30 days of
-    /// local calendar (when authorized) so the planner works around real
-    /// commitments; then reloads the detail to show the new distribution.
-    func planMultiday(project: DayflowProject) async {
-        isPlanning = true
-        statusMessage = nil
-        errorMessage = nil
-        defer { isPlanning = false }
-        let fixed = adapter.fixedMinutesByDate(from: Date(), days: 30)
-        do {
-            let result = try await client.planMultiday(fixedMinutesByDate: fixed)
-            statusMessage = "已排 \(result.chunks) 个时段"
-            await loadDetail(project)
-        } catch {
-            errorMessage = friendly(error)
-        }
-    }
+    // Multi-day distribution is now filled automatically during daily schedule
+    // generation (backend `ensure_multiday_plan`); the manual "plan multi-day"
+    // action was removed. `loadDetail` still fetches the distribution to show it.
 
     // MARK: Import (dry-run preview → confirm)
 

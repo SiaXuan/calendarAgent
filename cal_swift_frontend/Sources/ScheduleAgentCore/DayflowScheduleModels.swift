@@ -29,6 +29,14 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
     public var breakMinutes: Int
     public var pomodoroCount: Int
     public var deadline: Date?
+    /// An unfinished project chunk rolled over from a past day. The UI prefixes
+    /// the label with "继续：" so the day reads "继续昨天没做完的 X".
+    public var carriedOver: Bool
+
+    /// Title as shown to the user — carried blocks get the "继续：" prefix.
+    public var displayTitle: String {
+        carriedOver ? "继续：\(title)" : title
+    }
 
     public init(
         id: UUID = UUID(),
@@ -44,7 +52,8 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         focusMinutes: Int,
         breakMinutes: Int,
         pomodoroCount: Int,
-        deadline: Date?
+        deadline: Date?,
+        carriedOver: Bool = false
     ) {
         self.id = id
         self.start = start
@@ -60,6 +69,7 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         self.breakMinutes = breakMinutes
         self.pomodoroCount = pomodoroCount
         self.deadline = deadline
+        self.carriedOver = carriedOver
     }
 
     enum CodingKeys: String, CodingKey {
@@ -76,6 +86,7 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         case breakMinutes = "break_minutes"
         case pomodoroCount = "pomodoro_count"
         case deadline
+        case carriedOver = "carried_over"
     }
 
     public init(from decoder: Decoder) throws {
@@ -93,6 +104,7 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         breakMinutes = try container.decode(Int.self, forKey: .breakMinutes)
         pomodoroCount = try container.decode(Int.self, forKey: .pomodoroCount)
         deadline = try container.decodeIfPresent(Date.self, forKey: .deadline)
+        carriedOver = try container.decodeIfPresent(Bool.self, forKey: .carriedOver) ?? false
         id = UUID()
     }
 
@@ -111,6 +123,7 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         try container.encode(breakMinutes, forKey: .breakMinutes)
         try container.encode(pomodoroCount, forKey: .pomodoroCount)
         try container.encodeIfPresent(deadline, forKey: .deadline)
+        try container.encode(carriedOver, forKey: .carriedOver)
     }
 }
 

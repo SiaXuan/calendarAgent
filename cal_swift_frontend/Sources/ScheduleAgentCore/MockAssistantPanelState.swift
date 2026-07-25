@@ -680,7 +680,7 @@ public struct MockAssistantPanelState: Equatable, Sendable {
                 ))
             case .suggested, .scheduled, .instant:
                 let task = TaskItem(
-                    title: block.title,
+                    title: block.displayTitle,   // carried blocks read "继续：X"
                     estimatedMinutes: max(5, Int(block.end.timeIntervalSince(block.start) / 60)),
                     deadline: block.deadline,
                     priority: .medium,

@@ -1262,8 +1262,10 @@ struct SidebarView: View {
         Task {
             do {
                 let calendarEvents = generate ? localCalendarEventsForCurrentDate() : nil
+                let fixedMinutes = generate ? futureCapacityForPlanning() : nil
                 let schedule = try await (generate
-                    ? dayflowClient.generateSchedule(date: scheduleDate, calendarEvents: calendarEvents)
+                    ? dayflowClient.generateSchedule(date: scheduleDate, calendarEvents: calendarEvents,
+                                                     fixedMinutesByDate: fixedMinutes)
                     : dayflowClient.fetchSchedule(date: scheduleDate))
                 await MainActor.run {
                     state.applyDayflowSchedule(schedule, now: Date())
@@ -1316,6 +1318,14 @@ struct SidebarView: View {
         return calendarAdapter.localCalendarEvents(on: day)
     }
 
+    /// Committed minutes per day over the planning horizon, read from the local
+    /// calendar — lets the backend auto-plan multi-day project work around real
+    /// commitments. nil (no prompt) when access isn't granted yet.
+    private func futureCapacityForPlanning() -> [String: Int]? {
+        guard calendarAdapter.hasEventAccess else { return nil }
+        return calendarAdapter.fixedMinutesByDate(from: Date(), days: 30)
+    }
+
     private func startDayflowStream() {
         guard streamTask == nil else { return }
         isLoadingBackend = true
@@ -1323,9 +1333,11 @@ struct SidebarView: View {
         streamTask = Task {
             // Upload the local calendar so the backend works around real events.
             let calendarEvents = localCalendarEventsForCurrentDate()
+            let fixedMinutes = futureCapacityForPlanning()
             do {
                 for try await event in dayflowClient.streamSchedule(
-                    date: scheduleDate, calendarEvents: calendarEvents) {
+                    date: scheduleDate, calendarEvents: calendarEvents,
+                    fixedMinutesByDate: fixedMinutes) {
                     await MainActor.run {
                         switch event {
                         case let .health(energyCurve, healthSummary, energySource):
