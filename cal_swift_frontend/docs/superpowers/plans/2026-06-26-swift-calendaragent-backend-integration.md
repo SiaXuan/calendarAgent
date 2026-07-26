@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Connect the Swift macOS sidebar frontend to the existing `/Users/siaxuan/Desktop/calendarAgent` FastAPI backend while keeping the React web frontend intact.
+**Goal:** Connect the Swift macOS sidebar frontend to the existing `<repo-root>` FastAPI backend while keeping the React web frontend intact.
 
 **Architecture:** Treat the Swift app as a second client of the existing FastAPI server at `http://localhost:8000`. Add a small Swift HTTP client, DTO layer, mapper, and `ObservableObject` view model in this Swift project; do not move, fork, rewrite, or replace the Python/React project. Keep mock data only as a fallback when the existing backend is not running.
 
@@ -14,7 +14,7 @@
 
 This plan is **not** a plan to build a new backend.
 
-Implementation must reuse `/Users/siaxuan/Desktop/calendarAgent` as the source of truth:
+Implementation must reuse `<repo-root>` as the source of truth:
 
 - Do not create new Python routes in this Swift repo.
 - Do not reimplement scheduling, health scoring, writeback, task decomposition, memory, or chat logic in Swift.
@@ -1073,14 +1073,14 @@ Expected: PASS.
 - [ ] Start old backend:
 
 ```bash
-cd /Users/siaxuan/Desktop/calendarAgent
+cd <repo-root>
 .venv/bin/uvicorn main:app --reload
 ```
 
 - [ ] Start Swift app:
 
 ```bash
-cd /Users/siaxuan/Documents/Codex/2026-06-23/superpowers-brainstorming-users-siaxuan-codex-plugins
+cd <repo-root>/cal_swift_frontend
 swift run ScheduleAgentApp
 ```
 

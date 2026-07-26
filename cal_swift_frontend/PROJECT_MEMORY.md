@@ -8,11 +8,7 @@ This document captures the current working memory for this folder so another ses
 
 This folder is a SwiftPM macOS frontend prototype for a scheduling agent. The product direction is a right-edge hover sidebar that acts as a lightweight schedule copilot beside Apple Calendar or other desktop work.
 
-The Swift app is not meant to replace the existing web app. It is a second frontend client for the existing backend project at:
-
-```text
-/Users/siaxuan/Desktop/calendarAgent
-```
+The Swift app is not meant to replace the existing web app. It is a second frontend client for the existing backend project — the FastAPI repo one level up from this `cal_swift_frontend/` folder (the repo root).
 
 Important boundary:
 
