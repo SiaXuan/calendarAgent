@@ -1,0 +1,77 @@
+# ── Credentials & secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials.json
+token.json
+oauth_token*
+google_credentials*
+caldav_credentials*
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+pip-wheel-metadata/
+MANIFEST
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Testing & coverage ────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Logs & databases ──────────────────────────────────────────────────────────
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# ── Runtime / local data ──────────────────────────────────────────────────────
+# Phase 2: any persisted schedule/health data written locally
+data/
+local_data/
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+
+# Claude Code 共享设置（session 级权限白名单老被自动追加，不纳入版本控制）
+.claude/settings.json
+
+# Swift 构建产物
+cal_swift_frontend/.build/
+
+# eval 运行临时输出
+tests/eval/_eval_schedule_tmp.json
+tests/eval/last_run.json
