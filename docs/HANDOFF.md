@@ -81,14 +81,19 @@
 - 首次「写入」要授权提醒；首次「排入多天/生成」要授权日历。
 - 确认 uvicorn 日志不再联网读 CalDAV（世界杯赌博日历）。
 
-## 下一阶段建议（按优先级）
+## Phase 4 剩余（对照真 plan：`~/.claude/plans/whimsical-seeking-shannon.md` Step 0–4 + `parsed-gliding-platypus.md`）
 
-> 之前的 roadmap `docs/phase3-plan.md` 已被删（git 历史 `f5cf5fd^` 还能取到）；README/CLAUDE.md/ARCHITECTURE 里对它的引用是历史锚点。下面是基于当前状态的现实下一步。
+> 权威 plan 在 `~/.claude/plans/`（不是被删的 `docs/phase3-plan.md`）；进度追踪在 memory `phase4-local-eventkit-migration`。
+> **已完成**：Step 0 写入层加固、Step 1 项目层+完成追踪+完成感知 reconcile、Step 1.6 自动多天规划+结转、Step 2 前半（多格式导入）、Step 3 前半（项目对话记忆）、本会话完成勾接线。
+> **以下是 plan 里还没做的（已核对当前代码），按建议优先级：**
 
-1. **复盘 / heatmap 视图（最顺的下一步）**：本会话把行内完成勾接上了 `completion_store`，数据已在流。后端 `GET /completions/heatmap` + 前端 `fetchHeatmap` 都现成，就差一个视图——按天/按项目的完成热力图（commit wall）。这是「完成态 → 统计复盘」闭环的收口，用户明确想要。
-2. **聊天分步进度**：现在发消息只有一个 spinner（`/chat/agent` 是阻塞 `ainvoke`）。要做到像 Claude 那样「查容量→移动 block…」分步提示，得把 `/chat/agent` 改成 SSE 流式推工具调用（参考生成路的 node 级 SSE）。
-3. **Apply 提案的根因**：让 `pending_proposals` 持久化（或 confirm 带 `proposal_id` 精确定位），去掉「后端 reload / 版本变动就静默失效」。本会话只让前端把失败**显式化**了。
-4. **任务间真依赖（A→B）**：本会话只做了「同父任务阶段保序」。要支持两个独立任务的先后，得给 `Subtask`/`Task` 加 `depends_on` + scheduler/solver 尊重它 + 前端能设（用户此前评估后暂缓，想清楚再做）。
+1. **复盘 / review 视图（Step 3 后半，最顺的下一步）**：`GET /completions/heatmap` + 前端 `fetchHeatmap` 现成，本会话又把行内完成勾接上了 `completion_store`，数据在流——就差一个视图：commit 热力图墙 + 项目/周期复盘。**铁律：进度数字只来自 completion_store，LLM 只写叙述、不自报数字。**
+2. **自然语言重排 UX（Step 4，半成品）**：确认卡片 `agentProposalModule` 已在；plan 里两点没做——(a) LLM 回复仍塞进 `state.statusMessage`（底部状态条、被 `lineLimit(2)` 截），没有**独立回复区**；(b) minor 改动的「乐观执行 + 撤销」没做（后端 **无 `POST /chat/agent/undo`**、`BlockChange` 无 `from_iso/to_iso/duration_minutes`、proposal 无 `expires_at`）。
+3. **重复导入 = doc-diff + 指令 reconcile（Step 2 后半）**：二次导入改版文档仍可能重建；plan 是抽新文档 → 与现有任务按身份 diff → diff+用户指令喂 reconcile → 走完成感知 replan。
+4. **今天日程写回日历（changeset UI）**：客户端 `applyEventChangeset`/`scheduleChangeset` + executor 都有，`SidebarView` 没接。
+5. **收尾**：`integrations/caldav_client.py` 仍在（`legacy/caldav/` 未建，Step 5，等生成路彻底不依赖 CalDAV 再迁；注意 `do_sync_reminders` 仍是每日提醒来源）；**可分发 .app**（公证/图标/自动更新，也是 TCC 权限老重置的根因）；死代码清理（`startDocumentIntake`/`documentIntakeModule`）。
+
+> 另：本会话发现的**非-plan 工程项**（想做可加进来）——聊天分步进度需把 `/chat/agent` SSE 化；Apply 提案静默失败的后端根因（`pending_proposals` 不持久 + confirm 不带 proposal_id）；任务间真依赖 A→B（需 `Subtask.depends_on`，用户暂缓）。
 
 ## 还没做（非阻塞）
 - **今天日程写回日历**：`currentAgentEvents` → `POST /schedule/{date}/changeset` → `applyEventChangeset`（客户端+executor 都有，UI 没接）。
