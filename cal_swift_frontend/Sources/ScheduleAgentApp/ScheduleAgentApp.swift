@@ -113,6 +113,13 @@ final class SidebarWindowController {
     private weak var window: NSWindow?
     private var isExpanded = false
     private var isPinned = false
+    /// While the sidebar is open we pump the run loop so async @State updates
+    /// (schedule stream events, health refresh) commit to the screen live. The
+    /// sidebar lives in a floating, non-key window of an app that's usually
+    /// inactive, so without this the run loop stays idle between mouse events
+    /// and SwiftUI only flushes pending updates on the next hover — which is
+    /// why the energy curve / task cards used to appear only after re-hovering.
+    private var displayPump: Timer?
 
     private init() {}
 
@@ -154,6 +161,7 @@ final class SidebarWindowController {
     func setExpanded(_ expanded: Bool, animated: Bool = true) {
         guard expanded != isExpanded || window != nil else { return }
         isExpanded = expanded
+        setDisplayPump(active: expanded)
         guard let window else { return }
         let target = frame(for: expanded ? .expanded : .collapsed, window: window)
         if animated {
@@ -164,6 +172,28 @@ final class SidebarWindowController {
             }
         } else {
             window.setFrame(target, display: true)
+        }
+    }
+
+    /// Keep the main run loop turning (≈30 Hz) while the sidebar is open so
+    /// SwiftUI commits async updates without waiting for a mouse event. The
+    /// timer runs in `.common` modes so it survives tracking/animation, and
+    /// `displayIfNeeded()` is a no-op when nothing changed.
+    private func setDisplayPump(active: Bool) {
+        if active {
+            guard displayPump == nil else { return }
+            let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+                // Timer fires on the main run loop, so we're already on the main
+                // actor — assumeIsolated avoids an extra hop each tick.
+                MainActor.assumeIsolated {
+                    self?.window?.displayIfNeeded()
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            displayPump = timer
+        } else {
+            displayPump?.invalidate()
+            displayPump = nil
         }
     }
 

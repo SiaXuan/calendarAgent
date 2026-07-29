@@ -176,6 +176,7 @@ public struct DayflowTaskScheduleMetadata: Equatable, Sendable {
     public var pomodoroCount: Int
     public var taskKind: String?
     public var cognitiveLoad: DayflowCognitiveLoad?
+    public var isDone: Bool
 
     public init(
         start: Date,
@@ -184,7 +185,8 @@ public struct DayflowTaskScheduleMetadata: Equatable, Sendable {
         breakMinutes: Int,
         pomodoroCount: Int,
         taskKind: String? = nil,
-        cognitiveLoad: DayflowCognitiveLoad? = nil
+        cognitiveLoad: DayflowCognitiveLoad? = nil,
+        isDone: Bool = false
     ) {
         self.start = start
         self.end = end
@@ -193,6 +195,7 @@ public struct DayflowTaskScheduleMetadata: Equatable, Sendable {
         self.pomodoroCount = pomodoroCount
         self.taskKind = taskKind
         self.cognitiveLoad = cognitiveLoad
+        self.isDone = isDone
     }
 
     public func durationMinutes(adjustingPomodoroCountBy delta: Int) -> Int {
@@ -640,6 +643,18 @@ public struct MockAssistantPanelState: Equatable, Sendable {
         ))
     }
 
+    /// Optimistically flip a task's done state so the checkmark responds
+    /// immediately; the caller persists via the backend complete endpoint.
+    public mutating func setTaskDone(_ taskID: UUID, done: Bool) {
+        guard var metadata = backendScheduleMetadataByTaskID[taskID] else { return }
+        metadata.isDone = done
+        backendScheduleMetadataByTaskID[taskID] = metadata
+    }
+
+    public func isTaskDone(_ taskID: UUID) -> Bool {
+        backendScheduleMetadataByTaskID[taskID]?.isDone ?? false
+    }
+
     public mutating func adjustBackendScheduleMetadata(for taskID: UUID, durationMinutes: Int, pomodoroDelta: Int) {
         guard var metadata = backendScheduleMetadataByTaskID[taskID] else { return }
         metadata.end = metadata.start.addingTimeInterval(TimeInterval(max(5, durationMinutes) * 60))
@@ -697,7 +712,8 @@ public struct MockAssistantPanelState: Equatable, Sendable {
                     breakMinutes: block.breakMinutes,
                     pomodoroCount: block.pomodoroCount,
                     taskKind: block.taskKind,
-                    cognitiveLoad: block.cognitiveLoad
+                    cognitiveLoad: block.cognitiveLoad,
+                    isDone: block.isDone
                 )
                 if let backendID = block.taskID {
                     keys[task.id] = "\(backendID)::\(block.title)"

@@ -32,6 +32,9 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
     /// An unfinished project chunk rolled over from a past day. The UI prefixes
     /// the label with "继续：" so the day reads "继续昨天没做完的 X".
     public var carriedOver: Bool
+    /// Whether this block has been marked done — joined from the backend's
+    /// completion_store on read. Drives the inline done checkmark.
+    public var isDone: Bool
 
     /// Title as shown to the user — carried blocks get the "继续：" prefix.
     public var displayTitle: String {
@@ -53,7 +56,8 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         breakMinutes: Int,
         pomodoroCount: Int,
         deadline: Date?,
-        carriedOver: Bool = false
+        carriedOver: Bool = false,
+        isDone: Bool = false
     ) {
         self.id = id
         self.start = start
@@ -70,6 +74,7 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         self.pomodoroCount = pomodoroCount
         self.deadline = deadline
         self.carriedOver = carriedOver
+        self.isDone = isDone
     }
 
     enum CodingKeys: String, CodingKey {
@@ -87,6 +92,7 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         case pomodoroCount = "pomodoro_count"
         case deadline
         case carriedOver = "carried_over"
+        case isDone = "is_done"
     }
 
     public init(from decoder: Decoder) throws {
@@ -105,6 +111,7 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         pomodoroCount = try container.decode(Int.self, forKey: .pomodoroCount)
         deadline = try container.decodeIfPresent(Date.self, forKey: .deadline)
         carriedOver = try container.decodeIfPresent(Bool.self, forKey: .carriedOver) ?? false
+        isDone = try container.decodeIfPresent(Bool.self, forKey: .isDone) ?? false
         id = UUID()
     }
 
@@ -124,6 +131,7 @@ public struct DayflowScheduleBlock: Identifiable, Codable, Equatable, Sendable {
         try container.encode(pomodoroCount, forKey: .pomodoroCount)
         try container.encodeIfPresent(deadline, forKey: .deadline)
         try container.encode(carriedOver, forKey: .carriedOver)
+        try container.encode(isDone, forKey: .isDone)
     }
 }
 

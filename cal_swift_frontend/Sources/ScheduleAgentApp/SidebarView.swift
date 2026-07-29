@@ -183,6 +183,12 @@ struct SidebarView: View {
     private var activeColor: Color { Color(nsColor: .systemGreen) }
     private var syncedColor: Color { Color(nsColor: .systemBlue) }
     private var quietColor: Color { Color(nsColor: .secondaryLabelColor) }
+    /// Row-control glyph tint. These controls live in the Upcoming lane, whose
+    /// card fill is INVERTED vs the system appearance (a dark card in light
+    /// mode, light card in dark mode). So the glyph must track the lane's own
+    /// text color — same as the (clearly legible) task titles — not the raw
+    /// colorScheme, or it lands dark-on-dark.
+    private var controlGlyphColor: Color { upcomingPrimaryColor }
     private var energyCaption: String {
         switch state.healthSignal.energySource {
         case .none:
@@ -466,8 +472,10 @@ struct SidebarView: View {
                 HStack {
                     moduleHeader("Today Queue", systemName: "tray.full", caption: "\(state.todayQueue.count) waiting")
                     Spacer()
-                    Button(isLoadingBackend ? "Syncing" : "Sync All") {
+                    Button {
                         syncQueueToCalendar()
+                    } label: {
+                        Label(isLoadingBackend ? "Syncing" : "Sync All", systemImage: "calendar.badge.plus")
                     }
                     .buttonStyle(.bordered)
                     .disabled(state.todayQueue.isEmpty || isLoadingBackend)
@@ -496,6 +504,7 @@ struct SidebarView: View {
         let isCurrent = metadata.map { $0.start <= Date() && Date() < $0.end } ?? false
         let blockKey = state.backendBlockKey(for: task.id)
         let isSynced = blockKey.map { state.isBackendBlockSynced($0) } ?? false
+        let isDone = metadata?.isDone ?? false
         let foreground = isCurrent ? activeColor : upcomingPrimaryColor
         let secondary = upcomingSecondaryColor
         let backendBadgeLabel = metadata?.backendBadgeLabel
@@ -512,7 +521,8 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(task.title)
                     .font(.system(size: isCurrent ? 14 : 13, weight: isCurrent ? .semibold : .medium))
-                    .foregroundStyle(foreground)
+                    .foregroundStyle(isDone ? secondary : foreground)
+                    .strikethrough(isDone, color: secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
@@ -520,6 +530,8 @@ struct SidebarView: View {
                         .font(.caption)
                         .foregroundStyle(isCurrent ? activeColor : secondary)
                         .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)  // keep the timing legible; the badge yields, not this
+                        .layoutPriority(1)
                     if let backendBadgeLabel {
                         backendTaskBadge(backendBadgeLabel, cognitiveLoad: metadata?.cognitiveLoad)
                     } else {
@@ -539,13 +551,34 @@ struct SidebarView: View {
             Button {
                 acceptSingleTask(task.id)
             } label: {
-                Image(systemName: "checkmark.circle")
+                // A calendar glyph (not a bare checkmark) so this reads as
+                // "push to Apple Calendar", matching the icon on the Sync All
+                // buttons. A checkmark here misread as "mark done".
+                Image(systemName: isSynced ? "calendar.badge.checkmark" : "calendar.badge.plus")
                     .foregroundStyle(isSynced ? syncedColor : calendarColor)
                     .frame(width: 26, height: 24)
             }
             .buttonStyle(.borderless)
             .disabled(isSynced || isLoadingBackend)
             .help(isSynced ? "Already synced to calendar" : "Sync this task to Calendar")
+            // Done toggle (far right = the "✓" the user expects). Feeds the
+            // backend completion_store → 复盘/heatmap. Only shown once the task
+            // has a backend block to key completion off.
+            if blockKey != nil {
+                Button {
+                    toggleTaskDone(task.id)
+                } label: {
+                    Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 15, weight: .semibold))
+                        // Same rule: light hollow circle on dark, dark on light;
+                        // green fill once done.
+                        .foregroundStyle(isDone ? activeColor : controlGlyphColor)
+                        .frame(width: 26, height: 24)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isLoadingBackend)
+                .help(isDone ? "Mark not done" : "Mark done")
+            }
         }
         .padding(9)
         .background {
@@ -842,8 +875,10 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .disabled(isLoadingBackend)
                 .help("重新生成今天（按最新日历和睡眠）")
-                Button(isLoadingBackend ? "Syncing" : "Sync All") {
+                Button {
                     syncQueueToCalendar()
+                } label: {
+                    Label(isLoadingBackend ? "Syncing" : "Sync All", systemImage: "calendar.badge.plus")
                 }
                 .buttonStyle(.bordered)
                 .disabled(state.todayQueue.isEmpty || isLoadingBackend)
@@ -998,9 +1033,18 @@ struct SidebarView: View {
 
     private var statusBar: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(activeColor.opacity(0.82))
-                .frame(width: 7, height: 7)
+            // Spinner while a backend request is in flight (agent chat, generate,
+            // sync) so a request that takes a few seconds shows visible progress
+            // instead of a frozen line of text; static dot when idle.
+            if isLoadingBackend {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 12, height: 12)
+            } else {
+                Circle()
+                    .fill(activeColor.opacity(0.82))
+                    .frame(width: 7, height: 7)
+            }
             Text(state.statusMessage)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1154,11 +1198,15 @@ struct SidebarView: View {
     private func pomodoroAdjustButton(systemName: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.secondary)
-                .frame(width: 20, height: 22)
-                .background(Color.primary.opacity(0.055))
-                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .font(.system(size: 11, weight: .semibold))
+                // Contrast comes from the glyph, not a heavy box: light glyph on
+                // the dark night background, dark glyph on the light day one.
+                .foregroundStyle(controlGlyphColor)
+                .frame(width: 20, height: 20)
+                .background {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(0.07))
+                }
         }
         .buttonStyle(.plain)
         .help(help)
@@ -1214,6 +1262,19 @@ struct SidebarView: View {
                 Capsule()
                     .strokeBorder(color.opacity(0.32), lineWidth: 0.7)
             }
+            // The pill packs two dimensions: the text is the task TYPE
+            // (analytical / insight / admin) and the COLOR is the focus
+            // intensity. Spell that out on hover so the shades aren't a mystery.
+            .help("\(label) · \(cognitiveLoadHelp(cognitiveLoad))")
+    }
+
+    private func cognitiveLoadHelp(_ cognitiveLoad: DayflowCognitiveLoad?) -> String {
+        switch cognitiveLoad {
+        case .deep:   "deep focus (blue)"
+        case .medium: "medium focus (teal)"
+        case .light:  "light effort (grey)"
+        case nil:     "unspecified effort"
+        }
     }
 
     private func backendTaskBadgeColor(_ cognitiveLoad: DayflowCognitiveLoad?) -> Color {
@@ -1445,6 +1506,27 @@ struct SidebarView: View {
         }
     }
 
+    /// Toggle a task's done state. Optimistic (the checkmark flips instantly),
+    /// then persisted to the backend completion_store, which feeds the
+    /// 复盘/heatmap. Reverts on failure. Deliberately does NOT set
+    /// isLoadingBackend — marking done shouldn't lock the whole panel.
+    private func toggleTaskDone(_ taskID: UUID) {
+        guard let blockKey = state.backendBlockKey(for: taskID), !isLoadingBackend else { return }
+        let newValue = !state.isTaskDone(taskID)
+        state.setTaskDone(taskID, done: newValue)
+        Task {
+            do {
+                _ = try await dayflowClient.setBlockCompletion(
+                    date: scheduleDate, blockKey: blockKey, done: newValue)
+            } catch {
+                await MainActor.run {
+                    state.setTaskDone(taskID, done: !newValue)  // revert
+                    state.statusMessage = "Mark done failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
     private func pinTask(_ taskID: UUID, toStart start: Date) {
         guard let blockKey = state.backendBlockKey(for: taskID),
               let metadata = state.backendScheduleMetadata(for: taskID)
@@ -1604,7 +1686,17 @@ struct SidebarView: View {
                     }
                     await reloadScheduleAfterAgentSuccess(statusMessage: result.message)
                 } else {
+                    // Non-success (expired / superseded / schedule changed): the
+                    // backend has already discarded this proposal, so keeping the
+                    // card would leave an Apply button that silently does nothing.
+                    // Clear it, surface WHY, and show the latest schedule if the
+                    // backend sent one back.
                     await MainActor.run {
+                        pendingAgentProposal = nil
+                        pendingAgentProposalMessage = nil
+                        if let schedule = result.schedule {
+                            state.applyDayflowSchedule(schedule, now: Date())
+                        }
                         state.statusMessage = result.message
                         isLoadingBackend = false
                     }

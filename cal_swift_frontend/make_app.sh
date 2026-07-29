@@ -13,7 +13,7 @@ echo "› Building ($CONFIG)…"
 swift build -c "$CONFIG" >/dev/null
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 
-echo "› Assembling $APP…"
+echo "› Assembling ${APP}…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp "$BIN_DIR/ScheduleAgentApp" "$APP/Contents/MacOS/ScheduleAgentApp"
