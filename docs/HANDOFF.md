@@ -6,7 +6,7 @@
 
 **日期**：2026-07-29
 **测试**：`.venv/bin/python -m pytest -q --ignore=tests/eval` → **288 passed**（`swift build` + `./make_app.sh` 均通过）。
-**git**：本次 7 个 commit 在 `main`（排序 / 前端 UX / 文档若干），**未 push**。
+**git**：本次一组 commit 在 `main`（后端排序 / 前端 UX / 文档重构），**未 push**。
 
 ## 这次做完的：Swift 前端 UX 修复 + 完成态接线 + 同任务阶段保序
 
