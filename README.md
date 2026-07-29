@@ -1,7 +1,8 @@
 # dayflow — Health-Aware AI Scheduling Agent
 
-FastAPI + LangGraph backend with two frontends: the original React/Vite web UI
-and a native SwiftUI macOS client (`cal_swift_frontend/`). Per-day energy curve
+FastAPI + LangGraph backend with two frontends: a native SwiftUI macOS client
+(`cal_swift_frontend/`, the primary one) and the older React/Vite web UI, which
+now lags behind. Per-day energy curve
 drives task placement; LLM (Claude via LangChain) handles task decomposition and
 chat-based adjustments. **Phase 4** pivoted calendar/reminder I/O to local
 **EventKit** in the Swift client — the backend is pure logic and no longer talks
@@ -9,17 +10,24 @@ to iCloud/CalDAV (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §0).
 
 ## Daily startup
 
+The native SwiftUI client (`cal_swift_frontend/`) is the primary frontend. The
+React/Vite web UI still runs but lags behind: Phase 4 work (local EventKit
+calendar/reminder I/O, project layer, multi-day planning, daily carryover) is
+built against the Swift client first, and only part of it is wired into the web
+UI. Use the web UI for a quick look; use the Swift client for the current
+feature set.
+
 Two terminals, both run from the project root:
 
 ```bash
 # Terminal 1 — backend (FastAPI on :8000)
 .venv/bin/uvicorn main:app --reload
 
-# Terminal 2 — frontend (Vite on :5173)
-cd frontend && pnpm dev
+# Terminal 2 — Swift client (build caveats in "Swift frontend" below)
+cd cal_swift_frontend
+./make_app.sh            # SwiftPM build → ScheduleAgent.app + ad-hoc codesign
+open ScheduleAgent.app   # launch via LaunchServices so TCC can prompt
 ```
-
-Open <http://localhost:5173>.
 
 **Stopping the backend.** If it's in the foreground, `Ctrl+C`. If you lost the terminal, kill whatever holds port 8000:
 
@@ -28,11 +36,11 @@ lsof -ti:8000 | xargs kill        # graceful
 lsof -ti:8000 | xargs kill -9     # force, if it won't die
 ```
 
-(`--reload` runs a parent + worker, so you'll usually see two PIDs — the command above kills both.) The frontend stops the same way on port 5173.
+(`--reload` runs a parent + worker, so you'll usually see two PIDs — the command above kills both.) Stop the Swift client with `pkill -f ScheduleAgentApp`; the web UI stops the same way on port 5173.
 
-### Swift frontend (native macOS client — Phase 4 direction)
+### Swift frontend (native macOS client — primary)
 
-A native SwiftUI sidebar lives in `cal_swift_frontend/`. It talks to the **same** backend on :8000, so start the backend first.
+A native SwiftUI sidebar lives in `cal_swift_frontend/` and carries the current feature set. It talks to the **same** backend on :8000, so start the backend first.
 
 **Build and run — do NOT use `swift run`.** The app reads/writes the system
 Calendar and Reminders via **EventKit**, and macOS only grants those permissions
@@ -66,6 +74,18 @@ The app requests **full access** to Calendar and Reminders (usage strings are in
   A notarized, stably-signed build would fix this — not done yet.
 - Reset the grants manually with: `tccutil reset Calendar com.dayflow.scheduleagent`
   and `tccutil reset Reminders com.dayflow.scheduleagent`.
+
+### Web frontend (React/Vite — lagging behind)
+
+The original web UI still runs but trails the Swift client: it has no local
+EventKit path, and newer Phase 4 features (project layer, multi-day planning,
+daily carryover) are only partly wired in. Keep it for a quick browser view.
+
+```bash
+cd frontend && pnpm dev
+```
+
+Open <http://localhost:5173> (backend must be running on :8000).
 
 ## First-time setup
 

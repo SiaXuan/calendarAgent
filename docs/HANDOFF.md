@@ -1,8 +1,26 @@
-# Phase 4 交接（2026-07-24）
+# Phase 4 交接（最新：2026-07-29）
 
-> 明天接着干的清单。配合 [ARCHITECTURE.md](ARCHITECTURE.md)（§0 迁移状态最全、§10 踩坑）一起看。
+> 接着干的清单。配合 [ARCHITECTURE.md](ARCHITECTURE.md)（§0 迁移状态最全、§10 踩坑）一起看。
 > 结论/踩坑记在 ARCHITECTURE；这份是「现在到哪了、下一步做什么」。
-> 测试：`.venv/bin/python -m pytest -q` → **286 passed**。
+> 测试：`.venv/bin/python -m pytest -q --ignore=tests/eval` → **288 passed**。
+
+## 本会话（2026-07-29）做完的：Swift 前端 UX 修复 + 完成态接线 + 同任务阶段保序
+
+围绕真机试用暴露的一串问题（都在 Swift 侧栏 + 少量后端）：
+
+- **悬浮侧栏刷新**（关键）：`.floating` 非-key 窗口里异步 `@State` 更新不上屏，要重新 hover 才刷。修法：展开时挂 30Hz `Timer` 泵 run loop（`SidebarWindowController.setDisplayPump`）。详见 ARCHITECTURE §10.5。
+- **同一任务的阶段保序**（后端）：`scheduler_agent.generate_schedule` 把同父任务子任务成组、按拆解顺序处理 + 给后一阶段 `min_start` 下限，修掉「先练习后做计划」反序；聊天调整 agent prompt 加「保持先后」（`graphs/agent_run.py`）。新增 2 个回归测试。**独立任务间 A→B 依赖仍没做**（需 `depends_on` 字段，用户暂缓）。
+- **完成态接 UI**：行内「完成勾」→ `POST .../complete` → `completion_store`（喂复盘）。`is_done` 前端解码 + 乐观切换。sync 与 done 拆成两个图标；两个「Sync All」也带上同一日历图标。
+- **Apply 提案不再静默失败**：非 success 时清掉失效卡 + 状态栏显示原因 + 刷新最新日程（`confirmAgentProposal`）。根因（提案纯内存、confirm 不带 proposal_id）未除。
+- **杂项 UI**：状态栏请求中显示 spinner；±按钮/完成圈对比度（字色跟反相的 `upcomingPrimaryColor`，见 §10.5）；任务标签 hover 说明（虽然原生 tooltip 在这窗口弹不出，见 §10.5）；时长文本不再被标签挤截断；`make_app.sh` 的 `$APP…` unbound 变量修掉。
+
+**都过 `swift build` + `./make_app.sh`；后端 288 passed。GUI 端到端仍需真机点一遍（见下「待真机验证」）。**
+
+### 待真机验证（本会话）
+- 点完成勾：标题划掉、勾变绿、`data/completion_store.json` 出记录；重新生成/同步后仍保持。
+- 展开侧栏静止不动时，流式能量曲线/任务卡、睡眠输入后的曲线重算能**实时**刷出来（不用重新 hover）。
+- 同任务两阶段：不会再出现后置阶段排在前置之前。
+- Apply 提案：不改后端、5 分钟内点 → 套用成功刷新；若失效则卡片消失且状态栏给原因。
 
 ## 本会话（2026-07-23）做完的
 
@@ -63,14 +81,23 @@
 - 首次「写入」要授权提醒；首次「排入多天/生成」要授权日历。
 - 确认 uvicorn 日志不再联网读 CalDAV（世界杯赌博日历）。
 
+## 下一阶段建议（按优先级）
+
+> 之前的 roadmap `docs/phase3-plan.md` 已被删（git 历史 `f5cf5fd^` 还能取到）；README/CLAUDE.md/ARCHITECTURE 里对它的引用是历史锚点。下面是基于当前状态的现实下一步。
+
+1. **复盘 / heatmap 视图（最顺的下一步）**：本会话把行内完成勾接上了 `completion_store`，数据已在流。后端 `GET /completions/heatmap` + 前端 `fetchHeatmap` 都现成，就差一个视图——按天/按项目的完成热力图（commit wall）。这是「完成态 → 统计复盘」闭环的收口，用户明确想要。
+2. **聊天分步进度**：现在发消息只有一个 spinner（`/chat/agent` 是阻塞 `ainvoke`）。要做到像 Claude 那样「查容量→移动 block…」分步提示，得把 `/chat/agent` 改成 SSE 流式推工具调用（参考生成路的 node 级 SSE）。
+3. **Apply 提案的根因**：让 `pending_proposals` 持久化（或 confirm 带 `proposal_id` 精确定位），去掉「后端 reload / 版本变动就静默失效」。本会话只让前端把失败**显式化**了。
+4. **任务间真依赖（A→B）**：本会话只做了「同父任务阶段保序」。要支持两个独立任务的先后，得给 `Subtask`/`Task` 加 `depends_on` + scheduler/solver 尊重它 + 前端能设（用户此前评估后暂缓，想清楚再做）。
+
 ## 还没做（非阻塞）
 - **今天日程写回日历**：`currentAgentEvents` → `POST /schedule/{date}/changeset` → `applyEventChangeset`（客户端+executor 都有，UI 没接）。
-- **热力图墙 / 复盘**（`GET /completions/heatmap` 就绪）。
 - **可分发 .app**：`make_app.sh` 只做本机 ad-hoc 验证；缺公证/图标/自动更新（也是权限老重置的根因）。
 - **死代码清理**：旧假导入 `MockAssistantPanelState.startDocumentIntake` + `documentIntakeModule`；VM 里 chatbot 化后不再用的 `previewImport/confirmImport/importPreview/cancelImportPreview`。
-- **提醒勾完成回报后端**：提醒 notes 只有 tag_key 短 hash，反推不出 block_key。
+- **提醒勾完成回报后端**：时间块那条已接 UI（2026-07-29）；系统「提醒」App 里勾完成仍回报不了（提醒 notes 只有 tag_key 短 hash，反推不出 block_key）。
 - **移除 CalDAV → `legacy/caldav/`**：等生成路完全不依赖 CalDAV 再做；注意 `do_sync_reminders`（AppleScript 读本地提醒）仍是每日提醒的来源，动它前要有替代（前端上传当天到期提醒）。
 - **重复导入 dedup**：chatbot 按 title 合并已大幅缓解；纯重复导入仍可能重建。
+- **原生 tooltip 在悬浮窗弹不出**（§10.5）：若以后确实需要文字说明，得自建 hover 弹层，别指望 `.help()`。
 
 ## 怎么跑
 
@@ -81,8 +108,8 @@
 # 前端：改 Swift 后必须重新打包再开；别用 swift run（EventKit 权限过不了）
 cd cal_swift_frontend && ./make_app.sh && open ScheduleAgent.app
 
-# 测试
-.venv/bin/python -m pytest -q      # 276 passed
+# 测试（eval 会打真 LLM，日常跑排除它）
+.venv/bin/python -m pytest -q --ignore=tests/eval      # 288 passed
 ```
 
 ## 关键文件

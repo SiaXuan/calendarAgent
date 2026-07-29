@@ -83,6 +83,7 @@
 - [x] **生成走本地 EventKit（P2，2026-07-23）**：GET SSE 带不了 body，新增 **`POST /schedule/stream`**（真流式 POST-SSE，body 带 `calendar_events`）。前端 `streamSchedule(date:calendarEvents:)` 有本地日历就 POST、没有就退回 GET。规避了世界杯赌博日历那种 CalDAV 联网读。
   - **坑（改后即修）**：读本地日历要按**日历类型**排除订阅流——`.subscription`（中国/加拿大节假日、节气、世界杯赛程…）和 `.birthday` 是信息流不是个人占用；再叠加过滤 `isAllDay`。只按 `isAllDay` 不够（节气事件不一定标全天，用户报「大暑」仍占满全天）。见 `AppleCalendarAdapter.localCalendarEvents`。
   - **坑（改后即修）**：**生成绝不能在中途 `await` 日历权限弹窗**——一开始把 `requestEventAccess()` 放进 `loadDayflowSchedule(generate:true)`（睡眠输入后重排那条），权限弹窗把整个重新生成挂住，能量曲线永远不刷新（`applyManualSleepWindow` 乐观设了 `energySource=.today` 但不设曲线，所以表现为「有睡眠标签、曲线空白、无报错」）。改为：`onAppear` fire-and-forget 请求一次权限；生成只用 `hasEventAccess`（非弹窗检查）已授权才读本地日历，否则降级。
+- [x] **前端完成态接线（2026-07-29）**：Upcoming / Today Queue 行内加「完成勾」→ `POST /schedule/{date}/blocks/{block_key}/complete` → `completion_store`（喂 `GET /completions/heatmap` 复盘）。block 读取时 join 出的 `is_done`（`models/schedule.py:35`）现在前端也解码进 `DayflowScheduleBlock.isDone` → 任务 metadata。**sync 与 done 拆成两个图标**：日历图标（`calendar.badge.plus/.checkmark`）=写系统日历，✓ 圈=完成。`setBlockCompletion`/`fetchHeatmap` 客户端方法之前就在（`DayflowAPIClient.swift`），这次才接 UI。`toggleTaskDone` 乐观更新、失败回滚、不锁面板。**复盘/heatmap 视图仍未做**（见 §8、HANDOFF）。
 - [ ] 移除 CalDAV 文件到 `legacy/caldav/`
 
 ### 给后来 agent 的提示
@@ -212,7 +213,9 @@ env 可覆盖:`LLM_FAST_MODEL` / `LLM_REASON_MODEL` / `LLM_FAST_TEMPERATURE` / `
 - **`subtask_overrides` 没持久化**,而 `subtask_pins` 持久化了 —— 大概率是疏漏;用户编辑过的拆解重启就丢。
 - **eval 很薄:** 5 个手写场景(`tests/eval/`)、真 LLM、单次跑、all-or-nothing 通过率。没有数据集、没有和硬编码基线的对照、没有 pass@k、没有回归门。
 - **前端死代码(Phase 4):** 旧的假导入流程 `MockAssistantPanelState.startDocumentIntake` + `documentIntakeModule` 还在,但入口("Add Document" 磁贴)已被 "Projects" 取代 → 点不到。真导入走 `ProjectsView`/`ProjectDetailView`。待清。
-- **提醒勾完成没回报后端:** 时间块完成走 `POST /schedule/{date}/blocks/{block_key}/complete`(前端有 block_key)。但用户在「提醒」App 里勾掉一条 agent 提醒时,前端无法回报 —— 提醒 notes 里只有 tag_key 的短 hash,反推不出 block_key。要么在提醒 notes 里也塞明文 block_key,要么完成态只认时间块那条路。
+- **提醒勾完成没回报后端:** 时间块完成的那条路**已接 UI**(2026-07-29,侧栏行内完成勾 → `POST /schedule/{date}/blocks/{block_key}/complete`)。但用户在系统「提醒」App 里勾掉一条 agent 提醒时,前端仍无法回报 —— 提醒 notes 里只有 tag_key 的短 hash,反推不出 block_key。要么在提醒 notes 里也塞明文 block_key,要么完成态只认时间块那条路。
+- **任务先后依赖只做了「同父任务阶段」(2026-07-29):** `scheduler_agent.generate_schedule` 现在把同一父任务的子任务成组、按拆解顺序处理,并给后一阶段一个 `min_start` 下限(前一阶段结束+buffer),避免「先做练习、再做备考计划」这种反序(回归测试 `tests/test_scheduler_agent.py::test_same_task_phases_keep_order`;`test_independent_tasks_still_energy_ranked` 锁住独立任务仍按能量排)。聊天调整 agent 的 prompt 也加了「保持先后」约束(`graphs/agent_run.py`)。**但两个独立任务之间的 A→B 依赖仍无数据模型**(`Subtask` 无 `depends_on`)—— 真要做得加字段并让 scheduler/solver 尊重它。`_priority_of` 桩函数已删(排序改按 parent_rank/parent_order/phase)。
+- **Apply 提案静默失败已缓解、根因未除(2026-07-29):** `pending_proposals` 纯内存(`storage.py`)+ 乐观并发(`base_version`)+ 5min TTL → 后端 `--reload` 或日程在确认前变动都会让 `confirm_proposal` 返回非 `success`。前端过去在非 success 时**什么都不做**(表现为「点 Apply 没反应」);已改为**清掉失效提案卡 + 状态栏显示原因 +(若后端回了日程)刷新最新日程**(`SidebarView.confirmAgentProposal`)。根因(提案不持久 + confirm 只带 date、不带 proposal_id,`api/chat.py`)未动。
 - **没有可分发的 .app:** `cal_swift_frontend/make_app.sh` 只是把 `swift build` 产物包成 ad-hoc 签名的 `.app` 供本机 EventKit 验证(见 §10)。没有正式打包/公证/图标/自动更新。
 - **导入靠真 LLM,偶发形状问题已兜:** `ExtractedPlan` 的 `with_structured_output` 偶尔把嵌套 list/object 返回成 JSON 字符串,已用 `field_validator(mode="before")` 兜(见 §10);导入端点其余异常降级为 502 而非 500。但没有对导入抽取的 eval/回归。
 
@@ -263,3 +266,9 @@ Swift 6 严格并发副作用:持有 `EKEventStore` 的 `AppleCalendarAdapter` �
 - **LLM 读结构**:每个任务的 `week_index`(第几周)+ `due_weekday`(周几);把用户自然语言说明解析成 `ImportAdjustment`(target_year / term_start_date / due_weekday / shift_weeks)。**明确禁止 LLM 输出平移后的日期。**
 - **确定性代码算日期**:`agents/plan_reschedule.py::apply_adjustment` 两种模型(学期周锚点 / 换年保持"某月第 N 个周几"),纯函数、pytest 全覆盖。
 这条和项目既有铁律一致(进度数字来自 completion_store、不让 LLM 自报)。将来若要在聊天里做"整体挪一周",把这个纯函数包成 agent 工具即可,别让 agent 一步步算。
+
+### 10.5 悬浮侧栏是 `.floating` 非-key 窗口,三个坑(2026-07-29)
+侧栏活在一个 `.floating`、透明、从不成为 key 的 `NSWindow`(`ScheduleAgentApp.swift` `WindowConfigurator`/`SidebarWindowController`),App 平时也不 active。由此三个坑:
+1. **异步 `@State` 更新不上屏,要等事件泵 run loop。** 流式能量曲线/任务卡、睡眠输入后的曲线重算、完成勾——静止 hover 时都「不动」,重新 hover 那下的展开动画才把积压更新一次性刷出来。**修法:** 侧栏展开时挂一个 30Hz `Timer`(`.common` 模式)`displayIfNeeded()` 泵 run loop(`SidebarWindowController.setDisplayPump`,`setExpanded` 里开关)。收起即停。
+2. **原生 `.help()` tooltip 被系统抑制、弹不出来。** 非-key 悬浮窗里 AppKit tooltip 不显示。**决定:** 不做自定义 tooltip 层,靠图标自解释(sync 用日历图标并和「Sync All」同图标;done 用 ✓ 圈)。`.help(...)` 代码保留但别指望它显示。
+3. **Upcoming 栏卡片色是「反相」的。** `upcomingModuleFill`/`upcomingPrimaryColor`(`SidebarView.swift`):**浅色系统里画成深色卡、深色系统里画成浅色卡**。所以行内控件(± / 完成圈)的字色必须跟 `upcomingPrimaryColor`(= 那栏标题色,新增 `controlGlyphColor` 指向它),**不能用原始 `colorScheme` 判断**,否则「浅色模式→黑字」落在这栏的深卡上就看不见。「底深字浅、底浅字深」的规则要对着**这栏的实际底色**、不是系统外观。
