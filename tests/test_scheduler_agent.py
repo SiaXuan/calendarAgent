@@ -116,6 +116,47 @@ class TestGenerateSchedule:
         starts = [b.start for b in result.blocks]
         assert starts == sorted(starts)
 
+    def test_same_task_phases_keep_order(self):
+        """A later phase of a task must never be scheduled before an earlier
+        phase — even when energy-greedy placement would put the deeper phase in
+        the best (earlier) slot. Reproduces the "do the practice before making
+        the plan" bug: phase 1 is light ("understand format / make a plan"),
+        phase 2 is deep ("do the mock practice"), and the energy peak is early.
+        """
+        windows = [_window(9, 13, 0.9)]
+        curve = [0.2] * 24
+        curve[9], curve[10], curve[11], curve[12] = 0.95, 0.85, 0.75, 0.60
+        subtasks = [
+            _subtask("Understand format / make plan", CognitiveLoad.light, 30),
+            _subtask("Do the mock practice", CognitiveLoad.deep, 60),
+        ]
+        result = generate_schedule(subtasks, windows, [], TARGET_DATE, energy_curve=curve)
+        by_title = {b.title: b for b in result.blocks}
+        assert len(result.blocks) == 2
+        assert (
+            by_title["Understand format / make plan"].start
+            < by_title["Do the mock practice"].start
+        )
+
+    def test_independent_tasks_still_energy_ranked(self):
+        """Phase ordering only binds subtasks of the SAME parent. Independent
+        tasks (different parents) still compete purely on energy — a standalone
+        deep task should take the peak slot regardless of list position.
+        """
+        windows = [_window(9, 13, 0.9)]
+        curve = [0.2] * 24
+        curve[9], curve[10], curve[11], curve[12] = 0.95, 0.85, 0.75, 0.60
+        light = Subtask(parent_id="p_light", title="Light admin",
+                        cognitive_load=CognitiveLoad.light, estimated_minutes=30,
+                        suggested_date=TARGET_DATE)
+        deep = Subtask(parent_id="p_deep", title="Deep focus",
+                       cognitive_load=CognitiveLoad.deep, estimated_minutes=60,
+                       suggested_date=TARGET_DATE)
+        result = generate_schedule([light, deep], windows, [], TARGET_DATE, energy_curve=curve)
+        by_title = {b.title: b for b in result.blocks}
+        # Deep work (heavier load) claims the 09:00 peak; light admin comes after.
+        assert by_title["Deep focus"].start < by_title["Light admin"].start
+
     def test_mock_data_integration(self):
         """End-to-end using mock task data."""
         with open("tests/mock_data/tasks_sample.json") as f:

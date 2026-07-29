@@ -209,9 +209,37 @@ def generate_schedule(
     if energy_curve is None or len(energy_curve) != 24:
         energy_curve = [0.5] * 24  # neutral fallback
 
-    sorted_tasks = sorted(
-        subtasks,
-        key=lambda s: (_priority_of(s), _LOAD_ORDER[s.cognitive_load]),
+    # Preserve the logical order within a parent task. The decomposer emits a
+    # parent's subtasks in the order they must happen (e.g. "understand the OA
+    # format / make a prep plan" BEFORE "do the mock practice"), so we keep
+    # same-parent phases grouped and in that emitted order, and later floor each
+    # phase's start at the previous phase's end (see the loop below). Without
+    # this the energy-greedy placement could put a later phase earlier in the
+    # day than an earlier one.
+    #
+    # phase_index: position of a subtask among its same-parent siblings.
+    # parent_rank: heaviest cognitive load in the parent (deep work first, as
+    #   before). parent_order: first-appearance order, to keep the decomposer's
+    #   cross-task ordering among parents of equal load.
+    parent_seen: dict[str, int] = {}
+    parent_rank: dict[str, int] = {}
+    parent_order: dict[str, int] = {}
+    indexed: list[tuple[Subtask, int]] = []
+    for s in subtasks:
+        phase = parent_seen.get(s.parent_id, 0)
+        parent_seen[s.parent_id] = phase + 1
+        indexed.append((s, phase))
+        rank = _LOAD_ORDER[s.cognitive_load]
+        parent_rank[s.parent_id] = min(parent_rank.get(s.parent_id, rank), rank)
+        parent_order.setdefault(s.parent_id, len(parent_order))
+
+    sorted_indexed = sorted(
+        indexed,
+        key=lambda item: (
+            parent_rank[item[0].parent_id],
+            parent_order[item[0].parent_id],
+            item[1],
+        ),
     )
 
     # Each free window is represented as a mutable cursor [next_available, window_end].
@@ -228,14 +256,19 @@ def generate_schedule(
 
     scheduled_blocks: list[TimeBlock] = []
     unscheduled: list[Subtask] = []
+    # End (+buffer) of the last-placed phase per parent — a floor so the next
+    # phase of the same task can't start before the previous one finishes.
+    parent_floor: dict[str, datetime] = {}
 
-    for subtask in sorted_tasks:
+    for subtask, _phase in sorted_indexed:
         threshold = _ENERGY_THRESHOLD[subtask.cognitive_load]
+        earliest = parent_floor.get(subtask.parent_id)
 
         # First pass: must meet energy threshold → scheduled
         result = _find_best_slot(
             intervals, subtask.estimated_minutes, energy_curve,
             threshold, sleep_start_hour, scheduled_blocks, target_date,
+            min_start=earliest,
         )
         is_soft_fallback = False
 
@@ -244,6 +277,7 @@ def generate_schedule(
             result = _find_best_slot(
                 intervals, subtask.estimated_minutes, energy_curve,
                 0.0, sleep_start_hour, scheduled_blocks, target_date,
+                min_start=earliest,
             )
             is_soft_fallback = True
 
@@ -270,6 +304,8 @@ def generate_schedule(
             ))
             # Advance the cursor for this interval (task + buffer)
             intervals[interval_idx][0] = block_end + timedelta(minutes=_BUFFER_MINUTES)
+            # Later phases of this same task must start after this one ends.
+            parent_floor[subtask.parent_id] = block_end + timedelta(minutes=_BUFFER_MINUTES)
         else:
             unscheduled.append(subtask)
 
@@ -289,11 +325,14 @@ def _find_best_slot(
     sleep_start_hour: int,
     existing_blocks: list[TimeBlock],
     target_date: date,
+    min_start: datetime | None = None,
 ) -> tuple[int, datetime] | None:
     """
     Scan all free intervals for the highest-energy start time that meets
     min_energy and passes hard constraints.  Step size: _SLOT_STEP minutes.
-    Returns (interval_index, start_datetime) or None.
+    `min_start`, when given, is a floor on the start time (used to keep a later
+    phase of a task after its earlier phase). Returns (interval_index,
+    start_datetime) or None.
     """
     best_energy = -1.0
     best_result: tuple[int, datetime] | None = None
@@ -301,6 +340,9 @@ def _find_best_slot(
     for idx, (cursor, end_dt) in enumerate(intervals):
         slot = cursor
         while slot + timedelta(minutes=needed_minutes) <= end_dt:
+            if min_start is not None and slot < min_start:
+                slot += timedelta(minutes=_SLOT_STEP)
+                continue
             hour_energy = energy_curve[slot.hour]
             if hour_energy >= min_energy and hour_energy > best_energy:
                 block_end = slot + timedelta(minutes=needed_minutes)
@@ -352,7 +394,3 @@ def _check_constraints(
             return False
 
     return True
-
-
-def _priority_of(subtask: Subtask) -> int:
-    return 1  # Subtasks don't carry priority; pre-sorted by task_agent.

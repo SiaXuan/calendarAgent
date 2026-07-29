@@ -76,6 +76,7 @@ def _build_system_prompt(scratch: ScheduleScratch, language, memory_bullets: lis
 你可以调用工具来查看和修改日程。原则:
 - 先用 get_schedule / capacity_check / working_hours_until 了解情况，别凭空估算。
 - 用 move_block / remove_block / add_fixed_event 调整。只能动 scheduled/suggested，不许碰 fixed/meal。
+- **保持任务间的先后逻辑**。有些 block 天然有顺序(先"了解题型/制定备考计划"再"做模拟练习"，先"读材料"再"做题"，先准备再执行)。移动时别把后置的排到前置的之前；两个都要挪就整体平移、保持原相对顺序。不确定是否有先后关系就按现有顺序来，别对调。
 - 你**只能管今天**这一天的日程。如果用户要把任务"挪到明天/改天"，你能做的只是用 remove_block 把它从今天移除，并**如实说明**「已从今天移除，明天的安排请到那天再生成」——**绝不要声称已经排到了别的某天**(你没有这个能力)。
 - 请求**模糊或缺信息**时(比如有多个同名 block、不确定挪到哪)，调 ask_user(question) 问用户，别瞎猜。
 - 现有工具**真的做不到**时(比如要订机票)，调 report_blocked(reason) 诚实说明。
