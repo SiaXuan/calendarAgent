@@ -1,7 +1,7 @@
 # 架构与运行时参考
 
 > **这是什么:** 一份「现在到底怎么跑 + 为什么这么定 + 已知缺口」的活文档。
-> 与 [phase3-plan.md](phase3-plan.md) 分工不同:那份是 *roadmap*(未来要做的);这份是 *how-it-works-now* + 决策记录 + 技术债。
+> 与 [ROADMAP.md](ROADMAP.md) 分工不同:那份是 *全局蓝图 + 进度*(要去哪);这份是 *how-it-works-now* + 决策记录 + 技术债。当前交接看 [HANDOFF.md](HANDOFF.md)。
 >
 > **维护约定:** 每次落地实现或改设计,同步更新对应章节 **和** 技术债清单(§8)。写 `file:line` 时先读代码确认,不凭记忆。
 >
@@ -163,7 +163,7 @@ env 可覆盖:`LLM_FAST_MODEL` / `LLM_REASON_MODEL` / `LLM_FAST_TEMPERATURE` / `
 
 - **单维** `HealthSnapshot`(`models/health.py`):睡眠 + 静息心率 + HRV + 步数 + active_minutes。无 recovery/stress 分数(那是 Phase B,已降级)。
 - **能量曲线纯规则**(`agents/health_agent.py` `compute_energy_curve`):3 个高斯峰(晨/午后/傍晚)+ chronotype 系数(由就寝时间推)+ 午后谷(13-15h ×0.8)+ 睡眠时长/HRV/活动修正。不是 Phase E 的研究规则引擎(那个还不存在)。
-- **`energy_source`**(`models/schedule.py` `DaySchedule`):`today` | `baseline` | `none`,状态贯穿 state → DaySchedule → 前端。无数据 → `energy_curve=[]` + `source="none"`;排程走能量中性(solver/scheduler 回落到 0.5)。**Step 1 已完成;`baseline` 聚合还没建(见 phase3-plan §九)。**
+- **`energy_source`**(`models/schedule.py` `DaySchedule`):`today` | `baseline` | `none`,状态贯穿 state → DaySchedule → 前端。无数据 → `energy_curve=[]` + `source="none"`;排程走能量中性(solver/scheduler 回落到 0.5)。**Step 1 已完成;`baseline` 聚合还没建。**
 - 摄入:仅手动(`POST /health`)。iPhone Shortcuts 路径已删;未来 Apple Health 入口在 `api/health.py` 里注释留好。
 
 ---
@@ -198,13 +198,13 @@ env 可覆盖:`LLM_FAST_MODEL` / `LLM_REASON_MODEL` / `LLM_FAST_TEMPERATURE` / `
 - **生成 = sonnet 拆解(`rank_tasks`)在关键路径上**,只和 CalDAV I/O 并行(不和 haiku 健康调用并行,后者在 super-step 1)。
 - 没配 retry/timeout;失败回落到启发式或 degraded。
 
-杠杆(细节见 phase3-plan):prompt caching(最大,静态前缀被重发 ×N)、聊天回复流式(感知延迟)、砍聊天 `max_tokens`、减少轮数、模型分层。
+杠杆:prompt caching(最大,静态前缀被重发 ×N)、聊天回复流式(感知延迟)、砍聊天 `max_tokens`、减少轮数、模型分层。
 
 ---
 
 ## 8. 已知缺口 / 技术债(活清单)
 
-- **死 fallback:** 老的结构化填槽路径(`agents/chat_agent.py` + `graphs/adjust_graph.py` + `POST /chat` 路由 + `AdjustState` + `visualize_graphs.py` 引用)仍接着线,但前端只调 `/chat/agent`(`agent_chat.ts:40`)→ 没人用。待意图地图定论后删(phase3-plan §九)。
+- **死 fallback:** 老的结构化填槽路径(`agents/chat_agent.py` + `graphs/adjust_graph.py` + `POST /chat` 路由 + `AdjustState` + `visualize_graphs.py` 引用)仍接着线,但前端只调 `/chat/agent`(`agent_chat.ts:40`)→ 没人用。待意图地图定论后删。
 - **`solve_schedule` 建了没接进 agent:** `agents/solver.py`(多日 solver + 结构化 relaxations)存在,但 ReAct agent 只有 `capacity_check`/`working_hours_until`,没有 solver。所以"超额时权衡取舍"—— 最强的 agent 用例 —— 现在跑不起来。
 - **没有 deadline-vs-appointment 模型**(§4):instant 分类完全靠脆弱的关键词子串竞赛;同一个时间戳是"deadline"还是"do-at"取决于标志。**已选的下一条设计线。**
 - **无 token 流式**(§7)。prompt caching 已给聊天 agent 开(轮内已验证),但 `task_agent`/生成路径、跨对话复用还没做。
@@ -272,3 +272,13 @@ Swift 6 严格并发副作用:持有 `EKEventStore` 的 `AppleCalendarAdapter` �
 1. **异步 `@State` 更新不上屏,要等事件泵 run loop。** 流式能量曲线/任务卡、睡眠输入后的曲线重算、完成勾——静止 hover 时都「不动」,重新 hover 那下的展开动画才把积压更新一次性刷出来。**修法:** 侧栏展开时挂一个 30Hz `Timer`(`.common` 模式)`displayIfNeeded()` 泵 run loop(`SidebarWindowController.setDisplayPump`,`setExpanded` 里开关)。收起即停。
 2. **原生 `.help()` tooltip 被系统抑制、弹不出来。** 非-key 悬浮窗里 AppKit tooltip 不显示。**决定:** 不做自定义 tooltip 层,靠图标自解释(sync 用日历图标并和「Sync All」同图标;done 用 ✓ 圈)。`.help(...)` 代码保留但别指望它显示。
 3. **Upcoming 栏卡片色是「反相」的。** `upcomingModuleFill`/`upcomingPrimaryColor`(`SidebarView.swift`):**浅色系统里画成深色卡、深色系统里画成浅色卡**。所以行内控件(± / 完成圈)的字色必须跟 `upcomingPrimaryColor`(= 那栏标题色,新增 `controlGlyphColor` 指向它),**不能用原始 `colorScheme` 判断**,否则「浅色模式→黑字」落在这栏的深卡上就看不见。「底深字浅、底浅字深」的规则要对着**这栏的实际底色**、不是系统外观。
+
+### 10.6 Swift 前端设计约定（从旧 `PROJECT_MEMORY.md` 收编，2026-07-29）
+Swift 是**第二前端**,只管 macOS UI / 本地视图态 / API 调用 / 解码 / 交互;**不重实现**后端排程/LLM/健康/记忆/拆解逻辑。视觉参照 macOS 原生 widget / Control Center(不是 web dashboard):悬浮窗透明、无阴影,视觉重量在卡片上。已定的 UI 约定:
+- **颜色语义**:绿色**只**给「当前进行中」的任务/事件(绿标题+时间+卡下绿色进度线,**不用 NOW pill**);**green 绝不用作 synced 态**(读起来像 done,冲突)。synced-to-calendar 用安静的蓝(细线勾 / 淡蓝描边)。
+- **badge**:任务类型 badge 放第二行(和时长/session 元数据同行),**别挤标题**;长标题可小一号、最多两行。徽章用后端 `task_kind`(有则显 `ANALYTICAL`/`INSIGHT`…)、否则回退 `cognitive_load`;**颜色**编码认知负荷强度(见 §10.5 的 `controlGlyphColor` 讨论),不是用户优先级。
+- **Upcoming = 主工作时间轴**(旧「Today Queue」语义已并入 = scheduled 的 upcoming agent 块);fixed / meal 锚点比 agent 任务更安静。
+- **拖拽重排**:整条 Upcoming 时间轴可拖(不只拖到另一张卡上),y 坐标→时间、吸附 15 分钟、拖放显横线+时间徽章;冲突交**后端 `/pin` reflow**,不做本地碰撞;synced / fixed 不可拖。工作日映射当前 8:00–22:00(`ScheduleDragTargetResolver`)。
+- **番茄/时长**:单次 `1 x 25m · 25+5m`、多次 `N x 25m · TOTALm`;± 本地即时更新 + 后端 debounce,调 `/schedule/{date}/pin`(同 `block_key` + 原 start + 新时长)。
+- **能量态**:`energy_source==none` 时**不画假曲线**,显示空态/CTA(「Add sleep input」);手动睡眠输入始终可用,编辑发后端(不在 Swift 维护第二真相源)。
+- **代理提案**:agent 说「要删/移」但后端返回 proposal(需确认)时,**不得静默改 UI**;保留后端 proposal/confirm 语义。

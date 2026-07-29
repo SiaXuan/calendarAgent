@@ -47,10 +47,16 @@ The frontend uses `react-i18next` with locale files under `src/locales/{lang}.js
 
 ## Phase Status
 
-- **Phase 1** ✅ Core pipeline with mock data (no real API integrations)
-- **Phase 2** ✅ Real CalDAV (iCloud) + iOS Reminders integration; manual sleep input
-- **Phase 3** ✅ Chat agent + calendar write-back + per-task planning chat
-- **Phase 4 (in progress)** 🔄 Migration to LangGraph + LangMem long-term memory
-  + multi-source health adapter + research-driven health rules
-  + user-attached MCP extension interface.
-  See [docs/phase3-plan.md](docs/phase3-plan.md) for the full roadmap.
+See **[docs/ROADMAP.md](docs/ROADMAP.md)** for the authoritative global roadmap and
+done/not-done status (this section is a pointer, not the source of truth).
+
+Two parallel tracks:
+- **Grand framework (Phases A–E):** A LangGraph migration ✅ · B multi-source
+  health data (Apple Health/Oura/WHOOP) 🔭 not started · C LangMem memory 🔨 partial
+  (C.4 reflection+decay not done) · D user-attached MCP 🔭 not started · E
+  research-driven health-rules engine 🔭 not started.
+- **EventKit + project layer (the 2026-07 pure-local pivot):** Swift client owns all
+  Calendar/Reminders I/O via EventKit; backend is pure logic returning
+  create/update/delete change-sets (no iCloud/CalDAV). Project layer + multi-day
+  planning + daily carryover + completion tracking done; review/heatmap view, NL-reschedule
+  polish, repeat-import reconcile, and CalDAV→`legacy/` cleanup remain. See ROADMAP line B.

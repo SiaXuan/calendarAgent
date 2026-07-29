@@ -143,7 +143,7 @@ Current: **Phase 4 (in progress)** — pure-local pivot: the Swift client owns a
 Calendar/Reminders I/O via EventKit, the backend is pure logic returning
 create/update/delete change-sets (no iCloud/CalDAV). Project layer + multi-day
 planning + daily carryover. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §0
-(most current) and [docs/phase3-plan.md](docs/phase3-plan.md) for the roadmap.
+(most current) and [docs/ROADMAP.md](docs/ROADMAP.md) for the global roadmap.
 
 ## Optional LangSmith tracing
 
