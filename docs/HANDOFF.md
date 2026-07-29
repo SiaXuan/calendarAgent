@@ -4,6 +4,23 @@
 > 结论/踩坑记在 ARCHITECTURE；这份是「现在到哪了、下一步做什么」。
 > 测试：`.venv/bin/python -m pytest -q --ignore=tests/eval` → **288 passed**。
 
+## 总路线图（两条计划线 —— 别只盯 EventKit）
+
+权威 plan 都在 `~/.claude/plans/`（`docs/phase3-plan.md` 已删，别再找）：
+
+**A. 大框架 `md-phase3-polished-rocket.md`** —— 把项目从单一排程工具升级成「可扩展的个性化健康规划框架」，三层模型（Profile / Core Graph / Data+Rules）+ 五个 Phase。**核对代码后的真实状态：**
+- **Phase A · LangGraph 迁移 + task_kind** ✅ 完成（`graphs/*`、`agents/llm.py`、agent/workflow 分层、scratch + `classify_impact` + 乐观并发都在）。
+- **Phase B · 多源健康数据**（Apple Health / Oura / WHOOP / Garmin，抽象 `HealthAdapter` + `HEALTH_SOURCE`）🔭 **未开始**（设计上刻意降级；现在只有手动睡眠输入，无 `integrations/health/`）。
+- **Phase C · LangMem 长期记忆 + 学习闭环** 🔨 **部分**：C.1 storage / C.2 Inspector / C.3 规则触发写入+读取 已做（`memory/store.py|observations.py|retrieval.py`，仅 `schedule_prefs` namespace 通电）；**C.4（每周 LLM 反思 + 衰减 cron）未做**（无 `memory_extractor`）。见 memory `phase_c_status`。
+- **Phase D · 用户自带 MCP**（`custom_mcp_servers` + `graphs/user_mcp.py` + chronotype 下拉）🔭 **未开始**（chronotype 目前只是 `health_agent` 按就寝时间算的中间值，不是可配置字段）。
+- **Phase E · 研究论文驱动的健康规则引擎**（`agents/health_rules.py`，每条规则带论文引用 + health card 可展开看依据）🔭 **未开始**（现在能量曲线是 `health_agent` 里的高斯规则，不是可解释的引用式规则集）。
+
+**B. EventKit + 项目层 `whimsical-seeking-shannon.md`（Step 0–4）+ `parsed-gliding-platypus.md`** —— CLAUDE.md 说的「Phase 4」落地那半。剩余见下方「Phase 4 剩余」。
+
+> ⚠️ CLAUDE.md 的「Phase 4 (in progress)」把 LangGraph/LangMem/多源健康/研究规则/MCP 全算进去，实际只有 A 完成、C 部分，**B/D/E 没动**；它引用的 `docs/phase3-plan.md` 已删（应指向上面两份 plan）——建议顺手修。
+
+---
+
 ## 本会话（2026-07-29）做完的：Swift 前端 UX 修复 + 完成态接线 + 同任务阶段保序
 
 围绕真机试用暴露的一串问题（都在 Swift 侧栏 + 少量后端）：
