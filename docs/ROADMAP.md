@@ -30,12 +30,33 @@
 | Phase | 内容 | 状态 | 备注（核对代码 2026-07-29） |
 |---|---|---|---|
 | **A** | LangGraph 迁移 + `task_kind` 维度 + agent/workflow 分层 | ✅ | `graphs/*`（schedule_graph / agent_run / adjust_graph / state）、`agents/llm.py`、scratch + `classify_impact` + 乐观并发都在；`task_kind`(analytical/insight/admin) 已入模型 |
-| **B** | 多源健康数据（Apple Health / Oura / WHOOP / Garmin，抽象 `HealthAdapter` + `HEALTH_SOURCE`）| 🔭 | **未开始**，设计上刻意降级。现在只有**手动睡眠输入**，无 `integrations/health/`。远景路线：B.1 Health Auto Export webhook → B.2 Open Wearables MCP → B.3 adapter 抽象层 |
+| **B** | 多源健康数据（Apple Health / Oura / WHOOP / Garmin，抽象 `HealthAdapter` + `HEALTH_SOURCE`）| 🔭 | **未开始**，设计上刻意降级。现在只有**手动睡眠输入**，无 `integrations/health/`。远景路线：B.1 Health Auto Export webhook → B.2 Open Wearables MCP → B.3 adapter 抽象层。**接入方式的可行性与分阶段决策见下方「Phase B 可行性与路径」** |
 | **C** | LangMem 长期记忆 + 学习闭环 | 🔨 | **部分**：C.1 storage / C.2 Inspector / C.3 规则触发写入+读取 已做（`memory/store.py`·`observations.py`·`retrieval.py`，仅 `schedule_prefs` namespace 通电；`task_lexicon`/`physiological`/`interactions` 已定义未通电）。**C.4（每周 LLM 反思 + 衰减 cron）未做**（无 `memory_extractor`）。Embedding 依赖决策留 C.5 |
 | **D** | 用户自带 MCP 扩展接口 | 🔭 | **未开始**。无 `graphs/user_mcp.py`、无 `custom_mcp_servers`/`MCPConfig`。`chronotype` 目前只是 `health_agent` 按就寝时间算的中间值，不是 `UserPreferences` 可配字段/下拉。明确不做：MEQ 问卷 / role 类目 / 预定义 task_lexicon |
 | **E** | 研究论文驱动的健康规则引擎 | 🔭 | **未开始**。无 `agents/health_rules.py`。现在能量曲线是 `health_agent` 里的高斯规则（晨/午后/傍晚峰 + chronotype + 午后谷 + 睡眠修正），**不是**带论文引用、可在 health card 展开看依据的规则集。起步 5 条（基于 Daniel Pink《When》）见原稿 |
 
 **推进顺序（已定）**：A → C → D → E 主线；**B 显式降级**为远景（手动输入够用，等有「用」的需求再启动，且 B.2 必须等 A）。每个 Phase 独立可验证、可做完停下来用一段时间。
+
+#### Phase B 可行性与路径（2026-07-31 定）
+
+**硬约束**：HealthKit 只在 iOS，**Mac 客户端读不了 Apple Health**。任何 Apple Health 接入都必须有个 iPhone 侧的桥。三条路 + 取舍：
+
+| 路径 | 谁开发 | 谁付费 | 适合 |
+|---|---|---|---|
+| **第三方 Health Auto Export**（买）| 后端一个接收 endpoint（~半天）| **每个用户**各自买 Premium（$6.99/年 · $24.99 终身 · 7 天试用）| 仅自用、快速验证 |
+| **自造 iOS 伴侣 app**（造）| iOS app：HealthKit → POST 后端 | **你** 一个 Apple Developer Program **$99/年**（通吃 iOS+macOS）| 开源、用户免费（ChatGPT 模式）|
+| **免费个人签名试验** | 同上但免费签名 | 免费 | 只做「能不能读」的可行性探针 |
+
+**关键澄清（之前踩过的误区）**：
+- 付费 $99 是**开发者身份**，真机开发签名即可测 HealthKit，**无需上架**；上架 / TestFlight 是后面给别人用才做的独立步骤——不存在「不上架就没法测」的鸡蛋问题。
+- 付费账号的开发 provisioning 约一年有效，不受免费个人签名那个 **7 天**限制。
+- **Mac 客户端本地自用是 ad-hoc 签名 + EventKit，不需要 $99**；$99 只为 iOS 伴侣（以及将来公开分发 Mac 版的公证）。
+
+**分阶段决策（用户定）**：
+1. **先做便宜实验**：用**免费个人签名**验证「个人 team 到底能不能读 HealthKit」（HealthKit 是 premium capability，个人 team 很可能签不过；且 7 天过期会让后台同步停摆）。能读 → 自用先凑合；读不了 → 说明必须走 $99。
+2. **主线先开源 Mac 客户端**（EventKit，本地 ad-hoc，不花钱）。
+3. **触发条件**：开源反响好、大家觉得好用 → 再投 **iOS 伴侣 app（$99/年）**，甚至完整 iOS 客户端。
+   —— 即 **Phase B 的 Apple Health 接入门槛绑在 Mac 客户端的开源反响上，不阻塞当前主线**。
 
 ### 线 B — EventKit + 项目层（`whimsical-seeking-shannon.md` Step 0–4 + `parsed-gliding-platypus.md`）
 
