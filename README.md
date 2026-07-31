@@ -1,5 +1,7 @@
 # dayflow — Health-Aware AI Scheduling Agent
 
+> 中文版：[README.zh-CN.md](README.zh-CN.md)
+
 FastAPI + LangGraph backend with two frontends: a native SwiftUI macOS client
 (`cal_swift_frontend/`, the primary one) and the older React/Vite web UI, which
 now lags behind. Per-day energy curve
@@ -132,10 +134,10 @@ All external calls (Claude, CalDAV, AppleScript Reminders) are mocked — tests 
 - `api/` — FastAPI route handlers
 - `models/` — Pydantic schemas (Task, Subtask, TimeBlock, DaySchedule, …)
 - `storage.py` — JSON-backed in-memory stores (health, tasks, schedules)
-- `integrations/caldav_client.py` — iCloud CalDAV adapter
-- `frontend/` — React/Vite UI (Today / Tasks / Chat / Settings)
-- `cal_swift_frontend/` — native SwiftUI macOS client (EventKit, Phase 4 direction)
-- `tests/` — pytest suite (286 tests, fully offline)
+- `integrations/caldav_client.py` — iCloud CalDAV adapter (legacy fallback; Swift path uses EventKit)
+- `frontend/` — React/Vite UI (Today / Tasks / Chat / Settings) — lagging behind
+- `cal_swift_frontend/` — native SwiftUI macOS client (EventKit) — primary frontend
+- `tests/` — pytest suite (fully offline; `--ignore=tests/eval` to skip live-LLM eval)
 
 ## Phase status
 
