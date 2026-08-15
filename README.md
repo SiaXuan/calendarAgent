@@ -2,13 +2,58 @@
 
 > 中文版：[README.zh-CN.md](README.zh-CN.md)
 
-FastAPI + LangGraph backend with two frontends: a native SwiftUI macOS client
-(`cal_swift_frontend/`, the primary one) and the older React/Vite web UI, which
-now lags behind. Per-day energy curve
-drives task placement; LLM (Claude via LangChain) handles task decomposition and
-chat-based adjustments. **Phase 4** pivoted calendar/reminder I/O to local
-**EventKit** in the Swift client — the backend is pure logic and no longer talks
-to iCloud/CalDAV (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §0).
+**dayflow** is a health-aware scheduling assistant for macOS. It lives as a
+right-edge **hover sidebar** — slide your mouse to the screen edge and it opens
+next to Apple Calendar, like a Control Center for your day. It plans your tasks
+around *when you actually have energy*, not just around free time.
+
+You tell it what you need to do (in plain language, or by dropping in a syllabus
+/ PDF / screenshot). It estimates and breaks down the work, then places each
+piece into your day at a good-energy slot, working around your real calendar
+events. You adjust by chatting; it writes to Apple Calendar / Reminders only when
+you say so.
+
+## What it does
+
+- **Energy-aware placement.** A per-day *energy curve* (from your sleep/health
+  input) drives scheduling: deep/analytical work lands at your peaks, admin in
+  the afternoon trough. It also respects meal breaks, a wind-down before sleep,
+  and your work hours.
+- **Natural-language task intake.** Type "finish the algorithms problem set, ~2h,
+  due Friday" → Claude parses duration/deadline/cognitive-load, breaks big tasks
+  into ordered phases, and slots them into today around your Apple Calendar events
+  (read locally via EventKit).
+- **Projects + multi-day planning.** Import a course syllabus, PRD, PDF, or a
+  pasted screenshot → it becomes a **Project** spread into a multi-day plan up to
+  the deadline. Each project is a **chat with memory** — "break this down more",
+  "push week 3 back a week", "assignment 1 is done".
+- **Daily carryover.** Unfinished project work automatically bubbles up to today
+  ("继续：X") until you check it off — no infinite re-planning.
+- **Chat adjustments with a safety gate.** "I'm tired, lighten this afternoon" /
+  "move the report to 3pm" → an agent works on a scratch copy and proposes
+  changes; small edits apply optimistically, bigger ones show a **Proposed
+  Changes** card you confirm.
+- **You own the writes.** Sync tasks to Apple Calendar (one or all) and check them
+  done on your terms; the backend never touches iCloud — the Swift client does all
+  Calendar/Reminders I/O via EventKit.
+
+## How you use it (typical flow)
+
+1. Start the backend and `open ScheduleAgent.app` (setup below).
+2. Move your mouse to the **right screen edge** — the sidebar slides out.
+3. First run: enter last night's **sleep** → the energy curve fills in.
+4. Type a **task** in the command box → it's parsed, decomposed, and dropped onto
+   today's timeline at a good slot around your calendar.
+5. For a bigger plan, open **Projects** → paste/drop a syllabus → review the
+   multi-day breakdown → write it to Reminders.
+6. **Adjust by chatting** → confirm the proposed changes when asked.
+7. **Sync** to Apple Calendar and **check off** what you finish; tomorrow the
+   unfinished parts carry over.
+
+> Built with FastAPI + LangGraph (Claude via LangChain) + a native SwiftUI macOS
+> client. The backend is pure logic; the Swift client owns all Calendar/Reminders
+> I/O via EventKit (no iCloud/CalDAV). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+> for how it works and [docs/ROADMAP.md](docs/ROADMAP.md) for where it's going.
 
 ## Daily startup
 
