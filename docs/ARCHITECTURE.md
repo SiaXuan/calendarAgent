@@ -209,9 +209,9 @@ env 可覆盖:`LLM_FAST_MODEL` / `LLM_REASON_MODEL` / `LLM_FAST_TEMPERATURE` / `
 - **没有 deadline-vs-appointment 模型**(§4):instant 分类完全靠脆弱的关键词子串竞赛;同一个时间戳是"deadline"还是"do-at"取决于标志。**已选的下一条设计线。**
 - **无 token 流式**(§7)。prompt caching 已给聊天 agent 开(轮内已验证),但 `task_agent`/生成路径、跨对话复用还没做。
 - **`create_react_agent` 弃用警告**:langgraph V1.0 起已移到 `langchain.agents.create_agent`,V2.0 将移除;`agent_run.py` 仍用 `from langgraph.prebuilt import create_react_agent`(当前仅 warning,不影响运行)。
-- **`agent_run_log` 只写不读:** 每个终止态都记(`agent_run.py:146-154`)但从没被读、不持久化、只存一个工具调用计数(不是完整 trace)。要么接进 eval,要么砍掉。
+- **`agent_run_log` 已落盘、带结果标签(2026-08-20):** 每次 chat agent run + accept/reject 结果写 `data/agent_run_log.jsonl`(gitignored;pytest 下只在内存不落盘,见 `storage.append_agent_run_log` 的 `PYTEST_CURRENT_TEST` guard)。run 记录含 input + 冻结日程快照 + 能量曲线 + diff changes + 工具调用序列 + impact + 延迟;outcome 记录用 `proposal_id` 关联 applied/rejected/expired/stale(`graphs/agent_run.py` 的 `_log`/`_log_outcome`,reject 走 `POST /chat/agent/dismiss`)。**目的是攒真实 case 做 eval 数据集**——但导出成 `tests/eval` fixture 的脚本 + 合成扩量还没做(见 ROADMAP「Eval / 数据集」)。
 - **`subtask_overrides` 没持久化**,而 `subtask_pins` 持久化了 —— 大概率是疏漏;用户编辑过的拆解重启就丢。
-- **eval 很薄:** 5 个手写场景(`tests/eval/`)、真 LLM、单次跑、all-or-nothing 通过率。没有数据集、没有和硬编码基线的对照、没有 pass@k、没有回归门。
+- **eval 很薄:** 5 个手写场景(`tests/eval/`)、真 LLM、单次跑、all-or-nothing 通过率。没有数据集、没有和硬编码基线的对照、没有 pass@k、没有回归门。**真实 case 采集已就位**(见上条埋点),差「导出成 fixture + 合成扩量」——见 ROADMAP「Eval / 数据集」。
 - **前端死代码(Phase 4):** 旧的假导入流程 `MockAssistantPanelState.startDocumentIntake` + `documentIntakeModule` 还在,但入口("Add Document" 磁贴)已被 "Projects" 取代 → 点不到。真导入走 `ProjectsView`/`ProjectDetailView`。待清。
 - **提醒勾完成没回报后端:** 时间块完成的那条路**已接 UI**(2026-07-29,侧栏行内完成勾 → `POST /schedule/{date}/blocks/{block_key}/complete`)。但用户在系统「提醒」App 里勾掉一条 agent 提醒时,前端仍无法回报 —— 提醒 notes 里只有 tag_key 的短 hash,反推不出 block_key。要么在提醒 notes 里也塞明文 block_key,要么完成态只认时间块那条路。
 - **任务先后依赖只做了「同父任务阶段」(2026-07-29):** `scheduler_agent.generate_schedule` 现在把同一父任务的子任务成组、按拆解顺序处理,并给后一阶段一个 `min_start` 下限(前一阶段结束+buffer),避免「先做练习、再做备考计划」这种反序(回归测试 `tests/test_scheduler_agent.py::test_same_task_phases_keep_order`;`test_independent_tasks_still_energy_ranked` 锁住独立任务仍按能量排)。聊天调整 agent 的 prompt 也加了「保持先后」约束(`graphs/agent_run.py`)。**但两个独立任务之间的 A→B 依赖仍无数据模型**(`Subtask` 无 `depends_on`)—— 真要做得加字段并让 scheduler/solver 尊重它。`_priority_of` 桩函数已删(排序改按 parent_rank/parent_order/phase)。

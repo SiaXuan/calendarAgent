@@ -4,11 +4,21 @@
 > 全局蓝图与进度看 [ROADMAP.md](ROADMAP.md)；现状/决策/技术债看 [ARCHITECTURE.md](ARCHITECTURE.md)。
 > 历史决策不往这里堆，落地即写进 ARCHITECTURE 对应章节。
 
-**日期**：2026-07-29
+**日期**：2026-08-20（含 07-29 起未验证、未 push 的累积批次）
 **测试**：`.venv/bin/python -m pytest -q --ignore=tests/eval` → **288 passed**（`swift build` + `./make_app.sh` 均通过）。
-**git**：本次一组 commit 在 `main`（后端排序 / 前端 UX / 文档重构），**未 push**。
+**git**：多组 commit 在 `main`（07-29：后端排序 / 前端 UX / 文档重构；08-20：agent 埋点 / eval 数据集地基 / 文档），**未 push**。
 
-## 这次做完的：Swift 前端 UX 修复 + 完成态接线 + 同任务阶段保序
+## 本次追加（2026-08-20）：agent 埋点 = eval 数据集地基
+
+攒真实使用 case 做回归集（还 ARCHITECTURE §8 的「eval 很薄」债，见 ROADMAP「Eval / 数据集」）：
+
+- 每次 chat agent run + 你的 accept/reject **落 `data/agent_run_log.jsonl`**（gitignored；**pytest 下只在内存不落盘**，不污染真实数据）。
+- run 记录：input + 冻结日程快照 + 能量曲线 + diff changes + **工具调用序列(name+args)** + impact + 延迟；outcome 记录用 `proposal_id` 关联 **applied / rejected / expired / stale**。字段够把一条 case 回放成 `tests/eval` 的 `Scenario`。
+- 新增 **`POST /chat/agent/dismiss`**：前端「Keep as is」现在会回报后端记 `rejected`（之前 reject 是纯前端、后端不知道）。
+- 改动：`storage.append_agent_run_log`、`graphs/agent_run.py`（`_log`/`_tool_sequence`/`_log_outcome`/`dismiss_proposal`）、`api/chat.py`、前端 `DayflowAPIClient.dismissAgentProposal` + `SidebarView.rejectAgentProposal`。
+- **下一步**（未做）：`scripts/export_eval_cases.py`（jsonl → 手标 → `Scenario`）；缺 case 时按意图地图 LLM 合成扩量。详见 ROADMAP。
+
+## 07-29 那批做完的：Swift 前端 UX 修复 + 完成态接线 + 同任务阶段保序
 
 围绕真机试用暴露的一串问题（Swift 侧栏为主 + 少量后端）：
 
@@ -24,11 +34,14 @@
 - 侧栏展开静止不动时，流式能量曲线/任务卡、睡眠输入后的曲线重算能**实时**刷（不用重新 hover）。
 - 同任务两阶段：不会再出现后置阶段排在前置之前。
 - Apply 提案：不改后端、5 分钟内点 → 套用成功刷新；若失效则卡片消失且状态栏给原因。
+- **埋点(08-20)**：真机发几条 chat 调整,`data/agent_run_log.jsonl` 出 run 记录;点 Apply → 一条 `applied`;点「Keep as is」→ 一条 `rejected`。
 
 ## 建议下一步
 
-线 B 最顺：**复盘 / heatmap 视图**（ROADMAP 线 B Step 3 后半）——完成勾数据已在流，后端 `GET /completions/heatmap` + 前端 `fetchHeatmap` 都现成，只差视图。
-或推进线 A 的 IP：Phase E（论文规则引擎，叙事最强）/ Phase B（接 Apple Health）。全局取舍见 [ROADMAP.md](ROADMAP.md)。
+1. **用起来攒 case**：埋点已就位,日常真机用 chat 调整,`agent_run_log.jsonl` 自动积累真实数据。
+2. **eval 导出脚本**：`scripts/export_eval_cases.py`（jsonl → 手标 → `tests/eval` 的 `Scenario`），攒够一批再做。
+3. **复盘 / heatmap 视图**（ROADMAP 线 B Step 3 后半）——完成勾数据已在流，后端 + 前端客户端都现成，只差视图。
+4. 或推进线 A 的 IP：Phase E（论文规则引擎）/ Phase B（接 Apple Health，路径见 ROADMAP）。全局取舍见 [ROADMAP.md](ROADMAP.md)。
 
 ## 怎么跑
 

@@ -78,6 +78,16 @@
 
 ---
 
+## Eval / 数据集（大框架 S5，进行中）
+
+目标:攒真实使用 case → 回归集,改 prompt/工具后能抓行为退化。ARCHITECTURE §8 长期标着「eval 很薄 / `agent_run_log` 只写不读」——现在开始还债。
+
+- ✅ **本地埋点(2026-08-20)**:每次 chat agent run + 你的 accept/reject 结果落 `data/agent_run_log.jsonl`(gitignored;pytest 下只在内存不落盘,不污染真实数据)。run 记录带 input + 冻结日程快照 + 能量曲线 + diff changes + 工具调用序列 + impact + 延迟;outcome 记录用 `proposal_id` 关联 applied/rejected/expired/stale。字段够把一条 case 回放成 `tests/eval` 的 `Scenario`。埋点见 `graphs/agent_run.py`(`_log`/`_log_outcome`)、`storage.py`(`append_agent_run_log`)、`POST /chat/agent/dismiss`。
+- 🔨 **导出/策展脚本**(下一步):`scripts/export_eval_cases.py` 读 jsonl → 你挑/标好的 → 转成 `tests/eval/scenarios.py` 的 `Scenario`(seeded blocks + message + 期望终止态 + 内容检查)。
+- 🔭 **合成扩量**:缺实战 case 时,按**意图地图**(ARCHITECTURE §9)让 LLM 批量生成(seeded 日程 + 一句话 + 期望终止态)三元组,手标一小批,和真实 case 合并。
+- 🔭 **可选 LangSmith**:`LANGSMITH_TRACING=true` 零代码看 trace,也能用它的 Datasets + Annotation Queue 打标;但它是**云、会出网**——本地 jsonl 才是自有、可进 pytest 的资产。
+- 参考(**仅解析层、非 drop-in**):公开数据集 SGD / MTOP / TOPv2(NL→日历意图);工具 agent 评测**方法**参考 BFCL / τ-bench。**「在耦合日状态上按 NL 重排 + accept/reject」这个核心任务没有对口公开集**——自采 + 合成是唯一来源。
+
 ## 贯穿铁律（跨两条线都成立）
 
 - **自主性只住在 Agent 层**，且只在「情况会变 + 该走不同链路 + 没 hardcode」处；Layer 0 确定性引擎故意零自主（日常主力要可靠）。
