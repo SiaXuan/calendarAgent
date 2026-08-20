@@ -123,7 +123,14 @@ async def _llm_classify_batch(
             system=system,
             messages=[{"role": "user", "content": f"Tasks:\n{lines}"}],
         )
-        labels: list[str] = json.loads(resp.content[0].text.strip())
+        # Haiku sometimes wraps the array in a ```json fence or adds prose, which
+        # broke the naive json.loads ("Expecting value: line 1 column 1"). Pull the
+        # first [...] out instead of trusting the whole string.
+        raw = resp.content[0].text if resp.content else ""
+        lo, hi = raw.find("["), raw.rfind("]")
+        if lo == -1 or hi == -1:
+            raise ValueError(f"no JSON array in classifier output: {raw!r}")
+        labels: list[str] = json.loads(raw[lo:hi + 1])
         return {
             it["id"]: CognitiveLoad(labels[i]) if i < len(labels) and labels[i] in ("deep", "medium", "light") else CognitiveLoad.medium
             for i, it in enumerate(items)
