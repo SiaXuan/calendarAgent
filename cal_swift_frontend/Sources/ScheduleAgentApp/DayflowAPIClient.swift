@@ -254,6 +254,10 @@ final class DayflowAPIClient: @unchecked Sendable {
         try await request("/chat/agent/confirm", method: "POST", body: ["date": date])
     }
 
+    func dismissAgentProposal(date: String) async throws -> DayflowAgentChatResult {
+        try await request("/chat/agent/dismiss", method: "POST", body: ["date": date])
+    }
+
     private func request<T: Decodable>(_ path: String, method: String = "GET", body: [String: String]? = nil) async throws -> T {
         let encodedBody = try body.map { try JSONEncoder().encode($0) }
         return try await request(path, method: method, encodedBody: encodedBody)

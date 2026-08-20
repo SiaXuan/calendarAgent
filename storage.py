@@ -12,6 +12,7 @@ Phase C will add a fifth store (LangMem memories); we'll add it here.
 """
 import json
 import logging
+import os
 from datetime import date, datetime
 from pathlib import Path
 
@@ -130,8 +131,24 @@ memory_store: dict[str, Memory] = {}
 from models.memory import Observation as _Obs   # avoid top-level circular import
 observation_log: list[_Obs] = []
 
-# Conversational-agent run logs (S3 observability). In-memory; for replay+eval.
+# Conversational-agent run logs (S3 observability). In-memory + append-only
+# JSONL on disk (data/ is gitignored) for replay + building the eval dataset.
 agent_run_log: list[dict] = []
+_AGENT_LOG_FILE = _DATA_DIR / "agent_run_log.jsonl"
+
+
+def append_agent_run_log(record: dict) -> None:
+    """Append one agent run/outcome event — in-memory and as a JSON line on disk."""
+    agent_run_log.append(record)
+    # Don't pollute the real usage dataset with test-run noise.
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        with _AGENT_LOG_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        _log.warning("Could not append agent run log: %s", exc)
 
 # Pending major-change Proposals awaiting user confirm, keyed by date.
 # Each: {proposal_id, base_version, staged_blocks, summary, created_at_iso}.

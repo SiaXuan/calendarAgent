@@ -1714,6 +1714,10 @@ struct SidebarView: View {
         pendingAgentProposal = nil
         pendingAgentProposalMessage = nil
         state.statusMessage = "Kept schedule unchanged."
+        // Tell the backend so the reject is logged as a negative label for the
+        // eval dataset (fire-and-forget — UI already updated).
+        let date = scheduleDate
+        Task { _ = try? await dayflowClient.dismissAgentProposal(date: date) }
     }
 
     private func reloadScheduleAfterAgentSuccess(statusMessage: String) async {

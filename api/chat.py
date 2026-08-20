@@ -4,7 +4,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from graphs.adjust_graph import run_adjust_graph
-from graphs.agent_run import AgentChatResult, confirm_proposal, run_chat_agent
+from graphs.agent_run import (
+    AgentChatResult,
+    confirm_proposal,
+    dismiss_proposal,
+    run_chat_agent,
+)
 from models.schedule import DaySchedule
 from storage import schedule_store
 
@@ -65,3 +70,13 @@ async def chat_agent_confirm(payload: ConfirmRequest):
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
     return confirm_proposal(d)
+
+
+@router.post("/chat/agent/dismiss", response_model=AgentChatResult)
+async def chat_agent_dismiss(payload: ConfirmRequest):
+    """Drop a pending Proposal (user chose 'Keep as is'); logs the reject label."""
+    try:
+        d = date.fromisoformat(payload.date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+    return dismiss_proposal(d)

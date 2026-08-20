@@ -22,6 +22,7 @@ The impact gate (classify_impact) is deterministic and OUTSIDE the agent's
 reach — the agent cannot talk itself into auto-committing a major change.
 """
 import logging
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -38,6 +39,7 @@ from api.preferences import get_current_prefs
 from models.schedule import DaySchedule
 from storage import (
     agent_run_log,
+    append_agent_run_log,
     bump_schedule_version,
     chat_sessions,
     current_version,
@@ -144,14 +146,55 @@ def _stage_proposal(target_date: date, scratch: ScheduleScratch, summary: str) -
     return proposal
 
 
-def _log_run(target_date, user_message, terminal, result_text, tool_calls):
-    agent_run_log.append({
+def _log_run(target_date, user_message, terminal, result_text, tool_calls, *,
+             run_id=None, changes=None, tool_sequence=None, impact=None,
+             proposal_id=None, base_version=None, memory_bullets=None,
+             base_blocks=None, energy_curve=None, latency_ms=None):
+    """Persist one agent-run event (data/agent_run_log.jsonl). Rich fields are
+    optional so the degraded/early-exit call sites can pass just the basics.
+    `base_blocks` + `energy_curve` + `input` are what a captured case needs to
+    replay as an eval fixture; `changes`/`terminal_state` are the label side."""
+    append_agent_run_log({
+        "kind": "run",
+        "run_id": run_id,
+        "at": _now().isoformat(),
         "date": target_date.isoformat(),
         "input": user_message,
         "terminal_state": terminal,
+        "impact": impact,
         "output": result_text,
         "tool_calls": tool_calls,
+        "tool_sequence": tool_sequence,
+        "changes": changes,
+        "proposal_id": proposal_id,
+        "base_version": base_version,
+        "latency_ms": latency_ms,
+        "context": {
+            "memory_bullets": memory_bullets,
+            "base_blocks": base_blocks,
+            "energy_curve": energy_curve,
+        },
+    })
+
+
+def _tool_sequence(messages) -> list[dict]:
+    """Ordered [{name, args}] of every tool call the agent made this run."""
+    seq = []
+    for m in messages:
+        for tc in (getattr(m, "tool_calls", None) or []):
+            seq.append({"name": tc.get("name"), "args": tc.get("args")})
+    return seq
+
+
+def _log_outcome(target_date: date, proposal_id, outcome: str) -> None:
+    """The label side of a proposal: applied / rejected / expired / stale / none,
+    linked to the run via proposal_id."""
+    append_agent_run_log({
+        "kind": "outcome",
         "at": _now().isoformat(),
+        "date": target_date.isoformat(),
+        "proposal_id": proposal_id,
+        "outcome": outcome,
     })
 
 
@@ -232,20 +275,36 @@ async def run_chat_agent(target_date: date, user_message: str) -> AgentChatResul
 
     agent = create_react_agent(sonnet, tools, prompt=system_message)
 
+    # Instrumentation: one run_id links this run to its later accept/reject
+    # outcome; base_snapshot + energy_curve + input make it replayable as an
+    # eval fixture. See docs/ROADMAP line B (eval dataset).
+    run_id = uuid.uuid4().hex
+    _t0 = time.monotonic()
+    base_snapshot = [b.model_dump(mode="json") for b in base_blocks]
+
+    def _log(terminal, text, tool_calls, **extra):
+        _log_run(
+            target_date, user_message, terminal, text, tool_calls,
+            run_id=run_id, base_version=scratch.base_version,
+            memory_bullets=memory_bullets, base_blocks=base_snapshot,
+            energy_curve=current.energy_curve,
+            latency_ms=int((time.monotonic() - _t0) * 1000), **extra,
+        )
+
     try:
         result = await agent.ainvoke(
             {"messages": _history_messages(target_date) + [HumanMessage(content=user_message)]},
             config={"recursion_limit": _RECURSION_LIMIT},
         )
     except GraphRecursionError:
-        _log_run(target_date, user_message, "degraded", "loop limit", 0)
+        _log("degraded", "loop limit", 0)
         return AgentChatResult(
             terminal_state="degraded", schedule=current,
             message="这个调整有点绕，我没在合理步数内搞定。能不能说得更具体一点？",
         )
     except Exception as exc:
         _log.warning("agent run failed: %s", exc)
-        _log_run(target_date, user_message, "degraded", str(exc), 0)
+        _log("degraded", str(exc), 0)
         return AgentChatResult(
             terminal_state="degraded", schedule=current,
             message="出了点问题，日程保持原样没动。",
@@ -255,25 +314,27 @@ async def run_chat_agent(target_date: date, user_message: str) -> AgentChatResul
     n_tool_calls = sum(
         len(getattr(m, "tool_calls", []) or []) for m in result.get("messages", [])
     )
+    tool_seq = _tool_sequence(result.get("messages", []))
 
     # Terminal state resolution (explicit signals first).
     if signals["clarification"]:
-        _log_run(target_date, user_message, "clarification", signals["clarification"], n_tool_calls)
+        _log("clarification", signals["clarification"], n_tool_calls, tool_sequence=tool_seq)
         _record_turn(target_date, user_message, signals["clarification"])
         return AgentChatResult(
             terminal_state="clarification", schedule=current,
             message=signals["clarification"],
         )
     if signals["blocked"]:
-        _log_run(target_date, user_message, "degraded", signals["blocked"], n_tool_calls)
+        _log("degraded", signals["blocked"], n_tool_calls, tool_sequence=tool_seq)
         _record_turn(target_date, user_message, signals["blocked"])
         return AgentChatResult(
             terminal_state="degraded", schedule=current, message=signals["blocked"],
         )
 
     diff = scratch.diff()
+    changes_dump = [c.model_dump(mode="json") for c in diff.changes]
     if diff.is_empty:
-        _log_run(target_date, user_message, "no_change", text, n_tool_calls)
+        _log("no_change", text, n_tool_calls, tool_sequence=tool_seq, impact="none")
         _record_turn(target_date, user_message, text or "看了下，今天不用调整。")
         return AgentChatResult(
             terminal_state="no_change", schedule=current,
@@ -284,7 +345,8 @@ async def run_chat_agent(target_date: date, user_message: str) -> AgentChatResul
     if impact == "minor":
         new = _commit(target_date, scratch)
         pending_proposals.pop(target_date, None)   # superseded by this commit
-        _log_run(target_date, user_message, "success", text, n_tool_calls)
+        _log("success", text, n_tool_calls, tool_sequence=tool_seq,
+             impact="minor", changes=changes_dump)
         _record_turn(target_date, user_message, text or "已调整。")
         return AgentChatResult(
             terminal_state="success", schedule=new,
@@ -293,7 +355,8 @@ async def run_chat_agent(target_date: date, user_message: str) -> AgentChatResul
 
     # major → Proposal (no commit). Supersedes any prior pending proposal.
     proposal = _stage_proposal(target_date, scratch, text or "改动较大，请确认。")
-    _log_run(target_date, user_message, "proposal", text, n_tool_calls)
+    _log("proposal", text, n_tool_calls, tool_sequence=tool_seq,
+         impact="major", changes=changes_dump, proposal_id=proposal["proposal_id"])
     _record_turn(target_date, user_message, text or "改动较大，请确认。")
     return AgentChatResult(
         terminal_state="proposal", schedule=current,
@@ -311,11 +374,13 @@ def confirm_proposal(target_date: date) -> AgentChatResult:
     """Apply a pending major Proposal after version + TTL checks (stale-Proposal safety)."""
     prop = pending_proposals.get(target_date)
     if prop is None:
+        _log_outcome(target_date, None, "none")
         return AgentChatResult(terminal_state="degraded", message="没有待确认的调整。")
 
     # TTL expiry
     if _now() - prop["created_at"] > timedelta(minutes=_PROPOSAL_TTL_MIN):
         pending_proposals.pop(target_date, None)
+        _log_outcome(target_date, prop["proposal_id"], "expired")
         return AgentChatResult(
             terminal_state="degraded",
             message="这个调整建议过期了，重新说一下吧。",
@@ -325,6 +390,7 @@ def confirm_proposal(target_date: date) -> AgentChatResult:
     # Optimistic-concurrency: schedule changed since proposal → invalidate.
     if current_version(target_date) != prop["base_version"]:
         pending_proposals.pop(target_date, None)
+        _log_outcome(target_date, prop["proposal_id"], "stale")
         return AgentChatResult(
             terminal_state="clarification",
             message="日程在你确认前变了，我没套用旧方案。要的话我按最新的重排一遍。",
@@ -335,5 +401,18 @@ def confirm_proposal(target_date: date) -> AgentChatResult:
     new = base.model_copy(update={"blocks": prop["staged_blocks"]})
     schedule_store[target_date] = new
     bump_schedule_version(target_date)
+    _log_outcome(target_date, prop["proposal_id"], "applied")
     pending_proposals.pop(target_date, None)
     return AgentChatResult(terminal_state="success", schedule=new, message="已套用。")
+
+
+def dismiss_proposal(target_date: date) -> AgentChatResult:
+    """User clicked 'Keep as is' — drop the pending proposal and log the reject
+    as the negative label for the eval dataset."""
+    prop = pending_proposals.pop(target_date, None)
+    _log_outcome(target_date, prop["proposal_id"] if prop else None, "rejected")
+    return AgentChatResult(
+        terminal_state="no_change",
+        schedule=schedule_store.get(target_date),
+        message="保持原样，没改。",
+    )
