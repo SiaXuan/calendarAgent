@@ -49,6 +49,7 @@ _PROJECT_PLAN_FILE = _DATA_DIR / "project_plan_store.json"
 _PROJECT_TASK_FILE = _DATA_DIR / "project_task_store.json"
 _MULTIDAY_PLAN_FILE = _DATA_DIR / "multiday_plan_store.json"
 _PROJECT_CHAT_FILE = _DATA_DIR / "project_chat_store.json"
+_SUBTASK_CACHE_FILE = _DATA_DIR / "subtask_cache.json"
 
 
 # ─── In-memory stores ────────────────────────────────────────────────────────
@@ -149,6 +150,34 @@ def append_agent_run_log(record: dict) -> None:
             f.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
     except Exception as exc:
         _log.warning("Could not append agent run log: %s", exc)
+
+
+# Cached daily decomposition, keyed by task_id → {"hash": str, "subtasks": [dict]}.
+# Reused across regenerations while the task's content is unchanged so subtask
+# TITLES (and thus block_keys) stay stable — the fix for pin/complete/carryover
+# keys going stale after a re-generate. Values are plain JSON (model_dump'd
+# Subtasks); reconstruction happens in agents/nodes.py.
+subtask_cache: dict[str, dict] = {}
+
+
+def save_subtask_cache() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        _SUBTASK_CACHE_FILE.write_text(
+            json.dumps(subtask_cache, default=str, ensure_ascii=False)
+        )
+    except Exception as exc:
+        _log.warning("Could not save subtask cache: %s", exc)
+
+
+def load_subtask_cache() -> None:
+    if not _SUBTASK_CACHE_FILE.exists():
+        return
+    try:
+        subtask_cache.update(json.loads(_SUBTASK_CACHE_FILE.read_text()))
+        _log.info("Loaded %d cached decomposition(s) from disk.", len(subtask_cache))
+    except Exception as exc:
+        _log.warning("Could not load subtask cache: %s", exc)
 
 # Pending major-change Proposals awaiting user confirm, keyed by date.
 # Each: {proposal_id, base_version, staged_blocks, summary, created_at_iso}.

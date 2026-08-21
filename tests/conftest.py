@@ -40,6 +40,7 @@ def clean_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "_PROJECT_TASK_FILE", tmp_path / "project_task_store.json")
     monkeypatch.setattr(storage, "_MULTIDAY_PLAN_FILE", tmp_path / "multiday_plan_store.json")
     monkeypatch.setattr(storage, "_PROJECT_CHAT_FILE", tmp_path / "project_chat_store.json")
+    monkeypatch.setattr(storage, "_SUBTASK_CACHE_FILE", tmp_path / "subtask_cache.json")
 
     def _wipe():
         storage.health_store.clear()
@@ -50,6 +51,7 @@ def clean_stores(tmp_path, monkeypatch):
         storage.schedule_store.clear()
         storage.subtask_overrides.clear()
         storage.subtask_pins.clear()
+        storage.subtask_cache.clear()   # else a cached decomposition shadows another test's mock
         storage.memory_store.clear()
         storage.observation_log.clear()
         storage.schedule_version.clear()

@@ -20,7 +20,8 @@ from config import CORS_ORIGINS, DEPLOYMENT_MODE
 from storage import (
     load_completion_store, load_health_store, load_memory_store,
     load_multiday_plan_store, load_project_chat_store, load_project_plan_store,
-    load_project_store, load_project_task_store, load_schedule_store, load_task_store,
+    load_project_store, load_project_task_store, load_schedule_store, load_subtask_cache,
+    load_task_store,
 )
 
 logger = logging.getLogger("dayflow")
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
     load_project_plan_store()
     load_multiday_plan_store()
     load_project_chat_store()
+    load_subtask_cache()   # stable decomposition → stable block_keys across regenerations
     load_preferences()
     # No startup sync — the first /schedule/stream call will sync via the
     # throttle in stream_day_schedule (after yielding the health card, so

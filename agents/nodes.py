@@ -9,6 +9,7 @@ graph orchestration. When we delete orchestrator.py, this file is what holds
 the wiring together.
 """
 import asyncio
+import hashlib
 import logging
 import time
 from datetime import date, datetime, timedelta
@@ -16,11 +17,13 @@ from datetime import date, datetime, timedelta
 from agents import calendar_agent, health_agent, scheduler_agent, task_agent
 from api.preferences import get_current_prefs
 from models.schedule import BlockType, DaySchedule, FreeWindow, TimeBlock
-from models.task import CognitiveLoad, Subtask
+from models.task import CognitiveLoad, Subtask, Task
 from storage import (
     bump_schedule_version,
     health_store,
+    save_subtask_cache,
     schedule_store,
+    subtask_cache,
     subtask_overrides,
     subtask_pins,
     task_store,
@@ -61,6 +64,65 @@ def _within_horizon(task, target_date: date) -> bool:
 
 
 # ─── Pure helpers (lifted from orchestrator) ────────────────────────────────
+
+def _task_hash(t: Task) -> str:
+    """Fingerprint of the fields that would change a task's decomposition. When
+    it's unchanged we reuse the cached subtasks (stable titles → stable
+    block_keys); when it changes we re-decompose."""
+    parts = [
+        t.title or "",
+        t.description or "",
+        t.deadline_dt.isoformat() if t.deadline_dt else (t.deadline.isoformat() if t.deadline else ""),
+        f"{t.estimated_hours}",
+        t.cognitive_load.value,
+        t.task_kind.value,
+        str(t.is_instant),
+        t.priority.value,
+        t.source_excerpt or "",
+    ]
+    return hashlib.sha1("||".join(parts).encode("utf-8")).hexdigest()
+
+
+async def _decompose_with_cache(
+    tasks: list[Task], target_date: date, language, memory_context: str | None = None,
+) -> list[Subtask]:
+    """rank_and_decompose, but reuse a task's previously cached subtasks while its
+    content is unchanged. This keeps subtask TITLES stable across regenerations,
+    so `{task_id}::{title}` block_keys stay valid — pin/complete/carryover/sync no
+    longer break after a re-generate (the daily LLM re-decomposition used to
+    re-word every title each run). Only new/edited tasks hit the LLM. NOTE: memory
+    is deliberately NOT in the hash — folding it in would re-decompose whenever
+    memory changes, defeating stability; the cached wording already reflected
+    memory at cache time."""
+    reuse: list[Subtask] = []
+    to_decompose: list[Task] = []
+    for t in tasks:
+        entry = subtask_cache.get(t.id)
+        if entry and entry.get("hash") == _task_hash(t):
+            for raw in entry.get("subtasks", []):
+                s = Subtask.model_validate(raw)
+                s.suggested_date = target_date   # re-stamp for the day being generated
+                reuse.append(s)
+        else:
+            to_decompose.append(t)
+
+    fresh: list[Subtask] = []
+    if to_decompose:
+        fresh = await task_agent.rank_and_decompose(
+            to_decompose, target_date, language, memory_context=memory_context,
+        )
+        by_parent: dict[str, list[Subtask]] = {}
+        for s in fresh:
+            by_parent.setdefault(s.parent_id, []).append(s)
+        for t in to_decompose:
+            subtask_cache[t.id] = {
+                "hash": _task_hash(t),
+                "subtasks": [s.model_dump(mode="json") for s in by_parent.get(t.id, [])],
+            }
+        save_subtask_cache()
+
+    return reuse + fresh
+
 
 def _apply_overrides(subtasks: list[Subtask]) -> list[Subtask]:
     """Replace subtasks with confirmed plans from task chat where available."""
@@ -233,7 +295,7 @@ async def rank_tasks_node(state: dict) -> dict:
     language = state["language"]
     memory_context = retrieval.for_task_ranking()
 
-    all_subtasks = await task_agent.rank_and_decompose(
+    all_subtasks = await _decompose_with_cache(
         tasks, target_date, language, memory_context=memory_context,
     )
     all_subtasks = _apply_overrides(all_subtasks)
@@ -444,7 +506,7 @@ async def apply_adjustment_node(state: dict) -> dict:
         ]
 
     tasks = [t for t in task_store.values() if _within_horizon(t, target_date)]
-    all_subtasks = await task_agent.rank_and_decompose(tasks, target_date, language)
+    all_subtasks = await _decompose_with_cache(tasks, target_date, language)
     all_subtasks = _apply_overrides(all_subtasks)
 
     if state.get("add_task_title"):
