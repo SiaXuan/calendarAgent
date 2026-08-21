@@ -18,7 +18,13 @@ from graphs.schedule_stream import stream_schedule_events
 from integrations.caldav_client import fetch_debug_info
 from models.project import CompletionStatus
 from models.schedule import BlockType, DaySchedule
-from storage import PinSpec, completion_store, schedule_store, subtask_pins
+from storage import (
+    PinSpec,
+    bump_schedule_version,
+    completion_store,
+    schedule_store,
+    subtask_pins,
+)
 
 router = APIRouter()
 
@@ -377,3 +383,31 @@ async def unpin_block(target_date: str, block_key: str):
         subtask_pins.pop(d, None)
 
     return await reflow_after_pin(d)
+
+
+@router.post("/schedule/{target_date}/blocks/{block_key:path}/remove", response_model=DaySchedule)
+async def remove_scheduled_block(target_date: str, block_key: str):
+    """Remove one scheduled block from today's schedule (user deleted the card by
+    pressing '−' past a single pomodoro). Drops it from schedule_store + any pin
+    and leaves the freed slot open (no reflow). Does NOT delete the underlying
+    task/reminder — it can reappear on a future regeneration."""
+    try:
+        d = date.fromisoformat(target_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    current = schedule_store.get(d)
+    if current is None:
+        raise HTTPException(status_code=404, detail=f"No schedule for {target_date}.")
+
+    kept = [
+        b for b in current.blocks
+        if not (b.task_id and f"{b.task_id}::{b.title}" == block_key)
+    ]
+    if len(kept) == len(current.blocks):
+        raise HTTPException(status_code=404, detail=f"No block with key={block_key!r} on {target_date}.")
+
+    schedule_store[d] = current.model_copy(update={"blocks": kept})
+    subtask_pins.get(d, {}).pop(block_key, None)
+    bump_schedule_version(d)   # invalidates any stale pending Proposal + persists
+    return schedule_store[d]

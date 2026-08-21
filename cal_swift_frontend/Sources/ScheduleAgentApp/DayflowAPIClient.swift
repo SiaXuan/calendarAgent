@@ -135,6 +135,11 @@ final class DayflowAPIClient: @unchecked Sendable {
         try await request("/schedule/\(date)", encodedBody: nil)
     }
 
+    func removeScheduledBlock(date: String, blockKey: String) async throws -> DayflowSchedule {
+        // block_key is a {path} param with "::" and spaces — request() percent-encodes it.
+        try await request("/schedule/\(date)/blocks/\(blockKey)/remove", method: "POST", encodedBody: nil)
+    }
+
     func fetchHealthSnapshot(date: String) async throws -> DayflowHealthSnapshot {
         try await request("/health/\(date)", encodedBody: nil)
     }

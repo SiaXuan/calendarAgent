@@ -161,6 +161,7 @@ struct SidebarView: View {
     @State private var scheduleDate = Self.todayString()
     @State private var isLoadingBackend = false
     @State private var streamTask: Task<Void, Never>?
+    @State private var pendingDeleteTaskID: UUID?   // "−" at one pomodoro → confirm delete
     @State private var resizeDebounceTasks: [UUID: Task<Void, Never>] = [:]
     @State private var queueRowFrames: [UUID: CGRect] = [:]
     @State private var draggingTaskID: UUID?
@@ -225,6 +226,21 @@ struct SidebarView: View {
         }
         .tint(Color.primary)
         .background(Color.clear)
+        .alert(
+            "Delete this task?",
+            isPresented: Binding(
+                get: { pendingDeleteTaskID != nil },
+                set: { if !$0 { pendingDeleteTaskID = nil } }
+            )
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = pendingDeleteTaskID { deleteTaskFromSchedule(id) }
+                pendingDeleteTaskID = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteTaskID = nil }
+        } message: {
+            Text("Already at one session — removing it takes the task off today's schedule.")
+        }
         .sheet(isPresented: $isShowingHealthDetails) {
             HealthDetailView(signal: state.healthSignal, curve: state.energyCurve) { sleepStart, sleepEnd in
                 submitManualSleepWindow(sleepStart: sleepStart, sleepEnd: sleepEnd)
@@ -505,6 +521,7 @@ struct SidebarView: View {
         let blockKey = state.backendBlockKey(for: task.id)
         let isSynced = blockKey.map { state.isBackendBlockSynced($0) } ?? false
         let isDone = metadata?.isDone ?? false
+        let atMinimumPomodoro = (metadata?.pomodoroCount ?? 1) <= 1
         let foreground = isCurrent ? activeColor : upcomingPrimaryColor
         let secondary = upcomingSecondaryColor
         let backendBadgeLabel = metadata?.backendBadgeLabel
@@ -541,8 +558,17 @@ struct SidebarView: View {
             }
             Spacer()
             if metadata != nil && !isSynced {
-                pomodoroAdjustButton(systemName: "minus", help: "Remove one pomodoro") {
-                    adjustTaskPomodoro(task.id, delta: -1)
+                pomodoroAdjustButton(
+                    systemName: "minus",
+                    help: atMinimumPomodoro ? "Delete this task" : "Remove one pomodoro"
+                ) {
+                    // Already at one pomodoro → pressing "−" again means "delete",
+                    // so confirm before removing the card from today's schedule.
+                    if atMinimumPomodoro {
+                        pendingDeleteTaskID = task.id
+                    } else {
+                        adjustTaskPomodoro(task.id, delta: -1)
+                    }
                 }
                 pomodoroAdjustButton(systemName: "plus", help: "Add one pomodoro") {
                     adjustTaskPomodoro(task.id, delta: 1)
@@ -1555,6 +1581,31 @@ struct SidebarView: View {
             } catch {
                 await MainActor.run {
                     state.statusMessage = "Pin failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /// Remove a task's block from today's schedule (confirmed delete after "−"
+    /// at a single pomodoro). Backend drops it from the day + any pin; the
+    /// underlying task/reminder is untouched and may return on regeneration.
+    private func deleteTaskFromSchedule(_ taskID: UUID) {
+        guard let blockKey = state.backendBlockKey(for: taskID) else {
+            state.statusMessage = "This task has no backend block to remove."
+            return
+        }
+        state.statusMessage = "Removing task from today…"
+        Task {
+            do {
+                let schedule = try await dayflowClient.removeScheduledBlock(
+                    date: scheduleDate, blockKey: blockKey)
+                await MainActor.run {
+                    state.applyDayflowSchedule(schedule, now: Date())
+                    state.statusMessage = "Removed from today's schedule."
+                }
+            } catch {
+                await MainActor.run {
+                    state.statusMessage = "Remove failed: \(error.localizedDescription)"
                 }
             }
         }

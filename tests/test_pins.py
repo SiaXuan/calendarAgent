@@ -251,6 +251,31 @@ async def test_unpin_404_when_no_pin(client, seeded_schedule):
     assert r.status_code == 404
 
 
+# ─── /schedule/{date}/blocks/{key}/remove endpoint ──────────────────────────
+
+async def test_remove_block_takes_it_off_the_schedule(client, seeded_schedule):
+    """Delete-the-card flow: the block is gone from the returned schedule."""
+    task_id = seeded_schedule
+    block_key = f"{task_id}::Energy curve work"
+    r = client.post(f"/schedule/2026-05-15/blocks/{block_key}/remove")
+    assert r.status_code == 200
+    gone = all(
+        not (b.get("task_id") == task_id and b["title"] == "Energy curve work")
+        for b in r.json()["blocks"]
+    )
+    assert gone
+
+
+async def test_remove_block_404_when_no_schedule(client):
+    r = client.post("/schedule/2026-05-15/blocks/task_x::Work/remove")
+    assert r.status_code == 404
+
+
+async def test_remove_block_404_when_block_not_found(client, seeded_schedule):
+    r = client.post("/schedule/2026-05-15/blocks/no-such::title/remove")
+    assert r.status_code == 404
+
+
 # ─── reflow_after_pin: bypasses LLM ────────────────────────────────────────
 
 async def test_pin_endpoint_does_not_call_llm(client, seeded_schedule, mock_sonnet):
