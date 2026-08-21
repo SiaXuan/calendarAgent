@@ -1,14 +1,14 @@
 import asyncio
-import json
 import logging
-import os
 import uuid
 from datetime import date as date_type
+from typing import Literal
 
-import anthropic
 from fastapi import APIRouter, HTTPException
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
+from agents.llm import haiku
 from integrations.caldav_client import fetch_reminders, is_system_list
 from models.task import CognitiveLoad, Priority, Task
 from storage import save_task_store, task_store
@@ -79,6 +79,11 @@ def _keyword_classify(title: str, description: str | None) -> CognitiveLoad | No
 
 # ── LLM batch classifier (Haiku, cheap + fast) ───────────────────────────────
 
+class _LoadLabels(BaseModel):
+    """One cognitive-load label per task, in the same order as the input list."""
+    labels: list[Literal["deep", "medium", "light"]]
+
+
 async def _llm_classify_batch(
     items: list[dict],   # list of {"id": str, "title": str, "description": str|None}
 ) -> dict[str, CognitiveLoad]:
@@ -115,29 +120,26 @@ async def _llm_classify_batch(
         "- 'due' after a course name (e.g. 'ML due', 'CV due') → deep (it's an assignment)\n"
     )
 
-    try:
-        client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
-        resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=128,
-            system=system,
-            messages=[{"role": "user", "content": f"Tasks:\n{lines}"}],
-        )
-        # Haiku sometimes wraps the array in a ```json fence or adds prose, which
-        # broke the naive json.loads ("Expecting value: line 1 column 1"). Pull the
-        # first [...] out instead of trusting the whole string.
-        raw = resp.content[0].text if resp.content else ""
-        lo, hi = raw.find("["), raw.rfind("]")
-        if lo == -1 or hi == -1:
-            raise ValueError(f"no JSON array in classifier output: {raw!r}")
-        labels: list[str] = json.loads(raw[lo:hi + 1])
-        return {
-            it["id"]: CognitiveLoad(labels[i]) if i < len(labels) and labels[i] in ("deep", "medium", "light") else CognitiveLoad.medium
-            for i, it in enumerate(items)
-        }
-    except Exception as exc:
-        _log.warning("LLM cognitive-load classification failed: %s", exc)
-        return {it["id"]: CognitiveLoad.medium for it in items}
+    messages = [
+        SystemMessage(content=system),
+        HumanMessage(content=f"Tasks:\n{lines}"),
+    ]
+    # Prefer Claude's native structured output (json_schema); fall back to forced
+    # tool use (function_calling). Either guarantees a schema-valid list, so we no
+    # longer hand-parse a possibly fenced/prose-wrapped JSON blob. Note: json_schema
+    # needs a model that supports it (Haiku 4.5 does — the shared `haiku` client).
+    for method in ("json_schema", "function_calling"):
+        try:
+            model = haiku.with_structured_output(_LoadLabels, method=method)
+            result: _LoadLabels = await model.ainvoke(messages)
+            labels = result.labels
+            return {
+                it["id"]: (CognitiveLoad(labels[i]) if i < len(labels) else CognitiveLoad.medium)
+                for i, it in enumerate(items)
+            }
+        except Exception as exc:
+            _log.warning("cognitive-load classify via %s failed: %s", method, exc)
+    return {it["id"]: CognitiveLoad.medium for it in items}
 
 
 class TaskInput(BaseModel):
@@ -178,6 +180,29 @@ async def list_tasks():
     return list(task_store.values())
 
 
+# Default names a blank reminder gets (zh/en). A reminder with one of these as
+# its title and no notes is just an empty placeholder — skip it. But if the note
+# body has real content, use that instead (the user filled in the reminder, just
+# not its title).
+_PLACEHOLDER_REMINDER_TITLES = {
+    "", "新提醒事项", "新提醒事項", "new reminder", "reminder", "无标题", "無標題", "untitled",
+}
+
+
+def _reminder_effective_title(title: str | None, description: str | None) -> str | None:
+    """Resolve a usable task title. Returns None to signal "skip this reminder"
+    (placeholder title AND empty body). Falls back to the note body's first line
+    when the title is a placeholder but the body has content."""
+    t = (title or "").strip()
+    if t.lower() not in _PLACEHOLDER_REMINDER_TITLES:
+        return t
+    body = (description or "").strip()
+    if not body:
+        return None
+    first_line = body.splitlines()[0].strip()
+    return first_line[:80] if first_line else None
+
+
 async def do_sync_reminders() -> dict:
     """
     Core sync logic — shared by the API endpoint and the startup hook.
@@ -208,23 +233,30 @@ async def do_sync_reminders() -> dict:
             skipped += 1
             continue
 
+        # Skip blank/default-named reminders (e.g. the default "新提醒事项") with no
+        # notes; if the title is a placeholder but the body has content, use the body.
+        effective_title = _reminder_effective_title(r["title"], r["description"])
+        if effective_title is None:
+            skipped += 1
+            continue
+
         task_id = f"reminder_{r['id']}" if r["id"] else f"reminder_{uuid.uuid4()}"
-        is_instant = _detect_instant(r["title"])
+        is_instant = _detect_instant(effective_title)
 
         # Pass 1: keyword classification
         if is_instant:
             load: CognitiveLoad = CognitiveLoad.light
         else:
-            kw_load = _keyword_classify(r["title"], r["description"])
+            kw_load = _keyword_classify(effective_title, r["description"])
             if kw_load is not None:
                 load = kw_load
             else:
                 load = CognitiveLoad.medium   # placeholder; replaced after LLM pass
-                llm_pending.append({"id": task_id, "title": r["title"], "description": r["description"]})
+                llm_pending.append({"id": task_id, "title": effective_title, "description": r["description"]})
 
         task = Task(
             id=task_id,
-            title=r["title"],
+            title=effective_title,
             description=r["description"],
             priority=Priority(r["priority"]),
             cognitive_load=load,
