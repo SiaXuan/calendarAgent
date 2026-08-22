@@ -75,3 +75,6 @@ cal_swift_frontend/.build/
 # eval 运行临时输出
 tests/eval/_eval_schedule_tmp.json
 tests/eval/last_run.json
+
+# 个人梳理笔记（不纳入版本控制）
+notes/
