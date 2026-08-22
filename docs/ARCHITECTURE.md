@@ -178,6 +178,7 @@ env 可覆盖:`LLM_FAST_MODEL` / `LLM_REASON_MODEL` / `LLM_FAST_TEMPERATURE` / `
 - `schedule_store` + `schedule_version` + `subtask_pins` → `data/schedule_store.json`(一个文件)
 - `memory_store` → `data/memory_store.json`
 - `preferences`(`api/preferences.py`)→ `data/preferences.json`
+- `subtask_cache` → `data/subtask_cache.json`(每日拆解缓存,按 `task_id`+内容 hash;稳定 block_key,见 §10.7)
 
 **临时(内存,重启即失):**
 - `subtask_overrides` —— ⚠️ **没**持久化,而 `subtask_pins` 持久化了(不一致 —— §8)
@@ -282,3 +283,12 @@ Swift 是**第二前端**,只管 macOS UI / 本地视图态 / API 调用 / 解�
 - **番茄/时长**:单次 `1 x 25m · 25+5m`、多次 `N x 25m · TOTALm`;± 本地即时更新 + 后端 debounce,调 `/schedule/{date}/pin`(同 `block_key` + 原 start + 新时长)。
 - **能量态**:`energy_source==none` 时**不画假曲线**,显示空态/CTA(「Add sleep input」);手动睡眠输入始终可用,编辑发后端(不在 Swift 维护第二真相源)。
 - **代理提案**:agent 说「要删/移」但后端返回 proposal(需确认)时,**不得静默改 UI**;保留后端 proposal/confirm 语义。
+
+### 10.7 block_key 稳定化 + 相关一串修复(2026-08-22)
+一批真机暴露的问题,根子和收尾:
+
+- **`block_key` 会漂 → pin/complete/结转 重排后失效(重启才好)= 已修。** 块的逻辑身份是 `{task_id}::{title}`,但 `task_id` 只标"任务"、一个任务拆成多个子任务块共享它,所以早期靠拼**子任务标题**区分。而每日提醒/临时任务走 `rank_tasks_node` 每次生成都**重调 LLM 拆解、标题换词** → key 每次变 → 前端手里的旧 key 重排后全失配(pin 404、complete 静默记错);重启只是重新拉齐 key。**修法(不改 key 格式、零迁移):** 新增持久化 `subtask_cache`(按 `task_id`+内容 hash),`nodes._decompose_with_cache` 在任务内容未变时**复用上次拆好的子任务**、只对新增/改动任务调 LLM → 标题稳 → key 稳。memory 故意不进 hash(否则记忆一变就重拆,破坏稳定)。项目 chunk 那条本就稳(标题落盘)。回归测试 `tests/test_subtask_cache.py`。
+- **认知负荷分类器债已还。** `api/tasks._llm_classify_batch` 从「裸 `anthropic` 客户端 + 手写 `json.loads`(被 ```json 围栏搞崩)」改为共享 `haiku` 的 `with_structured_output`,**优先 `json_schema`(Claude 原生结构化输出,Haiku 4.5 支持)、失败降级 `function_calling`**。Anthropic 的"JSON mode"就是结构化输出(`output_config.format`),LangChain `with_structured_output(method=...)` 可选。注意默认 `sonnet=claude-sonnet-4-6` 不在 json_schema 支持列表,故只改了用 haiku 的分类器。
+- **空/默认名提醒过滤(带鲁棒性)。** `api/tasks._reminder_effective_title`:标题是默认名(「新提醒事项」/「New Reminder」等)且备注也空 → 跳过;标题占位但**备注有内容 → 用备注首行当标题**(不丢用户真填了内容的提醒)。
+- **删除卡片。** `POST /schedule/{date}/blocks/{block_key}/remove` 从今日 `schedule_store` 删块 + 清 pin + bump 版本(不 reflow、不删底层任务);前端 '−' 减到只剩 1 个番茄再按 → 弹确认框 → 调它。
+- **跨天自动前移。** 前端 `scheduleDate` 原来启动算一次不动,挂机过夜停在昨天。现在监听 `NSCalendarDayChanged`(午夜)+ `NSWorkspace.didWake`(睡眠跨午夜补一刀)→ `advanceDayIfNeeded` 推日期 + 重载(跑结转)。见 `SidebarView`。

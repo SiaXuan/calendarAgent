@@ -1,58 +1,46 @@
 # 交接（当前一次）
 
-> **这份只写「当前这次」交接，每次交接会整份覆盖它** —— 不累积历史、不写全局。
+> **这份只写「当前这次」交接，每次交接整份覆盖** —— 不累积历史、不写全局。
 > 全局蓝图与进度看 [ROADMAP.md](ROADMAP.md)；现状/决策/技术债看 [ARCHITECTURE.md](ARCHITECTURE.md)。
-> 历史决策不往这里堆，落地即写进 ARCHITECTURE 对应章节。
+> 落地即写进 ARCHITECTURE 对应章节，这里只留「到哪了 / 下一步」。
 
-**日期**：2026-08-20（含 07-29 起未验证、未 push 的累积批次）
-**测试**：`.venv/bin/python -m pytest -q --ignore=tests/eval` → **288 passed**（`swift build` + `./make_app.sh` 均通过）。
-**git**：多组 commit 在 `main`（07-29：后端排序 / 前端 UX / 文档重构；08-20：agent 埋点 / eval 数据集地基 / 文档），**未 push**。
+**日期**：2026-08-22
+**测试**：`.venv/bin/python -m pytest -q --ignore=tests/eval` → **299 passed**（`swift build` + `./make_app.sh` 均通过）。
+**git**：一串 commit 在 `main`，**未 push**。
 
-## 本次追加（2026-08-20）：agent 埋点 = eval 数据集地基
+## 最近这批做完的（细节见 ARCHITECTURE §10.5–§10.7）
 
-攒真实使用 case 做回归集（还 ARCHITECTURE §8 的「eval 很薄」债，见 ROADMAP「Eval / 数据集」）：
+真机试用暴露的一连串问题，已修：
 
-- 每次 chat agent run + 你的 accept/reject **落 `data/agent_run_log.jsonl`**（gitignored；**pytest 下只在内存不落盘**，不污染真实数据）。
-- run 记录：input + 冻结日程快照 + 能量曲线 + diff changes + **工具调用序列(name+args)** + impact + 延迟；outcome 记录用 `proposal_id` 关联 **applied / rejected / expired / stale**。字段够把一条 case 回放成 `tests/eval` 的 `Scenario`。
-- 新增 **`POST /chat/agent/dismiss`**：前端「Keep as is」现在会回报后端记 `rejected`（之前 reject 是纯前端、后端不知道）。
-- 改动：`storage.append_agent_run_log`、`graphs/agent_run.py`（`_log`/`_tool_sequence`/`_log_outcome`/`dismiss_proposal`）、`api/chat.py`、前端 `DayflowAPIClient.dismissAgentProposal` + `SidebarView.rejectAgentProposal`。
-- **下一步**（未做）：`scripts/export_eval_cases.py`（jsonl → 手标 → `Scenario`）；缺 case 时按意图地图 LLM 合成扩量。详见 ROADMAP。
+- **`block_key` 稳定化**（关键，pin/complete/结转「重排即失效、重启才好」的总根）：每日拆解现在缓存（`subtask_cache`，内容没变就复用 → 标题稳 → key 稳），不改 key 格式、零迁移。§10.7。
+- **跨天自动前移**：监听 `NSCalendarDayChanged` + `didWake`，挂机过夜自动切到今天并跑结转，不用重启。§10.7。
+- **删除卡片**：'−' 减到只剩 1 个番茄再按 → 确认框 → `POST .../blocks/{key}/remove` 从今日移除。§10.7。
+- **认知负荷分类器**：改用 `with_structured_output`（优先 json_schema、降级 tool use），根除 JSON 围栏崩溃。§10.7。
+- **空/默认名提醒过滤**：默认名「新提醒事项」且无备注 → 跳过；有备注 → 用备注首行当标题。§10.7。
+- **完成态接 UI**（行内完成勾 → completion_store，喂复盘）、**同任务阶段保序**、**Apply 提案不再静默失败**、**悬浮窗刷新泵 / 对比度 / spinner**、**sync 与 done 拆图标**。§10.5–§10.7。
 
-## 07-29 那批做完的：Swift 前端 UX 修复 + 完成态接线 + 同任务阶段保序
+## 待真机验证（都单测过，GUI 端到端没逐条跑）
 
-围绕真机试用暴露的一串问题（Swift 侧栏为主 + 少量后端）：
+- 输睡眠/重新生成后**不重启**拖任意卡片 → 不再 404；勾完成后重排仍认得。
+- 挂机过夜（或调系统时间过午夜/睡眠跨午夜）→ 侧栏自动切今天、昨天没做完的「继续」上来。
+- '−' 到 `1 x 25m` 再按 → 弹框 → Delete → 卡片消失、`data/schedule_store.json` 该块没了。
+- 空提醒（默认名无备注）不再排出「处理新提醒事项内容」；有备注的按备注排。
+- 埋点：发 chat 调整 → `data/agent_run_log.jsonl` 出 run；Apply→`applied`、Keep as is→`rejected`。
 
-- **悬浮侧栏刷新**（关键）：`.floating` 非-key 窗口里异步 `@State` 更新不上屏，要重新 hover 才刷。修法：展开时挂 30Hz `Timer` 泵 run loop（`SidebarWindowController.setDisplayPump`）。详见 ARCHITECTURE §10.5。
-- **同一任务阶段保序**（后端）：`scheduler_agent.generate_schedule` 把同父任务子任务成组、按拆解顺序处理 + 给后一阶段 `min_start` 下限，修掉「先练习后做计划」反序；聊天调整 agent prompt 加「保持先后」（`graphs/agent_run.py`）。新增 2 个回归测试。**独立任务间 A→B 依赖仍没做**（需 `depends_on`，用户暂缓）。
-- **完成态接 UI**：行内「完成勾」→ `POST /schedule/{date}/blocks/{block_key}/complete` → `completion_store`（喂复盘）。`DayflowScheduleBlock.isDone` 解码 + 乐观切换。sync 与 done 拆成两个图标（日历图标=写日历，✓=完成）；两个「Sync All」也带上同一日历图标。
-- **Apply 提案不再静默失败**：非 success 时清掉失效卡 + 状态栏显因 + 刷新最新日程（`confirmAgentProposal`）。根因（提案纯内存、confirm 不带 proposal_id）未除。
-- **杂项 UI**：状态栏请求中显示 spinner；±按钮/完成圈对比度（字色跟反相的 `upcomingPrimaryColor`，见 §10.5）；任务标签 hover 说明；时长文本不再被标签挤截断；`make_app.sh` 的 `$APP…` unbound 变量修掉。
+## 下一步（当前正在做）
 
-## 待真机验证（都单测过，GUI 端到端没跑）
+**复盘 / heatmap 视图**（ROADMAP 线 B Step 3 后半）—— 完成勾数据已在流，后端 `GET /completions/heatmap` + 前端 `fetchHeatmap` 都现成，只差一个视图（commit 热力图墙 + 可选按项目/周期的完成情况）。**铁律：进度数字只来自 `completion_store`，LLM 只写叙述、不自报数字。**
 
-- 点完成勾：标题划掉、勾变绿、`data/completion_store.json` 出记录；重新生成/同步后仍保持。
-- 侧栏展开静止不动时，流式能量曲线/任务卡、睡眠输入后的曲线重算能**实时**刷（不用重新 hover）。
-- 同任务两阶段：不会再出现后置阶段排在前置之前。
-- Apply 提案：不改后端、5 分钟内点 → 套用成功刷新；若失效则卡片消失且状态栏给原因。
-- **埋点(08-20)**：真机发几条 chat 调整,`data/agent_run_log.jsonl` 出 run 记录;点 Apply → 一条 `applied`;点「Keep as is」→ 一条 `rejected`。
-
-## 建议下一步
-
-1. **用起来攒 case**：埋点已就位,日常真机用 chat 调整,`agent_run_log.jsonl` 自动积累真实数据。
-2. **eval 导出脚本**：`scripts/export_eval_cases.py`（jsonl → 手标 → `tests/eval` 的 `Scenario`），攒够一批再做。
-3. **复盘 / heatmap 视图**（ROADMAP 线 B Step 3 后半）——完成勾数据已在流，后端 + 前端客户端都现成，只差视图。
-4. 或推进线 A 的 IP：Phase E（论文规则引擎）/ Phase B（接 Apple Health，路径见 ROADMAP）。全局取舍见 [ROADMAP.md](ROADMAP.md)。
+之后（未做）：eval 导出脚本 `scripts/export_eval_cases.py`（攒够真实 case 再做）；线 A 的 IP（Phase E 论文规则引擎 / Phase B 接 Apple Health，路径见 ROADMAP）。
 
 ## 怎么跑
 
 ```bash
 # 后端（改 .py 后 uvicorn --reload 自动重载；跑前端时别狂改后端会掐断流）
 .venv/bin/uvicorn main:app --reload
-
 # 前端：改 Swift 后必须重新打包再开；别用 swift run（EventKit 权限过不了）
 cd cal_swift_frontend && ./make_app.sh && open ScheduleAgent.app
-
-# 测试（eval 会打真 LLM，日常跑排除它）
+# 测试（eval 会打真 LLM，日常排除它）
 .venv/bin/python -m pytest -q --ignore=tests/eval
 ```
 
@@ -60,14 +48,15 @@ cd cal_swift_frontend && ./make_app.sh && open ScheduleAgent.app
 
 | 干什么 | 文件 |
 |---|---|
-| 每日生成 DAG / 节点（窗口闸门 + 注入项目时段）| `graphs/schedule_graph.py`、`agents/nodes.py` |
-| 聊天 agent（ReAct + scratch + gate）| `graphs/agent_run.py`、`agents/tools/schedule_tools.py`、`agents/scratch.py` |
+| 每日生成 DAG / 节点（窗口闸门 + 拆解缓存 + 注入项目时段）| `graphs/schedule_graph.py`、`agents/nodes.py` |
+| 聊天 agent（ReAct + scratch + gate + 埋点）| `graphs/agent_run.py`、`agents/tools/schedule_tools.py`、`agents/scratch.py` |
 | 排程器（同任务阶段保序）| `agents/scheduler_agent.py` |
-| 多天规划 + 结转 + 项目服务 | `agents/multiday_planner.py`、`agents/project_service.py` |
-| 项目 API（chat/plan/multiday/import/replan/complete/heatmap）| `api/projects.py`、`api/chat.py` |
-| 存储 | `storage.py`、`main.py`(lifespan) |
-| 前端主侧栏（流/健康/完成勾/sync/重排）| `cal_swift_frontend/.../SidebarView.swift` |
+| 多天规划 + 结转 + 项目服务 + 完成/heatmap | `agents/project_service.py`、`agents/multiday_planner.py` |
+| 任务/提醒同步 + 分类器 + 空提醒过滤 | `api/tasks.py` |
+| 日程 API（pin/complete/remove/heatmap/changeset/stream）| `api/schedule.py`、`api/projects.py`、`api/chat.py` |
+| 存储（含 subtask_cache / agent_run_log）| `storage.py`、`main.py`(lifespan) |
+| 前端主侧栏 | `cal_swift_frontend/.../SidebarView.swift` |
 | 前端悬浮窗 + 刷新泵 | `cal_swift_frontend/.../ScheduleAgentApp.swift` |
 | 前端 EventKit 执行层 | `cal_swift_frontend/.../AppleCalendarAdapter.swift` |
-| 前端后端客户端 + DTO（含 `is_done`/`setBlockCompletion`/`fetchHeatmap`）| `cal_swift_frontend/.../DayflowAPIClient.swift`、`.../DayflowScheduleModels.swift` |
+| 前端后端客户端 + DTO（`fetchHeatmap`/`setBlockCompletion`/`removeScheduledBlock`…）| `cal_swift_frontend/.../DayflowAPIClient.swift`、`.../DayflowScheduleModels.swift` |
 | 打包 | `cal_swift_frontend/make_app.sh` |
