@@ -357,6 +357,9 @@ struct SidebarView: View {
             controlTile(title: "Projects", subtitle: "Import & plan", systemName: "folder", color: taskColor) {
                 ProjectsWindowController.shared.show()
             }
+            controlTile(title: "Review", subtitle: "Completed work", systemName: "checkmark.seal", color: activeColor) {
+                ReviewWindowController.shared.show()
+            }
             controlTile(title: "Calendar", subtitle: "Open app", systemName: "calendar", color: calendarColor) {
                 calendarAdapter.openInCalendar(near: Date())
             }
