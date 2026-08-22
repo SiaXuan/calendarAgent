@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import ScheduleAgentCore
@@ -261,6 +262,15 @@ struct SidebarView: View {
         .onDisappear {
             streamTask?.cancel()
             streamTask = nil   // else the guard in startDayflowStream blocks a restart
+        }
+        // Roll over to the new day without a restart. NSCalendarDayChanged fires at
+        // midnight while open; didWake covers the case where the Mac was asleep
+        // across midnight (the day-changed notification can be missed then).
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            advanceDayIfNeeded()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+            advanceDayIfNeeded()
         }
     }
 
@@ -1373,6 +1383,22 @@ struct SidebarView: View {
     /// when there's no schedule for today yet (first open of the day) — matching
     /// the "don't re-run the LLM when nothing changed" design. Explicit
     /// regeneration still goes through loadDayflowSchedule(generate:true).
+    /// Roll the sidebar over to the current calendar day without a restart.
+    /// Cancels any in-flight stream, clears the stale pending proposal, advances
+    /// scheduleDate, then reloads — the load runs carryover of yesterday's
+    /// unfinished project chunks into today.
+    private func advanceDayIfNeeded() {
+        let today = Self.todayString()
+        guard scheduleDate != today else { return }
+        streamTask?.cancel()
+        streamTask = nil
+        pendingAgentProposal = nil
+        pendingAgentProposalMessage = nil
+        scheduleDate = today
+        state.statusMessage = "New day — loading today's schedule…"
+        loadTodaySchedulePreferringCache()
+    }
+
     private func loadTodaySchedulePreferringCache() {
         guard !isLoadingBackend else { return }
         isLoadingBackend = true
