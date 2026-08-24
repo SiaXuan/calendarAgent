@@ -41,7 +41,9 @@ async def lifespan(app: FastAPI):
     load_multiday_plan_store()
     load_project_chat_store()
     load_subtask_cache()   # stable decomposition → stable block_keys across regenerations
-    load_preferences()
+    load_preferences()     # must precede load_mcp_tools (reads custom_mcp_servers)
+    from graphs.user_mcp import load_mcp_tools
+    await load_mcp_tools()   # Phase D: attach user MCP servers' tools to the chat agent (no-op if none)
     # No startup sync — the first /schedule/stream call will sync via the
     # throttle in stream_day_schedule (after yielding the health card, so
     # the user sees immediate feedback while the sync runs).

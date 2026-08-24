@@ -258,7 +258,8 @@ async def run_chat_agent(target_date: date, user_message: str) -> AgentChatResul
         energy_curve=current.energy_curve,
     )
     signals: dict = {"clarification": None, "blocked": None}
-    tools = make_schedule_tools(scratch) + _make_signal_tools(signals)
+    from graphs.user_mcp import get_mcp_tools
+    tools = make_schedule_tools(scratch) + _make_signal_tools(signals) + get_mcp_tools()
     system_prompt = _build_system_prompt(scratch, prefs.language, memory_bullets)
     # Prompt caching (Anthropic): mark the whole system prompt as one ephemeral
     # cache block. Anthropic caches the prefix up to this breakpoint — i.e. tools +

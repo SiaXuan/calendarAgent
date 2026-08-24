@@ -43,7 +43,12 @@ async def get_preferences():
 @router.patch("/preferences", response_model=UserPreferences)
 async def update_preferences(update: UserPreferencesUpdate):
     global _prefs
-    patch = update.model_dump(exclude_unset=True)
-    _prefs = _prefs.model_copy(update=patch)
+    patch = update.model_dump(mode="json", exclude_unset=True)
+    # Re-validate the merged dict (not model_copy) so nested configs like
+    # custom_mcp_servers coerce back into their models rather than staying dicts.
+    _prefs = UserPreferences.model_validate({**_prefs.model_dump(mode="json"), **patch})
     _save()
+    if "custom_mcp_servers" in patch:
+        from graphs.user_mcp import load_mcp_tools
+        await load_mcp_tools()   # apply server changes without a restart
     return _prefs
