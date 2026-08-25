@@ -51,7 +51,7 @@ _log = logging.getLogger("dayflow")
 
 _RECURSION_LIMIT = 16          # ~8 tool-call rounds (model+tools = 2 steps each)
 _PROPOSAL_TTL_MIN = 5
-_MAX_HISTORY_MSGS = 12         # cap conversation context fed to the agent
+_MAX_HISTORY_MSGS = 24         # cap conversation context fed to the agent (one day = one thread)
 
 
 class AgentChatResult(BaseModel):
@@ -232,6 +232,12 @@ def _record_turn(target_date: date, user_message: str, assistant_message: str) -
 def clear_chat_session(target_date: date) -> None:
     """Drop conversation history (called on full regenerate — fresh schedule)."""
     chat_sessions.pop(target_date, None)
+
+
+def get_chat_history(target_date: date) -> list[dict]:
+    """Today's conversation turns ({role, content}) so the frontend can restore
+    the thread when the panel reopens. One day = one conversation."""
+    return list(chat_sessions.get(target_date, []))
 
 
 async def run_chat_agent(target_date: date, user_message: str) -> AgentChatResult:

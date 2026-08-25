@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from api.chat import router as chat_router
+from api.email import router as email_router
 from api.health import router as health_router
 from api.memory import router as memory_router
 from api.preferences import router as preferences_router
@@ -69,6 +70,7 @@ app.include_router(health_router, tags=["health"])
 app.include_router(schedule_router, tags=["schedule"])
 app.include_router(tasks_router, tags=["tasks"])
 app.include_router(chat_router, tags=["chat"])
+app.include_router(email_router, tags=["email"])
 app.include_router(task_chat_router, tags=["task-chat"])
 app.include_router(preferences_router, tags=["preferences"])
 app.include_router(memory_router, tags=["memory"])

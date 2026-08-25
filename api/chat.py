@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from graphs.adjust_graph import run_adjust_graph
@@ -8,6 +8,7 @@ from graphs.agent_run import (
     AgentChatResult,
     confirm_proposal,
     dismiss_proposal,
+    get_chat_history,
     run_chat_agent,
 )
 from models.schedule import DaySchedule
@@ -56,6 +57,25 @@ async def chat_agent_endpoint(payload: ChatRequest):
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
     return await run_chat_agent(d, payload.message)
+
+
+class ChatTurn(BaseModel):
+    role: str
+    content: str
+
+
+class ChatHistory(BaseModel):
+    messages: list[ChatTurn]
+
+
+@router.get("/chat/agent/history", response_model=ChatHistory)
+async def chat_agent_history(date_str: str = Query(alias="date")):
+    """Today's conversation so the frontend can restore the thread on reopen."""
+    try:
+        d = date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+    return ChatHistory(messages=[ChatTurn(**t) for t in get_chat_history(d)])
 
 
 class ConfirmRequest(BaseModel):
