@@ -42,6 +42,14 @@ def make_schedule_tools(scratch: ScheduleScratch) -> list:
         except ValueError as e:
             return f"错误：{e}"
 
+    def resize_block(block_id: str, duration_minutes: int) -> str:
+        """改一个 block 的时长(分钟)：开始时间不变，只调结束时间(move_block 只挪不改时长，改时长用这个)。
+        block_id 来自 get_schedule；只能改 scheduled/suggested。返回更新后的日程。"""
+        try:
+            return scratch.resize_block(block_id, int(duration_minutes))
+        except (ValueError, TypeError) as e:
+            return f"错误：{e}"
+
     def remove_block(block_id: str) -> str:
         """删除一个 agent 排的 block(scheduled/suggested)。返回更新后的日程。
         不能删 fixed(用户事件)/meal。"""
@@ -60,6 +68,20 @@ def make_schedule_tools(scratch: ScheduleScratch) -> list:
         if end <= start:
             return "错误：结束时间必须晚于开始时间"
         return scratch.add_fixed_event(title, start, end)
+
+    def add_to_schedule(
+        title: str, start_iso: str, end_iso: str, notes: str | None = None
+    ) -> str:
+        """把从邮件/外部来源抽出的会议/面试/笔试等带时间的事件加进当天日程(落为固定事件)。
+        用于「邮件里有面试邀请→加进日程」这类场景；notes 存来源/上下文(如原邮件要点)，
+        同步时会带进日历事件。start_iso/end_iso 形如 '2026-06-15T15:00:00'。返回更新后的日程。"""
+        try:
+            start, end = datetime.fromisoformat(start_iso), datetime.fromisoformat(end_iso)
+        except ValueError:
+            return "错误：时间格式不对"
+        if end <= start:
+            return "错误：结束时间必须晚于开始时间"
+        return scratch.add_fixed_event(title, start, end, notes=notes)
 
     def capacity_check_tool() -> str:
         """检查今天容量：返回 空闲分钟/已占分钟/缺口/是否超额。
@@ -98,8 +120,10 @@ def make_schedule_tools(scratch: ScheduleScratch) -> list:
     return [
         StructuredTool.from_function(get_schedule),
         StructuredTool.from_function(move_block),
+        StructuredTool.from_function(resize_block),
         StructuredTool.from_function(remove_block),
         StructuredTool.from_function(add_fixed_event),
+        StructuredTool.from_function(add_to_schedule),
         StructuredTool.from_function(capacity_check_tool, name="capacity_check"),
         StructuredTool.from_function(working_hours_until_tool, name="working_hours_until"),
     ]

@@ -22,7 +22,7 @@ from models.schedule import BlockType, TimeBlock
 
 
 class BlockChange(BaseModel):
-    op: str            # "move" | "remove" | "add"
+    op: str            # "move" | "resize" | "remove" | "add"
     scratch_id: str
     title: str
     block_type: str
@@ -40,6 +40,10 @@ class ScheduleDiff(BaseModel):
     @property
     def moved(self) -> list[BlockChange]:
         return [c for c in self.changes if c.op == "move"]
+
+    @property
+    def resized(self) -> list[BlockChange]:
+        return [c for c in self.changes if c.op == "resize"]
 
     @property
     def removed(self) -> list[BlockChange]:
@@ -121,6 +125,20 @@ class ScheduleScratch:
         self.blocks[scratch_id] = b.model_copy(update={"start": new_start, "end": new_start + dur})
         return self.render()
 
+    def resize_block(self, scratch_id: str, new_duration_minutes: int) -> str:
+        """Change a block's duration (start unchanged, end = start + duration)."""
+        b = self.blocks.get(scratch_id)
+        if b is None:
+            raise ValueError(f"no block {scratch_id}")
+        if b.block_type not in _MOVABLE:
+            raise ValueError(f"{scratch_id} 是 {b.block_type.value}，不可改时长")
+        if new_duration_minutes <= 0:
+            raise ValueError("时长必须为正数分钟")
+        self.blocks[scratch_id] = b.model_copy(
+            update={"end": b.start + timedelta(minutes=new_duration_minutes)}
+        )
+        return self.render()
+
     def remove_block(self, scratch_id: str) -> str:
         b = self.blocks.get(scratch_id)
         if b is None:
@@ -130,11 +148,16 @@ class ScheduleScratch:
         del self.blocks[scratch_id]
         return self.render()
 
-    def add_fixed_event(self, title: str, start: datetime, end: datetime) -> str:
+    def add_fixed_event(
+        self, title: str, start: datetime, end: datetime, notes: str | None = None
+    ) -> str:
+        """Add a fixed anchor (appointment, and the landing spot for an
+        email-extracted meeting/interview). `notes` carries provenance/context
+        (e.g. the source email) into the calendar event when synced."""
         sid = f"b{self._next}"
         self._next += 1
         self.blocks[sid] = TimeBlock(
-            start=start, end=end, block_type=BlockType.fixed, title=title,
+            start=start, end=end, block_type=BlockType.fixed, title=title, notes=notes,
         )
         return self.render()
 
@@ -164,9 +187,11 @@ class ScheduleScratch:
                 block_type=b.block_type.value,
                 to_time=self._fmt(b.start, cross_day=False),
             ))
-        for sid in base_ids & cur_ids:  # possibly moved
+        for sid in base_ids & cur_ids:  # possibly moved / resized
             old, new = self._base[sid], self.blocks[sid]
-            if old.start != new.start or old.end != new.end:
+            start_changed = old.start != new.start
+            end_changed = old.end != new.end
+            if start_changed:
                 cross = old.start.date() != new.start.date()
                 changes.append(BlockChange(
                     op="move", scratch_id=sid, title=new.title,
@@ -175,6 +200,15 @@ class ScheduleScratch:
                     touches_synced=self._key(old) in self.synced_keys,
                     from_time=self._fmt(old.start, cross_day=cross),
                     to_time=self._fmt(new.start, cross_day=cross),
+                ))
+            elif end_changed:  # duration-only change → resize
+                old_min = int((old.end - old.start).total_seconds() // 60)
+                new_min = int((new.end - new.start).total_seconds() // 60)
+                changes.append(BlockChange(
+                    op="resize", scratch_id=sid, title=new.title,
+                    block_type=new.block_type.value,
+                    touches_synced=self._key(old) in self.synced_keys,
+                    from_time=f"{old_min}分钟", to_time=f"{new_min}分钟",
                 ))
         return ScheduleDiff(changes=changes)
 
@@ -192,7 +226,7 @@ def classify_impact(diff: ScheduleDiff) -> str:
     DETERMINISTIC gate (agent cannot touch this). Returns "minor" | "major".
 
     major if: any delete / any add of a fixed event / touches a synced block /
-    any cross-day move / ≥2 blocks moved. else minor (≤1 same-day move).
+    any cross-day move / ≥2 blocks changed. else minor (≤1 same-day move/resize).
     """
     if diff.removed:
         return "major"
@@ -202,6 +236,6 @@ def classify_impact(diff: ScheduleDiff) -> str:
         return "major"
     if any(c.cross_day for c in diff.moved):
         return "major"
-    if len(diff.moved) >= 2:
+    if len(diff.moved) + len(diff.resized) >= 2:
         return "major"
     return "minor"

@@ -74,6 +74,34 @@ def test_add_fixed_event():
     assert "Dentist" in titles
 
 
+def test_resize_block_changes_duration_only():
+    s = _scratch([_scheduled("t1", "Work", 9, 10)])
+    s.resize_block("b1", 90)
+    b = s.get("b1")
+    assert b.start == datetime(2026, 6, 15, 9, 0)      # start unchanged
+    assert b.end == datetime(2026, 6, 15, 10, 30)      # 90min
+
+
+def test_resize_rejects_nonpositive_and_fixed():
+    s = _scratch([_scheduled("t1", "Work", 9, 10), _fixed("Meet", 13, 14)])
+    with pytest.raises(ValueError):
+        s.resize_block("b1", 0)
+    with pytest.raises(ValueError):
+        s.resize_block("b2", 60)   # fixed block
+
+
+def test_add_to_schedule_carries_notes():
+    s = _scratch([_scheduled("t1", "Work", 9, 10)])
+    tools = {t.name: t for t in make_schedule_tools(s)}
+    tools["add_to_schedule"].invoke({
+        "title": "Interview @ Acme", "start_iso": "2026-06-15T15:00:00",
+        "end_iso": "2026-06-15T16:00:00", "notes": "from email 2026-06-14",
+    })
+    added = [b for b in s.committed_blocks() if b.title == "Interview @ Acme"][0]
+    assert added.block_type == BlockType.fixed
+    assert added.notes == "from email 2026-06-14"
+
+
 # ─── diff + classify_impact (the deterministic gate) ────────────────────────
 
 def test_single_move_is_minor():
