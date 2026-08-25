@@ -159,6 +159,7 @@ struct SidebarView: View {
     @State private var isShowingDocumentImporter = false
     @State private var pendingAgentProposal: DayflowAgentProposal?
     @State private var pendingAgentProposalMessage: String?
+    @State private var chatMessages: [DayflowChatMessage] = []   // today's conversation thread
     @State private var scheduleDate = Self.todayString()
     @State private var isLoadingBackend = false
     @State private var streamTask: Task<Void, Never>?
@@ -213,6 +214,7 @@ struct SidebarView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
                     commandModule
+                    chatThreadModule
                     quickControls
                     energyCurveModule
                     documentIntakeModule
@@ -258,6 +260,7 @@ struct SidebarView: View {
             // the local calendar only when it's already authorized. Prompting
             // here re-fires every launch under ad-hoc signing (TCC resets).
             loadTodaySchedulePreferringCache()
+            loadChatHistory()
         }
         .onDisappear {
             streamTask?.cancel()
@@ -352,16 +355,60 @@ struct SidebarView: View {
         }
     }
 
+    /// Today's agent conversation. One day = one thread (backend keeps history
+    /// per date). Bubbles wrap fully and scroll — replaces the old single-line
+    /// status text that truncated the reply.
+    @ViewBuilder
+    private var chatThreadModule: some View {
+        if !chatMessages.isEmpty {
+            controlModule(accent: commandColor) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(chatMessages.enumerated()), id: \.offset) { i, m in
+                                chatBubble(m).id(i)
+                            }
+                        }
+                        .padding(2)
+                    }
+                    .frame(maxHeight: 280)
+                    .onChange(of: chatMessages.count) { _, _ in
+                        withAnimation { proxy.scrollTo(chatMessages.count - 1, anchor: .bottom) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func chatBubble(_ m: DayflowChatMessage) -> some View {
+        let isUser = m.role == "user"
+        return HStack {
+            if isUser { Spacer(minLength: 24) }
+            Text(m.content)
+                .font(.system(size: 13))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 10)
+                    .fill(isUser ? commandColor.opacity(0.15) : Color.secondary.opacity(0.1)))
+                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+            if !isUser { Spacer(minLength: 24) }
+        }
+    }
+
     private var quickControls: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
             controlTile(title: "Projects", subtitle: "Import & plan", systemName: "folder", color: taskColor) {
                 ProjectsWindowController.shared.show()
             }
-            controlTile(title: "Review", subtitle: "Completed work", systemName: "checkmark.seal", color: activeColor) {
-                ReviewWindowController.shared.show()
-            }
             controlTile(title: "Calendar", subtitle: "Open app", systemName: "calendar", color: calendarColor) {
                 calendarAdapter.openInCalendar(near: Date())
+            }
+            controlTile(title: "Mail", subtitle: "Today's inbox", systemName: "envelope", color: commandColor) {
+                MailWindowController.shared.show()
+            }
+            controlTile(title: "Review", subtitle: "Completed work", systemName: "checkmark.seal", color: activeColor) {
+                ReviewWindowController.shared.show()
             }
         }
     }
@@ -1398,8 +1445,10 @@ struct SidebarView: View {
         pendingAgentProposal = nil
         pendingAgentProposalMessage = nil
         scheduleDate = today
+        chatMessages = []   // new day = new conversation thread
         state.statusMessage = "New day — loading today's schedule…"
         loadTodaySchedulePreferringCache()
+        loadChatHistory()
     }
 
     private func loadTodaySchedulePreferringCache() {
@@ -1754,8 +1803,22 @@ struct SidebarView: View {
         pinTask(taskID, toStart: dragDropTime)
     }
 
+    /// Restore today's conversation thread from the backend on open, so the panel
+    /// shows the running same-day conversation instead of starting blank.
+    private func loadChatHistory() {
+        let date = scheduleDate
+        Task {
+            if let history = try? await dayflowClient.fetchAgentChatHistory(date: date) {
+                await MainActor.run {
+                    if chatMessages.isEmpty { chatMessages = history.messages }
+                }
+            }
+        }
+    }
+
     private func sendAgentMessage(_ message: String) async {
         await MainActor.run {
+            chatMessages.append(DayflowChatMessage(role: "user", content: message))
             isLoadingBackend = true
             state.statusMessage = "Asking Dayflow agent..."
         }
@@ -1772,6 +1835,7 @@ struct SidebarView: View {
                     pendingAgentProposalMessage = nil
                     state.applyDayflowSchedule(schedule, now: Date())
                 }
+                chatMessages.append(DayflowChatMessage(role: "assistant", content: result.message))
                 state.statusMessage = result.message
             }
             if shouldReload {

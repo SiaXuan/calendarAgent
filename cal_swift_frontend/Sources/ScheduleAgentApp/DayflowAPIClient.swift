@@ -263,6 +263,14 @@ final class DayflowAPIClient: @unchecked Sendable {
         try await request("/chat/agent/dismiss", method: "POST", body: ["date": date])
     }
 
+    func fetchAgentChatHistory(date: String) async throws -> DayflowChatHistory {
+        try await request("/chat/agent/history?date=\(date)", encodedBody: nil)
+    }
+
+    func triageEmail(date: String) async throws -> DayflowEmailReport {
+        try await request("/email/triage", method: "POST", body: ["date": date])
+    }
+
     private func request<T: Decodable>(_ path: String, method: String = "GET", body: [String: String]? = nil) async throws -> T {
         let encodedBody = try body.map { try JSONEncoder().encode($0) }
         return try await request(path, method: method, encodedBody: encodedBody)
@@ -575,6 +583,36 @@ struct DayflowChatMessage: Codable {
 
 struct DayflowChatHistory: Codable {
     var messages: [DayflowChatMessage]
+}
+
+struct DayflowEmailItem: Decodable, Identifiable {
+    var id = UUID()
+    var subject: String
+    var sender: String?
+    var gist: String?
+    enum CodingKeys: String, CodingKey { case subject, sender, gist }
+}
+
+struct DayflowEmailReport: Decodable {
+    var connected: Bool
+    var generatedAt: String
+    var summary: String
+    var needsReply: [DayflowEmailItem]
+    var newsletters: [DayflowEmailItem]
+    var detectedInvites: [DayflowEmailItem]
+    var filteredAds: Int
+    var note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case connected
+        case generatedAt = "generated_at"
+        case summary
+        case needsReply = "needs_reply"
+        case newsletters
+        case detectedInvites = "detected_invites"
+        case filteredAds = "filtered_ads"
+        case note
+    }
 }
 
 struct DayflowChatReply: Codable {
