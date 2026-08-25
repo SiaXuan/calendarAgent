@@ -570,7 +570,9 @@ struct SidebarView: View {
                 }
             }
             Spacer()
-            if metadata != nil && !isSynced {
+            // Synced blocks stay editable: an edit auto-updates the written
+            // calendar event (resyncCalendarIfSynced), so no need to lock them.
+            if metadata != nil {
                 pomodoroAdjustButton(
                     systemName: "minus",
                     help: atMinimumPomodoro ? "Delete this task" : "Remove one pomodoro"
@@ -648,16 +650,14 @@ struct SidebarView: View {
         .gesture(
             DragGesture(minimumDistance: 8, coordinateSpace: .named("upcomingTimeline"))
                 .onChanged { value in
-                    guard !isSynced else { return }
                     beginTimelineDrag(taskID: task.id, location: value.location, translation: value.translation)
                 }
                 .onEnded { _ in
-                    guard !isSynced else { return }
                     endTimelineDrag(taskID: task.id)
                 }
         )
         .animation(.easeOut(duration: 0.12), value: draggingTaskID)
-        .help(isSynced ? "Synced tasks are fixed" : "Drag this card on the timeline to reflow it")
+        .help(isSynced ? "Drag to reflow — the synced calendar event updates too" : "Drag this card on the timeline to reflow it")
     }
 
     private func timelineStamp(start: Date, end: Date, isCurrent: Bool) -> some View {
@@ -1561,6 +1561,45 @@ struct SidebarView: View {
         }
     }
 
+    /// Push an edit (move / resize / drag) of an ALREADY-synced block through to
+    /// its calendar event. The backend keys events by a time-independent tag and
+    /// delete-before-writes, so writing the block again simply updates the event's
+    /// time. No-op for blocks that were never synced.
+    private func resyncCalendarIfSynced(_ taskID: UUID) async {
+        let start: Date? = await MainActor.run { () -> Date? in
+            guard let key = state.backendBlockKey(for: taskID),
+                  state.isBackendBlockSynced(key),
+                  let s = state.backendStart(for: taskID)
+            else { return nil }
+            return s
+        }
+        guard let start else { return }
+        do {
+            _ = try await dayflowClient.writeScheduleBlock(date: scheduleDate, start: start)
+            await MainActor.run { state.statusMessage = "Updated the synced calendar event." }
+        } catch {
+            await MainActor.run {
+                state.statusMessage = "Calendar update failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Re-push every currently-synced block to the calendar. Used after an agent
+    /// proposal that touched a synced block is confirmed — the confirm only
+    /// reloads the schedule, so the written events would otherwise go stale.
+    private func resyncAllSyncedBlocks() async {
+        let starts: [Date] = await MainActor.run { () -> [Date] in
+            state.todayQueue.compactMap { task in
+                guard let key = state.backendBlockKey(for: task.id),
+                      state.isBackendBlockSynced(key) else { return nil }
+                return state.backendStart(for: task.id)
+            }
+        }
+        for start in starts {
+            _ = try? await dayflowClient.writeScheduleBlock(date: scheduleDate, start: start)
+        }
+    }
+
     /// Toggle a task's done state. Optimistic (the checkmark flips instantly),
     /// then persisted to the backend completion_store, which feeds the
     /// 复盘/heatmap. Reverts on failure. Deliberately does NOT set
@@ -1606,6 +1645,7 @@ struct SidebarView: View {
                     ? "Dayflow moved it to the nearest available slot."
                     : "Dayflow pinned and reflowed the schedule."
                 }
+                await resyncCalendarIfSynced(taskID)
                 await refreshHealthSnapshot()
             } catch {
                 await MainActor.run {
@@ -1675,6 +1715,7 @@ struct SidebarView: View {
                         : "Dayflow resized this task and reflowed the day."
                     resizeDebounceTasks[taskID] = nil
                 }
+                await resyncCalendarIfSynced(taskID)
                 await refreshHealthSnapshot()
             } catch {
                 await MainActor.run {
@@ -1754,6 +1795,9 @@ struct SidebarView: View {
 
     private func confirmAgentProposal() {
         guard pendingAgentProposal != nil, !isLoadingBackend else { return }
+        // Did the proposal move/resize a block that's already on the calendar?
+        // If so we must re-push those events after applying, or they go stale.
+        let touchedSynced = pendingAgentProposal?.changes?.contains { $0.touchesSynced == true } ?? false
         isLoadingBackend = true
         state.statusMessage = "Applying proposed changes..."
         Task {
@@ -1765,6 +1809,9 @@ struct SidebarView: View {
                         pendingAgentProposalMessage = nil
                     }
                     await reloadScheduleAfterAgentSuccess(statusMessage: result.message)
+                    if touchedSynced {
+                        await resyncAllSyncedBlocks()
+                    }
                 } else {
                     // Non-success (expired / superseded / schedule changed): the
                     // backend has already discarded this proposal, so keeping the
@@ -1944,6 +1991,7 @@ struct SidebarView: View {
     private func proposalOpLabel(_ op: String) -> String {
         switch op {
         case "move": "Move"
+        case "resize": "Resize"
         case "remove": "Remove"
         case "add": "Add"
         default: op.capitalized
@@ -1960,7 +2008,7 @@ struct SidebarView: View {
 
     private func proposalTimingLabel(_ change: DayflowProposalChange) -> String? {
         switch change.op {
-        case "move":
+        case "move", "resize":
             if let from = change.fromTime, let to = change.toTime {
                 return "\(from) -> \(to)"
             }

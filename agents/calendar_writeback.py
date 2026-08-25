@@ -245,6 +245,29 @@ async def write_block_to_calendar(target_date: date, block: TimeBlock) -> dict:
     return await asyncio.to_thread(_do_write)
 
 
+async def delete_block_from_calendar(target_date: date, block: TimeBlock) -> dict:
+    """
+    Best-effort delete of a block's active calendar event by its stable per-block
+    tag. Called when a synced block is removed from the schedule so the calendar
+    doesn't keep an orphaned event. Graceful no-op in local-only mode (no CalDAV).
+    Returns {deleted, ok, error?}.
+    """
+    def _do() -> dict:
+        from integrations.caldav_client import (
+            delete_events_with_tag, CalDAVError, CalDAVNotConfigured,
+        )
+        try:
+            deleted = delete_events_with_tag(target_date, _block_tag(block))
+        except CalDAVNotConfigured:
+            return {"deleted": 0, "ok": True}   # nothing written in local-only mode
+        except CalDAVError as exc:
+            return {"deleted": 0, "ok": False, "error": str(exc)}
+        nodes._calendar_cache.pop(target_date, None)
+        return {"deleted": deleted, "ok": True}
+
+    return await asyncio.to_thread(_do)
+
+
 async def promote_block_to_history(
     target_date: date, block: TimeBlock, done_iso: str, project_id: str | None = None,
 ) -> dict:

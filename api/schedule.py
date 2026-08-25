@@ -8,6 +8,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from agents.calendar_reconcile import reconcile_schedule
 from agents.calendar_writeback import (
+    delete_block_from_calendar as _delete_block_from_calendar,
     write_block_to_calendar as _writeback_block,
     write_schedule_to_calendar as _writeback_schedule,
 )
@@ -400,14 +401,19 @@ async def remove_scheduled_block(target_date: str, block_key: str):
     if current is None:
         raise HTTPException(status_code=404, detail=f"No schedule for {target_date}.")
 
-    kept = [
-        b for b in current.blocks
-        if not (b.task_id and f"{b.task_id}::{b.title}" == block_key)
-    ]
-    if len(kept) == len(current.blocks):
+    removed = next(
+        (b for b in current.blocks
+         if b.task_id and f"{b.task_id}::{b.title}" == block_key),
+        None,
+    )
+    if removed is None:
         raise HTTPException(status_code=404, detail=f"No block with key={block_key!r} on {target_date}.")
 
+    kept = [b for b in current.blocks if b is not removed]
     schedule_store[d] = current.model_copy(update={"blocks": kept})
     subtask_pins.get(d, {}).pop(block_key, None)
     bump_schedule_version(d)   # invalidates any stale pending Proposal + persists
+    # If the block was already written to the calendar, drop its event too
+    # (best-effort; no-op in local-only mode). Otherwise it would orphan.
+    await _delete_block_from_calendar(d, removed)
     return schedule_store[d]

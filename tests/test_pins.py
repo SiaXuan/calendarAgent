@@ -266,6 +266,22 @@ async def test_remove_block_takes_it_off_the_schedule(client, seeded_schedule):
     assert gone
 
 
+async def test_remove_block_also_deletes_calendar_event(client, seeded_schedule, monkeypatch):
+    """A synced block's calendar event must be cleaned up on remove, not orphaned."""
+    import api.schedule as sched
+    seen = {}
+
+    async def _fake_delete(d, block):
+        seen["block_key"] = f"{block.task_id}::{block.title}"
+        return {"deleted": 1, "ok": True}
+
+    monkeypatch.setattr(sched, "_delete_block_from_calendar", _fake_delete)
+    task_id = seeded_schedule
+    r = client.post(f"/schedule/2026-05-15/blocks/{task_id}::Energy curve work/remove")
+    assert r.status_code == 200
+    assert seen["block_key"] == f"{task_id}::Energy curve work"
+
+
 async def test_remove_block_404_when_no_schedule(client):
     r = client.post("/schedule/2026-05-15/blocks/task_x::Work/remove")
     assert r.status_code == 404
