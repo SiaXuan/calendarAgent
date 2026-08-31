@@ -78,3 +78,6 @@ tests/eval/last_run.json
 
 # 个人梳理笔记（不纳入版本控制）
 notes/
+
+# 内部文档（不公开）
+docs/
