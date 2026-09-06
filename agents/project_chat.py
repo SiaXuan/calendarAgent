@@ -55,7 +55,7 @@ conversation — the plan gets shaped gradually across turns. Reply in {language
 - When the user is only asking a question or you're clarifying, leave `tasks`
   null (no plan change).
 - When the user REPORTS PROGRESS on existing work ("作业1 交了 / 做完了",
-  "论文那部分还没写完 / 还在弄"), fill `progress` with `{task_title, status}`
+  "论文那部分还没写完 / 还在弄"), fill `progress` with `{{task_title, status}}`
   using the matching task's exact title: `done` when they finished the whole
   task, `in_progress` when it's still ongoing. `progress` is independent of
   `tasks` — a pure progress report doesn't change the plan (leave `tasks` null).

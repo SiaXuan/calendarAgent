@@ -9,12 +9,22 @@ from fastapi.testclient import TestClient
 
 import storage
 from agents import project_chat
-from agents.project_chat import PlanChatResult
+from agents.project_chat import PlanChatResult, _SYSTEM_PROMPT
 from main import app
 from models.plan_import import CandidateTask
 from models.task import CognitiveLoad, Priority, Task
+from models.user import Language
 
 client = TestClient(app)
+
+
+def test_system_prompt_formats_without_keyerror():
+    """The prompt contains literal braces (e.g. {task_title, status}) that must
+    be escaped so .format() only fills name/language. Regression: an unescaped
+    brace made converse() raise KeyError → every project-chat turn 502'd. The
+    other tests here mock converse away, so this is the only guard on .format()."""
+    for lang in Language:
+        _SYSTEM_PROMPT.format(name="X", language=lang.value)
 
 
 def _project_with_task():
