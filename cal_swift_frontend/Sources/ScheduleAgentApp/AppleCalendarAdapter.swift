@@ -135,6 +135,13 @@ extension AppleCalendarAdapter {
         return status == .authorized
     }
 
+    /// True when the user hasn't been asked for calendar access yet — a one-time
+    /// prompt is appropriate. Distinct from `hasEventAccess` (already granted):
+    /// lets the caller prompt only on first launch, not re-fire every time.
+    var accessUndetermined: Bool {
+        EKEventStore.authorizationStatus(for: .event) == .notDetermined
+    }
+
     // MARK: Reads → upload to the backend
 
     /// The agent-owned events currently on the calendar for `date`, as the

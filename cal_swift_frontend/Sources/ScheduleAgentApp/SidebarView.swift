@@ -255,10 +255,11 @@ struct SidebarView: View {
             }
         }
         .onAppear {
-            // Don't prompt for calendar access on launch — the reminders
-            // full-access flow (import / replan) grants it, and generation reads
-            // the local calendar only when it's already authorized. Prompting
-            // here re-fires every launch under ad-hoc signing (TCC resets).
+            // Prompt for calendar access once (only when undetermined) so the
+            // scheduler can see the user's fixed events. Without this, EventKit
+            // reads are gated on hasEventAccess and never fire → the backend never
+            // receives calendar_events and schedules tasks over real commitments.
+            requestCalendarAccessIfNeeded()
             loadTodaySchedulePreferringCache()
             loadChatHistory()
         }
@@ -409,6 +410,22 @@ struct SidebarView: View {
             }
             controlTile(title: "Review", subtitle: "Completed work", systemName: "checkmark.seal", color: activeColor) {
                 ReviewWindowController.shared.show()
+            }
+        }
+    }
+
+    /// Request calendar access ONCE, only when undetermined (so we don't re-prompt
+    /// every launch). EventKit reads are gated on `hasEventAccess`, so without a
+    /// grant the scheduler never sees the user's fixed events (meetings, exams) and
+    /// puts tasks right over them. Fire-and-forget — never block generation on the
+    /// dialog (§10.5). The initial load already ran without a calendar, so on first
+    /// grant, regenerate today WITH the real events now that we can read them.
+    private func requestCalendarAccessIfNeeded() {
+        guard calendarAdapter.accessUndetermined else { return }
+        Task {
+            let (granted, _) = await calendarAdapter.requestFullAccess()
+            if granted {
+                await MainActor.run { regenerateToday() }
             }
         }
     }
