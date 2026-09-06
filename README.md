@@ -58,11 +58,9 @@ you say so.
 ## Daily startup
 
 The native SwiftUI client (`cal_swift_frontend/`) is the primary frontend. The
-React/Vite web UI still runs but lags behind: Phase 4 work (local EventKit
-calendar/reminder I/O, project layer, multi-day planning, daily carryover) is
-built against the Swift client first, and only part of it is wired into the web
-UI. Use the web UI for a quick look; use the Swift client for the current
-feature set.
+React/Vite web UI is **shelved for now** (it can't read local EventKit and the
+backend no longer reads CalDAV — see "Web frontend" below), so the Swift client
+is the only usable frontend.
 
 Two terminals, both run from the project root:
 
@@ -122,17 +120,19 @@ The app requests **full access** to Calendar and Reminders (usage strings are in
 - Reset the grants manually with: `tccutil reset Calendar com.dayflow.scheduleagent`
   and `tccutil reset Reminders com.dayflow.scheduleagent`.
 
-### Web frontend (React/Vite — lagging behind)
+### Web frontend (React/Vite — shelved)
 
-The original web UI still runs but trails the Swift client: it has no local
-EventKit path, and newer Phase 4 features (project layer, multi-day planning,
-daily carryover) are only partly wired in. Keep it for a quick browser view.
+**Shelved for now.** The web UI runs in a browser and can't read local EventKit;
+it used to get your real calendar from the backend's networked iCloud (CalDAV)
+read. To kill the cold-start stall from CalDAV's full pull (~15–45s per refresh,
+measured), the backend now **no longer reads CalDAV** — it only accepts the
+calendar the Swift client uploads via EventKit. The web UI therefore can't see
+your real events and would schedule over your fixed commitments, so it's parked.
 
-```bash
-cd frontend && pnpm dev
-```
-
-Open <http://localhost:5173> (backend must be running on :8000).
+The code still lives in `frontend/`, and the CalDAV adapter
+(`integrations/caldav_client.py`) is kept; to revive the web or a mobile client,
+wire that read path back in (see the commented-out CalDAV branch in
+`agents/nodes.py::fetch_calendar_node`).
 
 ## First-time setup
 
@@ -146,9 +146,7 @@ cp .env.example .env
 # the Swift client (see docs/ARCHITECTURE.md §0); leave it unset unless you run
 # the older CalDAV path.
 
-# Frontend (React/Vite — the original web client)
-cd frontend
-pnpm install
+# Web frontend is shelved (see "Web frontend" below) — no install needed.
 ```
 
 The native macOS Swift client needs no extra install step beyond a Swift
@@ -180,7 +178,7 @@ All external calls (Claude, CalDAV, AppleScript Reminders) are mocked — tests 
 - `models/` — Pydantic schemas (Task, Subtask, TimeBlock, DaySchedule, …)
 - `storage.py` — JSON-backed in-memory stores (health, tasks, schedules)
 - `integrations/caldav_client.py` — iCloud CalDAV adapter (legacy fallback; Swift path uses EventKit)
-- `frontend/` — React/Vite UI (Today / Tasks / Chat / Settings) — lagging behind
+- `frontend/` — React/Vite UI (Today / Tasks / Chat / Settings) — shelved (see "Web frontend")
 - `cal_swift_frontend/` — native SwiftUI macOS client (EventKit) — primary frontend
 - `tests/` — pytest suite (fully offline; `--ignore=tests/eval` to skip live-LLM eval)
 

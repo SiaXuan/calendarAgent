@@ -39,7 +39,7 @@
 | `LANGSMITH_*` | 可选 | 只用于把 trace 发到 LangSmith 调试 |
 | OpenAI / embedding | ❌ 不用 | 当前记忆是 pre-embedding(置信度 + namespace 过滤) |
 
-前提:真正能跑主线的是 **macOS**(EventKit + Swift 客户端 + 本地提醒的 AppleScript)。非 Mac 只能起后端 + 落后的 Web UI。
+前提:真正能跑主线的是 **macOS**(EventKit + Swift 客户端 + 本地提醒的 AppleScript)。非 Mac 目前没有可用前端——Web UI 已暂时弃用(原因见下方「Web 前端」)。
 
 ## 首次配置
 
@@ -53,11 +53,7 @@ cp .env.example .env
 
 Swift 原生客户端除了 Swift 工具链(Xcode / command-line tools)之外不需要额外安装,见下方「Swift 前端」。
 
-Web 前端(可选,已落后):
-
-```bash
-cd frontend && pnpm install
-```
+（Web 前端已暂时弃用,见下方「Web 前端」,无需安装。）
 
 ## 日常启动
 
@@ -108,15 +104,11 @@ app 申请日历和提醒的**完全访问**(用途字符串在 `cal_swift_front
 - **ad-hoc 签名的坑**:用 `make_app.sh` 重新打包可能重置 TCC 授权(签名不稳定),所以重打包后 macOS 可能再弹一次。正式公证 + 稳定签名能修掉,目前还没做。
 - 手动重置授权:`tccutil reset Calendar com.dayflow.scheduleagent` 和 `tccutil reset Reminders com.dayflow.scheduleagent`。
 
-### Web 前端(React/Vite — 已落后)
+### Web 前端(React/Vite — 暂时弃用)
 
-原来的 Web UI 还能跑,但落后于 Swift 客户端:没有本地 EventKit 路径,较新的 Phase 4 功能(项目层、多天规划、每日结转)只接了一部分。留着快速在浏览器看一眼用。
+**已暂时弃用。** Web UI 在浏览器里跑,读不了本地 EventKit,原先靠后端联网读 iCloud 日历(CalDAV)拿你的真实日程。为消除冷启动时 CalDAV 全量拉取的卡顿(实测一次刷新 ~15–45 秒),后端已**停用 CalDAV 读日历**,改成只接受 Swift 客户端经 EventKit 上传的日历。Web 端因此拿不到你的真实日历、排程会和固定事件撞车,故暂时搁置。
 
-```bash
-cd frontend && pnpm dev
-```
-
-打开 <http://localhost:5173>(后端要在 :8000 跑着)。
+代码仍在 `frontend/`,CalDAV 适配器(`integrations/caldav_client.py`)也保留着;将来要恢复 Web 或做移动端时,把那条读取路径接回即可(见 `agents/nodes.py::fetch_calendar_node` 里注释保留的 CalDAV 分支)。
 
 ## 跑测试
 
@@ -144,7 +136,7 @@ cd frontend && pnpm dev
 - `models/` — Pydantic 模型(Task、Subtask、TimeBlock、DaySchedule…)
 - `storage.py` — JSON 落盘的内存 store(健康、任务、日程、项目、完成态…)
 - `integrations/caldav_client.py` — iCloud CalDAV 适配器(legacy 兜底;Swift 主线走 EventKit)
-- `frontend/` — React/Vite UI(已落后)
+- `frontend/` — React/Vite UI(暂时弃用,见「Web 前端」)
 - `cal_swift_frontend/` — 原生 SwiftUI macOS 客户端(EventKit,主前端)
 - `tests/` — pytest 套件(离线)
 
