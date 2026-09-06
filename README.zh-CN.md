@@ -117,7 +117,22 @@ app 申请日历和提醒的**完全访问**(用途字符串在 `cal_swift_front
 .venv/bin/python -m pytest tests/test_schedule_graph.py -v   # 单个文件
 ```
 
-所有外部调用(Claude、CalDAV、AppleScript 提醒)都被 mock,测试离线跑。`tests/eval/` 会打真 LLM,日常用 `--ignore=tests/eval` 排除。
+所有外部调用(Claude、CalDAV、AppleScript 提醒)都被 mock,测试离线跑。`tests/eval/` 里**打真 LLM 的 runner**(`run_eval.py`、`run_decomp_eval.py`)日常用 `--ignore=tests/eval` 排除;其中的 `test_*.py`(如任务拆解的 fallback 冒烟)是纯离线的,跟全量一起跑。
+
+### Eval:冒烟 vs 完整 LLM
+
+行为回归(改了 prompt/工具后模型决策是否还合理)用 `tests/eval/`,分两条:
+
+- **冒烟(smoke)**——强制走确定性 fallback、**不打 LLM**,验证链路/数据流/Pydantic 不崩。快、免费、可进 CI。抓不到 LLM *质量*退化。
+- **完整(full)**——真 LLM,测真实决策质量(比如任务拆解有没有过度拆)。需要 `ANTHROPIC_API_KEY`,花几分钱。
+
+```bash
+.venv/bin/python -m tests.eval.run_eval                       # 聊天 agent 场景(真 LLM)
+.venv/bin/python -m tests.eval.run_decomp_eval --mode smoke   # 任务拆解,离线
+.venv/bin/python -m tests.eval.run_decomp_eval --mode full    # 任务拆解,真 LLM
+```
+
+结果结构化写进 `tests/eval/*_last_run.json`(时间戳、每场景的状态/步数/标题/耗时),方便跨次 diff 复盘。full 模式的 case 状态:`pass` / `fail` / `xfail`(已知未修的 bad case,仍失败)/ `xpass`(已知 bad case 现在通过了 → 去掉 xfail 标记的信号)/ `error`。已知 bad case(如「一次性杂事被过度拆解」,见 `tests/eval/decomp_scenarios.py`)以 xfail 存档,修复后自动翻成 xpass 提醒。
 
 ## 可视化 LangGraph 流程
 

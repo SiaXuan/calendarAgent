@@ -160,6 +160,31 @@ toolchain (Xcode / command-line tools) — see the Swift frontend section above.
 ```
 
 All external calls (Claude, CalDAV, AppleScript Reminders) are mocked — tests stay offline.
+The real-LLM **runners** in `tests/eval/` (`run_eval.py`, `run_decomp_eval.py`) are excluded
+with `--ignore=tests/eval`; the `test_*.py` there (e.g. the decomposition fallback smoke test)
+are offline and run with the full suite.
+
+### Eval: smoke vs full LLM
+
+Behavior regressions (does the model still make sensible decisions after a prompt/tool change?)
+live in `tests/eval/`, in two flavors:
+
+- **smoke** — forces the deterministic fallback, **no LLM call**. Checks the harness, data flow,
+  and Pydantic wiring don't break. Fast, free, CI-safe. Won't catch LLM *quality* regressions.
+- **full** — real LLM, measures actual decision quality (e.g. task over-decomposition). Needs
+  `ANTHROPIC_API_KEY`, costs a few cents.
+
+```bash
+.venv/bin/python -m tests.eval.run_eval                       # chat-agent scenarios (real LLM)
+.venv/bin/python -m tests.eval.run_decomp_eval --mode smoke   # decomposition, offline
+.venv/bin/python -m tests.eval.run_decomp_eval --mode full    # decomposition, real LLM
+```
+
+Results are written structured to `tests/eval/*_last_run.json` (timestamp, per-scenario
+status/step-count/titles/elapsed) for diffing across runs. Full-mode case status:
+`pass` / `fail` / `xfail` (known-bad, still failing) / `xpass` (known-bad now passing → drop the
+xfail flag) / `error`. Known bad cases (e.g. "one-off errand over-decomposed", see
+`tests/eval/decomp_scenarios.py`) are parked as xfail and flip to xpass once fixed.
 
 ## Visualize the LangGraph pipelines
 
