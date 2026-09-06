@@ -3,8 +3,9 @@ Frontend-supplied calendar input (Phase 4 Step 2, docs/ARCHITECTURE.md §0).
 
 When the caller passes `calendar_events`, fetch_calendar builds fixed blocks +
 free windows from them with pure functions and never reads CalDAV. When absent,
-the legacy CalDAV path still runs. These tests exercise the node directly and
-end-to-end through POST /schedule/generate.
+it falls back to the last persisted EventKit snapshot (the CalDAV fetch is
+retired — ARCHITECTURE §11), never the network. These tests exercise the node
+directly and end-to-end through POST /schedule/generate.
 """
 from datetime import date
 
@@ -55,8 +56,9 @@ async def test_agent_tagged_event_excluded_from_fixed(clean_stores):
     assert [b.title for b in patch["fixed_blocks"]] == ["User meeting"]
 
 
-async def test_none_falls_back_to_caldav(clean_stores, mock_caldav):
-    # No calendar_events key → legacy CalDAV path (stubbed) still runs.
+async def test_none_falls_back_to_snapshot(clean_stores, mock_caldav):
+    # No calendar_events key → fall back to the last persisted EventKit snapshot
+    # (mock_caldav seeds a lunch block), never the network.
     patch = await fetch_calendar_node({"target_date": D})
     assert any(b.title == "Lunch meeting" for b in patch["fixed_blocks"])
 

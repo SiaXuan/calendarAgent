@@ -50,6 +50,7 @@ _PROJECT_TASK_FILE = _DATA_DIR / "project_task_store.json"
 _MULTIDAY_PLAN_FILE = _DATA_DIR / "multiday_plan_store.json"
 _PROJECT_CHAT_FILE = _DATA_DIR / "project_chat_store.json"
 _SUBTASK_CACHE_FILE = _DATA_DIR / "subtask_cache.json"
+_CALENDAR_SNAPSHOT_FILE = _DATA_DIR / "calendar_snapshot.json"
 
 
 # ─── In-memory stores ────────────────────────────────────────────────────────
@@ -78,6 +79,12 @@ schedule_store: dict[date, DaySchedule] = {}
 # Monotonic version per date — bumped on every schedule mutation. Used by the
 # conversational agent for optimistic-concurrency on stale Proposals (S3).
 schedule_version: dict[date, int] = {}
+
+# Last calendar events the frontend sent per date (raw EventKit event dicts).
+# PERSISTED so a request WITHOUT calendar_events (cold start before EventKit is
+# ready, cross-midnight regen) can still schedule around real events instead of
+# hitting the network. Replaces the retired CalDAV fetch (see ARCHITECTURE §11).
+calendar_snapshot_store: dict[date, list[dict]] = {}
 
 
 def current_version(d: date) -> int:
@@ -455,3 +462,27 @@ def load_schedule_store() -> None:
         _log.info("Loaded %d cached schedule(s) from disk.", len(schedule_store))
     except Exception as exc:
         _log.warning("Could not load schedule store: %s", exc)
+
+
+# ─── calendar snapshot persistence (last EventKit events per date) ────────────
+
+def save_calendar_snapshot() -> None:
+    try:
+        _DATA_DIR.mkdir(exist_ok=True)
+        payload = {str(d): events for d, events in calendar_snapshot_store.items()}
+        _CALENDAR_SNAPSHOT_FILE.write_text(
+            json.dumps(payload, default=str, ensure_ascii=False))
+    except Exception as exc:
+        _log.warning("Could not save calendar snapshot: %s", exc)
+
+
+def load_calendar_snapshot() -> None:
+    if not _CALENDAR_SNAPSHOT_FILE.exists():
+        return
+    try:
+        payload = json.loads(_CALENDAR_SNAPSHOT_FILE.read_text())
+        for date_str, events in payload.items():
+            calendar_snapshot_store[date.fromisoformat(date_str)] = events
+        _log.info("Loaded %d calendar snapshot(s) from disk.", len(calendar_snapshot_store))
+    except Exception as exc:
+        _log.warning("Could not load calendar snapshot: %s", exc)

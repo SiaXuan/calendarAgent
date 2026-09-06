@@ -41,6 +41,7 @@ def clean_stores(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "_MULTIDAY_PLAN_FILE", tmp_path / "multiday_plan_store.json")
     monkeypatch.setattr(storage, "_PROJECT_CHAT_FILE", tmp_path / "project_chat_store.json")
     monkeypatch.setattr(storage, "_SUBTASK_CACHE_FILE", tmp_path / "subtask_cache.json")
+    monkeypatch.setattr(storage, "_CALENDAR_SNAPSHOT_FILE", tmp_path / "calendar_snapshot.json")
 
     def _wipe():
         storage.health_store.clear()
@@ -55,6 +56,7 @@ def clean_stores(tmp_path, monkeypatch):
         storage.memory_store.clear()
         storage.observation_log.clear()
         storage.schedule_version.clear()
+        storage.calendar_snapshot_store.clear()
         storage.pending_proposals.clear()
         storage.agent_run_log.clear()
         storage.chat_sessions.clear()
@@ -74,30 +76,21 @@ def clean_stores(tmp_path, monkeypatch):
 @pytest.fixture
 def mock_caldav(monkeypatch):
     """
-    Replace calendar_agent.fetch_fixed_blocks with a deterministic stub:
-      - one fixed block 13:00–14:00 (lunch meeting)
-      - two free windows around it (work_start–13 and 14–work_end)
+    Provide a deterministic calendar snapshot for the no-frontend-events fallback
+    (which replaced the CalDAV fetch — ARCHITECTURE §11). For any date, the
+    persisted snapshot yields one fixed block 13:00–14:00 (lunch meeting), which
+    fetch_calendar turns into two free windows around it (work_start–13, 14–work_end).
     """
-    async def fake_fetch(target_date, work_start, work_end):
-        fixed = [TimeBlock(
-            start=datetime(target_date.year, target_date.month, target_date.day, 13, 0),
-            end=datetime(target_date.year, target_date.month, target_date.day, 14, 0),
-            block_type=BlockType.fixed,
-            title="Lunch meeting",
-        )]
-        free = [
-            FreeWindow(
-                start_hour=work_start, end_hour=13,
-                duration_minutes=(13 - work_start) * 60,
-            ),
-            FreeWindow(
-                start_hour=14, end_hour=work_end,
-                duration_minutes=(work_end - 14) * 60,
-            ),
-        ]
-        return fixed, free
+    lunch = [{"title": "Lunch meeting", "start": "13:00", "end": "14:00"}]
 
-    monkeypatch.setattr("agents.calendar_agent.fetch_fixed_blocks", fake_fetch)
+    class _AnyDateSnapshot(dict):
+        # Fall back to lunch for any date the test asks about, unless the test
+        # explicitly stored its own events for that date.
+        def get(self, key, default=None):
+            existing = dict.get(self, key)
+            return existing if existing else lunch
+
+    monkeypatch.setattr("agents.nodes.calendar_snapshot_store", _AnyDateSnapshot())
 
 
 @pytest.fixture

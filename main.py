@@ -19,7 +19,7 @@ from api.preferences import load_preferences
 from api.tasks import router as tasks_router
 from config import CORS_ORIGINS, DEPLOYMENT_MODE
 from storage import (
-    load_completion_store, load_health_store, load_memory_store,
+    load_calendar_snapshot, load_completion_store, load_health_store, load_memory_store,
     load_multiday_plan_store, load_project_chat_store, load_project_plan_store,
     load_project_store, load_project_task_store, load_schedule_store, load_subtask_cache,
     load_task_store,
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
     load_multiday_plan_store()
     load_project_chat_store()
     load_subtask_cache()   # stable decomposition → stable block_keys across regenerations
+    load_calendar_snapshot()   # last EventKit events per date → schedule w/o CalDAV when frontend omits them
     load_preferences()     # must precede load_mcp_tools (reads custom_mcp_servers)
     from graphs.user_mcp import load_mcp_tools
     await load_mcp_tools()   # Phase D: attach user MCP servers' tools to the chat agent (no-op if none)

@@ -20,7 +20,9 @@ from models.schedule import BlockType, DaySchedule, FreeWindow, TimeBlock
 from models.task import CognitiveLoad, Subtask, Task
 from storage import (
     bump_schedule_version,
+    calendar_snapshot_store,
     health_store,
+    save_calendar_snapshot,
     save_subtask_cache,
     schedule_store,
     subtask_cache,
@@ -240,6 +242,11 @@ async def fetch_calendar_node(state: dict) -> dict:
 
     supplied = state.get("calendar_events")
     if supplied is not None:
+        # Remember the frontend's EventKit events so a later request WITHOUT
+        # calendar_events (cold start before EventKit is ready, cross-midnight
+        # regen) can still schedule around real events — see the fallback below.
+        calendar_snapshot_store[target_date] = supplied
+        save_calendar_snapshot()
         fixed_blocks = calendar_agent.events_to_fixed_blocks(supplied, target_date)
         free_windows = calendar_agent.extract_free_windows(
             fixed_blocks, target_date, prefs.work_start, prefs.work_end)
@@ -248,33 +255,27 @@ async def fetch_calendar_node(state: dict) -> dict:
             "free_windows": _free_windows_or_whole_day(free_windows, prefs),
         }
 
-    # ── Legacy CalDAV fallback (no frontend calendar data supplied) ──
+    # ── No frontend calendar supplied → use the last EventKit snapshot the
+    #    frontend persisted; NEVER hit the network. The CalDAV fetch is retired
+    #    (2026-08-31, see ARCHITECTURE §0/§11) — kept in
+    #    integrations/caldav_client.py + calendar_agent.fetch_fixed_blocks for a
+    #    future iOS/web client that can't read EventKit. To re-enable it, swap the
+    #    snapshot lookup below for:
+    #        fixed_blocks, free_windows = await calendar_agent.fetch_fixed_blocks(
+    #            target_date, prefs.work_start, prefs.work_end)
     cached = _calendar_cache.get(target_date)
     if cached and time.monotonic() - cached[2] < _CALENDAR_CACHE_TTL_S:
         fixed_blocks, free_windows = cached[0], cached[1]
     else:
-        async with _calendar_lock:
-            cached = _calendar_cache.get(target_date)
-            if cached and time.monotonic() - cached[2] < _CALENDAR_CACHE_TTL_S:
-                fixed_blocks, free_windows = cached[0], cached[1]
-            else:
-                try:
-                    fixed_blocks, free_windows = await calendar_agent.fetch_fixed_blocks(
-                        target_date, prefs.work_start, prefs.work_end
-                    )
-                except Exception as exc:
-                    _log.warning("Calendar fetch failed: %s", exc)
-                    if cached:
-                        fixed_blocks, free_windows = cached[0], cached[1]
-                    else:
-                        fixed_blocks, free_windows = [], []
-                if not free_windows:
-                    free_windows = [FreeWindow(
-                        start_hour=prefs.work_start,
-                        end_hour=prefs.work_end,
-                        duration_minutes=(prefs.work_end - prefs.work_start) * 60,
-                    )]
-                _calendar_cache[target_date] = (fixed_blocks, free_windows, time.monotonic())
+        snapshot = calendar_snapshot_store.get(target_date)
+        if snapshot:
+            fixed_blocks = calendar_agent.events_to_fixed_blocks(snapshot, target_date)
+            free_windows = calendar_agent.extract_free_windows(
+                fixed_blocks, target_date, prefs.work_start, prefs.work_end)
+        else:
+            fixed_blocks, free_windows = [], []
+        free_windows = _free_windows_or_whole_day(free_windows, prefs)
+        _calendar_cache[target_date] = (fixed_blocks, free_windows, time.monotonic())
 
     return {"fixed_blocks": fixed_blocks, "free_windows": free_windows}
 
