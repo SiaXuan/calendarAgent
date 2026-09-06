@@ -71,6 +71,8 @@ frontend/dist/
 
 # Swift 构建产物
 cal_swift_frontend/.build/
+# make_app.sh 打包产物（每次构建都变，不进版本控制）
+cal_swift_frontend/ScheduleAgent.app/
 
 # eval 运行临时输出
 tests/eval/_eval_schedule_tmp.json
