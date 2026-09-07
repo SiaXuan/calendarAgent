@@ -45,6 +45,7 @@ from storage import (
     current_version,
     pending_proposals,
     schedule_store,
+    undo_snapshots,
 )
 
 _log = logging.getLogger("dayflow")
@@ -122,12 +123,32 @@ def _final_text(result: dict) -> str:
     return ""
 
 
-def _commit(target_date: date, scratch: ScheduleScratch) -> DaySchedule:
+def _snapshot_for_undo(target_date: date, prior_blocks: list, summary: str,
+                       proposal_id: str | None = None, run_id: str | None = None) -> None:
+    """Remember the pre-commit arrangement so the user can take one step back.
+
+    Called with the blocks as they were BEFORE the overwrite. Overwrites any
+    earlier snapshot for the date — one step back, not a history stack.
+    """
+    undo_snapshots[target_date] = {
+        "blocks": list(prior_blocks),
+        "version_after": current_version(target_date),
+        "summary": summary,
+        "created_at": _now(),
+        "proposal_id": proposal_id,
+        "run_id": run_id,
+    }
+
+
+def _commit(target_date: date, scratch: ScheduleScratch,
+            run_id: str | None = None) -> DaySchedule:
     """Atomic commit: replace blocks in schedule_store + bump version."""
     base = schedule_store[target_date]
+    prior_blocks = list(base.blocks)
     new = base.model_copy(update={"blocks": scratch.committed_blocks()})
     schedule_store[target_date] = new
     bump_schedule_version(target_date)
+    _snapshot_for_undo(target_date, prior_blocks, "上一次自动调整", run_id=run_id)
     return new
 
 
@@ -187,14 +208,18 @@ def _tool_sequence(messages) -> list[dict]:
     return seq
 
 
-def _log_outcome(target_date: date, proposal_id, outcome: str) -> None:
-    """The label side of a proposal: applied / rejected / expired / stale / none,
-    linked to the run via proposal_id."""
+def _log_outcome(target_date: date, proposal_id, outcome: str, run_id=None) -> None:
+    """The label side of a commit: applied / rejected / expired / stale / undone /
+    none. Linked to its run via proposal_id for major changes; minor auto-commits
+    never get a proposal_id, so `undone` carries run_id instead — without it a
+    user's undo (the strongest negative label there is) couldn't be traced back
+    to the run that caused it."""
     append_agent_run_log({
         "kind": "outcome",
         "at": _now().isoformat(),
         "date": target_date.isoformat(),
         "proposal_id": proposal_id,
+        "run_id": run_id,
         "outcome": outcome,
     })
 
@@ -230,7 +255,11 @@ def _record_turn(target_date: date, user_message: str, assistant_message: str) -
 
 
 def clear_chat_session(target_date: date) -> None:
-    """Drop conversation history (called on full regenerate — fresh schedule)."""
+    """Drop conversation history (called on full regenerate — fresh schedule).
+
+    NOTE: currently unused — `run_schedule_graph` clears the per-date session
+    state inline (chat_sessions + pending_proposals + undo_snapshots) instead.
+    """
     chat_sessions.pop(target_date, None)
 
 
@@ -351,7 +380,7 @@ async def run_chat_agent(target_date: date, user_message: str) -> AgentChatResul
 
     impact = classify_impact(diff)
     if impact == "minor":
-        new = _commit(target_date, scratch)
+        new = _commit(target_date, scratch, run_id=run_id)
         pending_proposals.pop(target_date, None)   # superseded by this commit
         _log("success", text, n_tool_calls, tool_sequence=tool_seq,
              impact="minor", changes=changes_dump)
@@ -406,12 +435,64 @@ def confirm_proposal(target_date: date) -> AgentChatResult:
         )
 
     base = schedule_store[target_date]
+    prior_blocks = list(base.blocks)
     new = base.model_copy(update={"blocks": prop["staged_blocks"]})
     schedule_store[target_date] = new
     bump_schedule_version(target_date)
+    _snapshot_for_undo(target_date, prior_blocks, prop["summary"], prop["proposal_id"])
     _log_outcome(target_date, prop["proposal_id"], "applied")
     pending_proposals.pop(target_date, None)
     return AgentChatResult(terminal_state="success", schedule=new, message="已套用。")
+
+
+def undo_last_commit(target_date: date) -> AgentChatResult:
+    """Step back to the arrangement from before the last agent commit.
+
+    Guarded by version rather than by a TTL: what makes an undo unsafe isn't age
+    but interference. If nothing has touched the day since the commit, restoring
+    it is correct an hour later just as much as a second later; if something HAS
+    touched it (a drag, a completion tick, a later agent turn), the snapshot no
+    longer describes a state the user would recognise, so we refuse rather than
+    silently clobber that work.
+
+    Single-step: the snapshot is dropped on use, so undo can't be repeated into
+    older states it never recorded.
+    """
+    snap = undo_snapshots.get(target_date)
+    if snap is None:
+        return AgentChatResult(
+            terminal_state="degraded",
+            schedule=schedule_store.get(target_date),
+            message="没有可撤销的调整。",
+        )
+
+    if current_version(target_date) != snap["version_after"]:
+        undo_snapshots.pop(target_date, None)
+        _log_outcome(target_date, snap["proposal_id"], "undo_stale", run_id=snap["run_id"])
+        return AgentChatResult(
+            terminal_state="clarification",
+            schedule=schedule_store.get(target_date),
+            message="这之后日程又变过了，我没撤销，免得把后来的改动一起抹掉。",
+        )
+
+    base = schedule_store.get(target_date)
+    if base is None:
+        undo_snapshots.pop(target_date, None)
+        return AgentChatResult(terminal_state="degraded", message="今天还没有日程。")
+
+    new = base.model_copy(update={"blocks": snap["blocks"]})
+    schedule_store[target_date] = new
+    # Bump forward rather than restoring the old number — version is a monotonic
+    # change counter the frontend and pending proposals compare against, so
+    # rewinding it would make a stale proposal look current.
+    bump_schedule_version(target_date)
+    undo_snapshots.pop(target_date, None)
+    # An undo is the strongest negative label the dataset gets: the user saw the
+    # applied result and rejected it after the fact.
+    _log_outcome(target_date, snap["proposal_id"], "undone", run_id=snap["run_id"])
+    return AgentChatResult(
+        terminal_state="success", schedule=new, message="已撤销，恢复到调整前。",
+    )
 
 
 def dismiss_proposal(target_date: date) -> AgentChatResult:

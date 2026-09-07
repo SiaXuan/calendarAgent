@@ -160,6 +160,11 @@ struct SidebarView: View {
     @State private var pendingAgentProposal: DayflowAgentProposal?
     @State private var pendingAgentProposalMessage: String?
     @State private var chatMessages: [DayflowChatMessage] = []   // today's conversation thread
+    /// Set when an agent change went live without a confirm step (minor auto-commit)
+    /// or right after an Apply, so the user gets one step back. The backend is the
+    /// authority on whether undo is still safe — it refuses if the day moved on —
+    /// so this only controls whether the affordance is offered.
+    @State private var canUndoAgentChange = false
     @State private var scheduleDate = Self.todayString()
     @State private var isLoadingBackend = false
     @State private var streamTask: Task<Void, Never>?
@@ -377,7 +382,19 @@ struct SidebarView: View {
                         withAnimation { proxy.scrollTo(chatMessages.count - 1, anchor: .bottom) }
                     }
                 }
+                if canUndoAgentChange { undoBar }
             }
+        }
+    }
+
+    /// One step back after a change that went live without a confirm step.
+    private var undoBar: some View {
+        HStack {
+            Button("撤销") { undoAgentChange() }
+                .buttonStyle(.link)
+                .font(.system(size: 12))
+                .disabled(isLoadingBackend)
+            Spacer()
         }
     }
 
@@ -436,6 +453,9 @@ struct SidebarView: View {
         guard !isLoadingBackend else { return }
         streamTask?.cancel()
         streamTask = nil   // clear the guard in startDayflowStream
+        // A regenerate replaces the day wholesale; the backend drops its undo
+        // snapshot with it, so stop offering to restore.
+        canUndoAgentChange = false
         startDayflowStream()
     }
 
@@ -1463,6 +1483,7 @@ struct SidebarView: View {
         pendingAgentProposalMessage = nil
         scheduleDate = today
         chatMessages = []   // new day = new conversation thread
+        canUndoAgentChange = false
         state.statusMessage = "New day — loading today's schedule…"
         loadTodaySchedulePreferringCache()
         loadChatHistory()
@@ -1854,6 +1875,9 @@ struct SidebarView: View {
                 }
                 chatMessages.append(DayflowChatMessage(role: "assistant", content: result.message))
                 state.statusMessage = result.message
+                // "success" = a minor change the gate let through without asking.
+                // That's exactly the case that needs a way back.
+                canUndoAgentChange = result.terminalState == "success"
             }
             if shouldReload {
                 await MainActor.run {
@@ -1888,6 +1912,7 @@ struct SidebarView: View {
                     await MainActor.run {
                         pendingAgentProposal = nil
                         pendingAgentProposalMessage = nil
+                        canUndoAgentChange = true   // Apply just went live — offer a way back
                     }
                     await reloadScheduleAfterAgentSuccess(statusMessage: result.message)
                     if touchedSynced {
@@ -1926,6 +1951,45 @@ struct SidebarView: View {
         // eval dataset (fire-and-forget — UI already updated).
         let date = scheduleDate
         Task { _ = try? await dayflowClient.dismissAgentProposal(date: date) }
+    }
+
+    /// Step back to the arrangement from before the last agent change.
+    ///
+    /// The offer is withdrawn either way: on success the snapshot is consumed,
+    /// and on refusal the backend has already dropped it (the day moved on), so
+    /// leaving the button up would promise something it can no longer do.
+    private func undoAgentChange() {
+        guard canUndoAgentChange, !isLoadingBackend else { return }
+        isLoadingBackend = true
+        state.statusMessage = "Undoing last change..."
+        Task {
+            do {
+                let result = try await dayflowClient.undoAgentChange(date: scheduleDate)
+                await MainActor.run {
+                    canUndoAgentChange = false
+                    chatMessages.append(DayflowChatMessage(role: "assistant", content: result.message))
+                }
+                if agentChatRefreshPolicy.shouldReloadSchedule(terminalState: result.terminalState) {
+                    await reloadScheduleAfterAgentSuccess(statusMessage: result.message)
+                    // The reverted blocks may already be on the calendar under
+                    // their post-change times, so re-push whatever is synced.
+                    await resyncAllSyncedBlocks()
+                } else {
+                    await MainActor.run {
+                        if let schedule = result.schedule {
+                            state.applyDayflowSchedule(schedule, now: Date())
+                        }
+                        state.statusMessage = result.message
+                        isLoadingBackend = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    state.statusMessage = "Undo failed: \(error.localizedDescription)"
+                    isLoadingBackend = false
+                }
+            }
+        }
     }
 
     private func reloadScheduleAfterAgentSuccess(statusMessage: String) async {

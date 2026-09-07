@@ -19,12 +19,21 @@ Topology:
                                               ▼
                                             END
 
-`compute_meals` depends only on `fetch_calendar` (single in-edge → fires once).
-`apply_pins` and `schedule` each have two in-edges, but both incoming branches
-are the SAME depth from START (compute_meals at 3, split_instant at 3), so
-they land in the same super-step and the node fires exactly once. The earlier
-duplicate-fire bug happened because compute_meals had in-edges from different
-depths — keep this invariant in mind when adding nodes.
+`apply_pins` is the only fan-in here: two in-edges, but both upstreams are the
+SAME depth from START (compute_meals at 3, split_instant at 3), so both writes
+land in the same super-step and the node fires exactly once. Every other node
+has a single in-edge.
+
+LangGraph does not join on in-edges — a node runs once per super-step in which
+any in-edge delivers. So an in-edge from depth 2 and another from depth 3 makes
+the node fire TWICE. That was the original duplicate-fire bug: compute_meals
+used to hang off both fetch_calendar (depth 2) and split_instant (depth 3), and
+inserted two sets of meal blocks per run.
+
+INVARIANT when adding nodes or edges: a node may have any number of in-edges,
+but all of its upstreams must sit at the same depth from START. Otherwise pad
+the short branch with a pass-through node, or mark the node `defer=True`.
+See docs/ARCHITECTURE.md §10.8.
 
 `apply_pins` converts user-pinned subtasks (set by drag-to-move + pomodoro +/-)
 into TimeBlocks and merges them into fixed_blocks before the scheduler runs,
@@ -111,10 +120,13 @@ async def run_schedule_graph(
     """
     await sync_reminders_if_due()
 
-    # Full regenerate = fresh day → drop the old conversation + pending proposal.
-    from storage import chat_sessions, pending_proposals
+    # Full regenerate = fresh day → drop the old conversation, pending proposal,
+    # and undo snapshot (the snapshot's blocks belong to a day that's about to be
+    # replaced wholesale, so offering to restore them would be wrong).
+    from storage import chat_sessions, pending_proposals, undo_snapshots
     chat_sessions.pop(target_date, None)
     pending_proposals.pop(target_date, None)
+    undo_snapshots.pop(target_date, None)
 
     initial_state: ScheduleState = {
         "target_date": target_date,

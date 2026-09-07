@@ -10,6 +10,7 @@ from graphs.agent_run import (
     dismiss_proposal,
     get_chat_history,
     run_chat_agent,
+    undo_last_commit,
 )
 from models.schedule import DaySchedule
 from storage import schedule_store
@@ -100,3 +101,16 @@ async def chat_agent_dismiss(payload: ConfirmRequest):
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
     return dismiss_proposal(d)
+
+
+@router.post("/chat/agent/undo", response_model=AgentChatResult)
+async def chat_agent_undo(payload: ConfirmRequest):
+    """Step back to the arrangement from before the last agent commit.
+
+    Refuses (terminal_state=clarification) if the day changed after that commit.
+    """
+    try:
+        d = date.fromisoformat(payload.date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+    return undo_last_commit(d)

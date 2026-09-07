@@ -58,6 +58,7 @@ def clean_stores(tmp_path, monkeypatch):
         storage.schedule_version.clear()
         storage.calendar_snapshot_store.clear()
         storage.pending_proposals.clear()
+        storage.undo_snapshots.clear()
         storage.agent_run_log.clear()
         storage.chat_sessions.clear()
         storage.project_store.clear()

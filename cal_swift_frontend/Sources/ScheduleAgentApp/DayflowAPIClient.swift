@@ -263,6 +263,12 @@ final class DayflowAPIClient: @unchecked Sendable {
         try await request("/chat/agent/dismiss", method: "POST", body: ["date": date])
     }
 
+    /// Step back to the arrangement from before the last agent commit.
+    /// Returns `clarification` (not an error) if the day changed in between.
+    func undoAgentChange(date: String) async throws -> DayflowAgentChatResult {
+        try await request("/chat/agent/undo", method: "POST", body: ["date": date])
+    }
+
     func fetchAgentChatHistory(date: String) async throws -> DayflowChatHistory {
         try await request("/chat/agent/history?date=\(date)", encodedBody: nil)
     }

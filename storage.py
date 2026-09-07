@@ -195,6 +195,18 @@ pending_proposals: dict[date, dict] = {}
 # build on prior turns. In-memory; cleared on full regenerate.
 chat_sessions: dict[date, list[dict]] = {}
 
+# One-step undo for agent commits, keyed by date (Step 4). Written by every
+# agent-driven overwrite of schedule_store — the minor auto-commit and the
+# major Apply — because the commit itself is destructive: it replaces `blocks`
+# outright, so without this the prior arrangement is simply gone.
+# Each: {blocks, version_after, summary, created_at, proposal_id}.
+# `version_after` is the version the commit produced; undo refuses if the live
+# version has moved past it (something else edited the day in between).
+# ONE snapshot per date, overwritten by the next commit — this backs a single
+# "撤销刚才那步" affordance, not a history stack. In-memory on purpose: an undo
+# offer that outlives a restart would be lying about what it can restore.
+undo_snapshots: dict[date, dict] = {}
+
 
 # ─── health_store persistence ────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 import graphs.agent_run as ar
-from graphs.agent_run import confirm_proposal, run_chat_agent
+from graphs.agent_run import confirm_proposal, run_chat_agent, undo_last_commit
 from models.schedule import BlockType, DaySchedule, TimeBlock
 from models.task import CognitiveLoad, TaskKind
 
@@ -260,3 +260,120 @@ async def test_confirm_expired_ttl(clean_stores, patch_agent):
     res = confirm_proposal(D)
     assert res.terminal_state == "degraded"
     assert D not in pending_proposals
+
+
+# ─── undo_last_commit (Step 4) ───────────────────────────────────────────────
+
+async def _minor_move(patch_agent, hour=14):
+    """One scripted minor move → auto-committed."""
+    patch_agent(
+        [("move_block", {"block_id": "b1", "new_start_iso": f"2026-06-15T{hour}:00:00"})],
+        final="挪好了",
+    )
+    return await run_chat_agent(D, "把工作挪到下午")
+
+
+async def test_undo_restores_state_before_minor_commit(clean_stores, patch_agent):
+    _seed([_scheduled("t1", "Work", 9, 10)])
+    await _minor_move(patch_agent)
+    from storage import current_version, schedule_store, undo_snapshots
+    assert schedule_store[D].blocks[0].start.hour == 14
+    version_after_commit = current_version(D)
+
+    res = undo_last_commit(D)
+
+    assert res.terminal_state == "success"
+    assert schedule_store[D].blocks[0].start.hour == 9   # back to where it was
+    # Version moves FORWARD, never rewinds — it's a change counter the frontend
+    # and pending proposals compare against.
+    assert current_version(D) == version_after_commit + 1
+    assert D not in undo_snapshots   # single-step: consumed
+
+
+async def test_undo_restores_state_before_applied_proposal(clean_stores, patch_agent):
+    """A major change goes live via Apply, so Apply must be undoable too."""
+    _seed([_scheduled("t1", "A", 9, 10), _scheduled("t2", "B", 11, 12)])
+    patch_agent([
+        ("move_block", {"block_id": "b1", "new_start_iso": "2026-06-15T14:00:00"}),
+        ("move_block", {"block_id": "b2", "new_start_iso": "2026-06-15T16:00:00"}),
+    ], final="改动较大")
+    await run_chat_agent(D, "重排")
+    confirm_proposal(D)
+    from storage import schedule_store
+    assert sorted(b.start.hour for b in schedule_store[D].blocks) == [14, 16]
+
+    res = undo_last_commit(D)
+
+    assert res.terminal_state == "success"
+    assert sorted(b.start.hour for b in schedule_store[D].blocks) == [9, 11]
+
+
+async def test_undo_refuses_when_day_changed_after_commit(clean_stores, patch_agent):
+    """
+    The guard that matters. Something else touched the day after the commit
+    (a drag, a completion tick, a later turn) — restoring the snapshot would
+    silently wipe that work, so refuse instead.
+    """
+    _seed([_scheduled("t1", "Work", 9, 10)])
+    await _minor_move(patch_agent)
+    from storage import bump_schedule_version, schedule_store, undo_snapshots
+    bump_schedule_version(D)   # someone else edited the day
+
+    res = undo_last_commit(D)
+
+    assert res.terminal_state == "clarification"
+    assert schedule_store[D].blocks[0].start.hour == 14   # left alone
+    assert D not in undo_snapshots   # stale snapshot dropped, not left to mislead
+
+
+async def test_undo_without_snapshot_is_degraded(clean_stores):
+    _seed([_scheduled("t1", "A", 9, 10)])
+    res = undo_last_commit(D)
+    assert res.terminal_state == "degraded"
+
+
+async def test_undo_is_single_step(clean_stores, patch_agent):
+    """Undoing twice must not walk back into states never recorded."""
+    _seed([_scheduled("t1", "Work", 9, 10)])
+    await _minor_move(patch_agent, hour=14)
+    assert undo_last_commit(D).terminal_state == "success"
+
+    res = undo_last_commit(D)
+
+    assert res.terminal_state == "degraded"
+    from storage import schedule_store
+    assert schedule_store[D].blocks[0].start.hour == 9
+
+
+async def test_undo_logs_undone_outcome_linked_to_run(clean_stores, patch_agent):
+    """
+    An undo is the dataset's strongest negative label. A minor commit has no
+    proposal_id, so the link back to the run has to come from run_id.
+    """
+    _seed([_scheduled("t1", "Work", 9, 10)])
+    await _minor_move(patch_agent)
+    from storage import agent_run_log
+    run_id = next(r["run_id"] for r in agent_run_log if r["kind"] == "run")
+
+    undo_last_commit(D)
+
+    undone = [r for r in agent_run_log
+              if r["kind"] == "outcome" and r["outcome"] == "undone"]
+    assert len(undone) == 1
+    assert undone[0]["run_id"] == run_id
+
+
+async def test_regenerate_clears_undo_snapshot(clean_stores, patch_agent, mock_sonnet,
+                                               mock_caldav, mock_reminders_sync):
+    """After a regenerate the snapshot describes a day that no longer exists."""
+    _seed([_scheduled("t1", "Work", 9, 10)])
+    await _minor_move(patch_agent)
+    from storage import undo_snapshots
+    assert D in undo_snapshots
+
+    from agents.task_agent import _LLMSubtaskList
+    mock_sonnet.set_structured_response(_LLMSubtaskList(subtasks=[]))
+    from graphs.schedule_graph import run_schedule_graph
+    await run_schedule_graph(D)
+
+    assert D not in undo_snapshots

@@ -142,6 +142,20 @@ def test_patch_preferences_updates_field(client):
     client.patch("/preferences", json={"work_start": 8})
 
 
+# ─── /chat/agent/undo ───────────────────────────────────────────────────────
+
+def test_undo_rejects_bad_date(client):
+    r = client.post("/chat/agent/undo", json={"date": "15-06-2026"})
+    assert r.status_code == 422
+
+
+def test_undo_without_snapshot_returns_degraded(client):
+    """Wiring check — the undo logic itself is covered in test_agent_run.py."""
+    r = client.post("/chat/agent/undo", json={"date": "2026-06-15"})
+    assert r.status_code == 200
+    assert r.json()["terminal_state"] == "degraded"
+
+
 # ─── / root ─────────────────────────────────────────────────────────────────
 
 def test_root_returns_status(client):
