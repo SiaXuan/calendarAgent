@@ -19,6 +19,46 @@ def test_graph_topology_has_expected_nodes():
     assert expected <= actual
 
 
+def test_fan_in_nodes_have_same_depth_upstreams():
+    """
+    Guard for the duplicate-fire bug (docs/ARCHITECTURE.md §10.8).
+
+    LangGraph does not join on in-edges: a node runs once per super-step in
+    which any in-edge delivers. A node fed from depth 2 and depth 3 therefore
+    fires twice. compute_meals used to do exactly that and inserted two sets of
+    meal blocks per run.
+
+    So every multi-in-edge node must have all its upstreams at the same depth
+    from START. This recomputes depths from the compiled graph, so adding a node
+    or an edge that breaks the invariant fails here instead of silently
+    doubling output at runtime.
+    """
+    graph = build_schedule_graph().get_graph()
+
+    preds: dict[str, list[str]] = {}
+    for edge in graph.edges:
+        preds.setdefault(edge.target, []).append(edge.source)
+
+    # Longest path from START — a node executes in the super-step after its
+    # deepest upstream, so the longest path is what decides when writes land.
+    depth = {"__start__": 0}
+    for _ in range(len(graph.nodes) + 1):
+        for node, upstreams in preds.items():
+            if all(u in depth for u in upstreams):
+                depth[node] = max(depth[u] for u in upstreams) + 1
+
+    offenders = {
+        node: {u: depth[u] for u in upstreams}
+        for node, upstreams in preds.items()
+        if len(upstreams) > 1 and len({depth[u] for u in upstreams}) > 1
+    }
+    assert not offenders, (
+        f"These nodes would fire more than once per run: {offenders}. "
+        "Pad the short branch with a pass-through node, drop an edge, or mark "
+        "the node defer=True. See docs/ARCHITECTURE.md §10.8."
+    )
+
+
 async def test_run_schedule_graph_end_to_end(
     clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
     sample_task, sample_snapshot, sample_date,
