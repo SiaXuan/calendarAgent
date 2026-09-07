@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1156" viewBox="0 0 1240 1156"
+     font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A8494"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1240" height="1156" fill="#FFFFFF"/>
+
+  <text x="40" y="42" font-size="21" font-weight="700" fill="#111A22">Health-Aware AI Scheduling Agent · System Overview</text>
+  <text x="40" y="66" font-size="12.5" fill="#6B7683">A macOS scheduling assistant. The Swift client reads and writes system Calendar and Reminders through EventKit; the Python backend holds the logic and returns change-sets.</text>
+
+  <!-- ══ Band 1: macOS system ══ -->
+  <rect x="40" y="88" width="1160" height="100" rx="10" fill="#F4F5F7" stroke="#D6DAE0"/>
+  <text x="56" y="112" font-size="14" font-weight="700" fill="#3C4753">macOS system</text>
+
+  <rect x="440" y="124" width="180" height="48" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="530" y="146" font-size="13" font-weight="700" fill="#2B3440" text-anchor="middle">Calendar.app</text>
+  <text x="530" y="163" font-size="11" fill="#5A6673" text-anchor="middle">where time blocks land</text>
+
+  <rect x="640" y="124" width="180" height="48" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="730" y="146" font-size="13" font-weight="700" fill="#2B3440" text-anchor="middle">Reminders.app</text>
+  <text x="730" y="163" font-size="11" fill="#5A6673" text-anchor="middle">future project nodes</text>
+
+  <text x="856" y="142" font-size="11.5" fill="#6B7683">Written events and reminders carry a tag in their notes:</text>
+  <text x="856" y="160" font-size="11.5" fill="#6B7683">[agent-scheduled] · [agent-reminder] · [agent-project]</text>
+
+  <!-- arrows band1 <-> band2 -->
+  <line x1="430" y1="190" x2="430" y2="248" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="444" y="212" font-size="11.5" font-weight="600" fill="#4A5560">read: today's fixed events + free windows</text>
+  <text x="444" y="229" font-size="11" fill="#6B7683">(subscription and birthday calendars excluded)</text>
+
+  <line x1="800" y1="248" x2="800" y2="190" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="814" y="212" font-size="11.5" font-weight="600" fill="#4A5560">write: event &amp; reminder change-set</text>
+  <text x="814" y="229" font-size="11" fill="#6B7683">{create · update · delete}, delete before create</text>
+
+  <!-- ══ Band 2: Swift client ══ -->
+  <rect x="40" y="252" width="1160" height="196" rx="10" fill="#FFF6EF" stroke="#F2D2B4"/>
+  <text x="56" y="276" font-size="14" font-weight="700" fill="#8A4E17">Swift client · ScheduleAgent.app (SwiftUI, native macOS)</text>
+  <text x="560" y="276" font-size="11" fill="#A87441">two targets: ScheduleAgentApp (UI + EventKit) and ScheduleAgentCore (unit-tested logic)</text>
+
+  <rect x="52" y="288" width="272" height="58" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="66" y="308" font-size="12.5" font-weight="700" fill="#6B3E13">SidebarView — hover panel</text>
+  <text x="66" y="325" font-size="11" fill="#7C5734">today's timeline · energy curve · drag</text>
+  <text x="66" y="340" font-size="11" fill="#7C5734">chat thread · done checks · pomodoros</text>
+
+  <rect x="342" y="288" width="272" height="58" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="356" y="308" font-size="12.5" font-weight="700" fill="#6B3E13">ProjectsView / Detail</text>
+  <text x="356" y="325" font-size="11" fill="#7C5734">import outlines · chat left, plan right</text>
+  <text x="356" y="340" font-size="11" fill="#7C5734">review, then write to calendar</text>
+
+  <rect x="632" y="288" width="272" height="58" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="646" y="308" font-size="12.5" font-weight="700" fill="#6B3E13">ReviewView</text>
+  <text x="646" y="325" font-size="11" fill="#7C5734">completion heatmap · streak</text>
+  <text x="646" y="340" font-size="11" fill="#7C5734">fed by completion_store</text>
+
+  <rect x="922" y="288" width="272" height="58" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="936" y="308" font-size="12.5" font-weight="700" fill="#6B3E13">MailView</text>
+  <text x="936" y="325" font-size="11" fill="#7C5734">triage report by category</text>
+  <text x="936" y="340" font-size="11" fill="#7C5734">extracted invites drop into the day</text>
+
+  <rect x="52" y="360" width="560" height="72" rx="8" fill="#FBD9B8" stroke="#DFA469"/>
+  <text x="66" y="382" font-size="13" font-weight="700" fill="#6B3E13">AppleCalendarAdapter — the EventKit layer</text>
+  <text x="66" y="401" font-size="11" fill="#6E4B25">Reads today's events, free windows and 30-day capacity; applies event and</text>
+  <text x="66" y="418" font-size="11" fill="#6E4B25">reminder change-sets; one reminder list per project, tinted with its color.</text>
+
+  <rect x="634" y="360" width="560" height="72" rx="8" fill="#FBD9B8" stroke="#DFA469"/>
+  <text x="648" y="382" font-size="13" font-weight="700" fill="#6B3E13">DayflowAPIClient — backend client</text>
+  <text x="648" y="401" font-size="11" fill="#6E4B25">REST + SSE. Generation goes through POST /schedule/stream, whose body</text>
+  <text x="648" y="418" font-size="11" fill="#6E4B25">carries the day's calendar events. Decodes schedules, projects, mail reports.</text>
+
+  <!-- arrows band2 <-> band3 -->
+  <line x1="430" y1="450" x2="430" y2="508" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="444" y="472" font-size="11.5" font-weight="600" fill="#4A5560">POST /schedule/stream · /chat/agent</text>
+  <text x="444" y="489" font-size="11" fill="#6B7683">uploads today's events + 30-day capacity</text>
+
+  <line x1="800" y1="508" x2="800" y2="450" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="814" y="472" font-size="11.5" font-weight="600" fill="#4A5560">SSE node-level stream · DaySchedule</text>
+  <text x="814" y="489" font-size="11" fill="#6B7683">change-set {create, update, delete}</text>
+
+  <!-- ══ Band 3: Python backend ══ -->
+  <rect x="40" y="512" width="1160" height="380" rx="10" fill="#F0F5FF" stroke="#C4D6F5"/>
+  <text x="56" y="536" font-size="14" font-weight="700" fill="#17325E">Python backend · FastAPI</text>
+
+  <!-- api layer -->
+  <rect x="52" y="548" width="1142" height="52" rx="8" fill="#F7FAFF" stroke="#CFDDF5"/>
+  <text x="68" y="579" font-size="12.5" font-weight="700" fill="#17325E">api/ routes</text>
+  <g font-size="11.5" fill="#25303B">
+    <rect x="160" y="561" width="78" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="199" y="578" text-anchor="middle">/schedule</text>
+    <rect x="248" y="561" width="60" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="278" y="578" text-anchor="middle">/tasks</text>
+    <rect x="318" y="561" width="54" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="345" y="578" text-anchor="middle">/chat</text>
+    <rect x="382" y="561" width="86" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="425" y="578" text-anchor="middle">/chat/task</text>
+    <rect x="478" y="561" width="78" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="517" y="578" text-anchor="middle">/projects</text>
+    <rect x="566" y="561" width="66" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="599" y="578" text-anchor="middle">/health</text>
+    <rect x="642" y="561" width="60" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="672" y="578" text-anchor="middle">/email</text>
+    <rect x="712" y="561" width="70" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="747" y="578" text-anchor="middle">/memory</text>
+    <rect x="792" y="561" width="98" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="841" y="578" text-anchor="middle">/preferences</text>
+  </g>
+  <text x="906" y="578" font-size="11" fill="#6B7683">9 routers mounted by main.py · ~55 endpoints</text>
+
+  <!-- graphs layer -->
+  <rect x="52" y="612" width="1142" height="122" rx="8" fill="#F7FAFF" stroke="#CFDDF5"/>
+  <text x="68" y="634" font-size="12.5" font-weight="700" fill="#17325E">graphs/ — orchestration (LangGraph)</text>
+
+  <rect x="68" y="646" width="358" height="76" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="82" y="667" font-size="12.5" font-weight="700" fill="#17325E">schedule_graph.py — daily generation</text>
+  <text x="82" y="685" font-size="11" fill="#3E5A87">An 8-node DAG with fixed edges.</text>
+  <text x="82" y="701" font-size="11" fill="#3E5A87">Health → calendar and task breakdown in</text>
+  <text x="82" y="716" font-size="11" fill="#3E5A87">parallel → scheduling → assembly. (fig. 2)</text>
+
+  <rect x="442" y="646" width="358" height="76" rx="8" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="456" y="667" font-size="12.5" font-weight="700" fill="#442A75">agent_run.py — conversational edits</text>
+  <text x="456" y="685" font-size="11" fill="#5C3F92">A ReAct loop calling schedule tools.</text>
+  <text x="456" y="701" font-size="11" fill="#5C3F92">Edits land on a copy, diffed at the end and</text>
+  <text x="456" y="716" font-size="11" fill="#5C3F92">committed or staged by impact. (fig. 3)</text>
+
+  <rect x="816" y="646" width="358" height="76" rx="8" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="830" y="667" font-size="12.5" font-weight="700" fill="#442A75">email_triage.py · user_mcp.py</text>
+  <text x="830" y="685" font-size="11" fill="#5C3F92">Sorts and summarizes mail into a structured</text>
+  <text x="830" y="701" font-size="11" fill="#5C3F92">report. Mail tools are picked by name; this is</text>
+  <text x="830" y="716" font-size="11" fill="#5C3F92">where user-configured MCP servers attach.</text>
+
+  <!-- agents layer -->
+  <rect x="52" y="746" width="1142" height="134" rx="8" fill="#F7FAFF" stroke="#CFDDF5"/>
+  <text x="68" y="768" font-size="12.5" font-weight="700" fill="#17325E">agents/ — logic · memory/ — long-term memory</text>
+
+  <g>
+    <rect x="68" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="80" y="797" font-size="11.5" font-weight="700" fill="#17325E">health_agent</text>
+    <text x="80" y="813" font-size="10.5" fill="#3E5A87">24-hour energy curve from sleep</text>
+
+    <rect x="292" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="304" y="797" font-size="11.5" font-weight="700" fill="#17325E">task_agent</text>
+    <text x="304" y="813" font-size="10.5" fill="#3E5A87">ranking + breakdown into subtasks</text>
+
+    <rect x="516" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="528" y="797" font-size="11.5" font-weight="700" fill="#17325E">scheduler_agent</text>
+    <text x="528" y="813" font-size="10.5" fill="#3E5A87">energy-matched placement, phase order</text>
+
+    <rect x="740" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="752" y="797" font-size="11.5" font-weight="700" fill="#17325E">multiday_planner</text>
+    <text x="752" y="813" font-size="10.5" fill="#3E5A87">spread across days + carryover</text>
+
+    <rect x="964" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="976" y="797" font-size="11.5" font-weight="700" fill="#17325E">project_service</text>
+    <text x="976" y="813" font-size="10.5" fill="#3E5A87">projects · progress · replan</text>
+
+    <rect x="68" y="832" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="80" y="849" font-size="11.5" font-weight="700" fill="#17325E">calendar / reminder_reconcile</text>
+    <text x="80" y="865" font-size="10.5" fill="#3E5A87">computes the change-sets</text>
+
+    <rect x="292" y="832" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="304" y="849" font-size="11.5" font-weight="700" fill="#17325E">plan_import_agent</text>
+    <text x="304" y="865" font-size="10.5" fill="#3E5A87">documents · images → plan nodes</text>
+
+    <rect x="516" y="832" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="528" y="849" font-size="11.5" font-weight="700" fill="#17325E">project_chat</text>
+    <text x="528" y="865" font-size="10.5" fill="#3E5A87">per-project thread: edits + progress</text>
+
+    <rect x="740" y="832" width="214" height="44" rx="7" fill="#E6DBFF" stroke="#C3ABF0"/>
+    <text x="752" y="849" font-size="11.5" font-weight="700" fill="#442A75">scratch</text>
+    <text x="752" y="865" font-size="10.5" fill="#5C3F92">schedule copy + classify_impact</text>
+
+    <rect x="964" y="832" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="976" y="849" font-size="11.5" font-weight="700" fill="#17325E">memory/</text>
+    <text x="976" y="865" font-size="10.5" fill="#3E5A87">observe → promote → inject in prompt</text>
+  </g>
+
+  <!-- arrows band3 <-> band4 -->
+  <line x1="400" y1="894" x2="400" y2="946" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="414" y="920" font-size="11.5" font-weight="600" fill="#4A5560">JSON snapshots</text>
+
+  <line x1="960" y1="894" x2="960" y2="946" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="974" y="920" font-size="11.5" font-weight="600" fill="#4A5560">LLM calls · MCP tools</text>
+
+  <!-- ══ Band 4: storage + external ══ -->
+  <rect x="40" y="950" width="740" height="128" rx="10" fill="#EFF8F3" stroke="#B8DCC8"/>
+  <text x="56" y="974" font-size="14" font-weight="700" fill="#14512F">Local storage · data/*.json</text>
+  <g font-size="11" fill="#1E5C3A" text-anchor="middle">
+    <rect x="56" y="986" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="141" y="1005">task_store</text>
+    <rect x="236" y="986" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="321" y="1005">schedule_store</text>
+    <rect x="416" y="986" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="501" y="1005">project_store</text>
+    <rect x="596" y="986" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="681" y="1005">project_task_store</text>
+    <rect x="56" y="1022" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="141" y="1041">completion_store</text>
+    <rect x="236" y="1022" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="321" y="1041">multiday_plan_store</text>
+    <rect x="416" y="1022" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="501" y="1041">memory_store</text>
+    <rect x="596" y="1022" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="681" y="1041">subtask_cache</text>
+  </g>
+  <text x="56" y="1068" font-size="10.5" fill="#3C6B52">Plus calendar_snapshot · project_plan · project_chat · preferences · agent_run_log — 20 state containers in all.</text>
+
+  <rect x="800" y="950" width="400" height="128" rx="10" fill="#F6F4FF" stroke="#D2C7F0"/>
+  <text x="816" y="974" font-size="14" font-weight="700" fill="#442A75">External services</text>
+  <rect x="816" y="986" width="368" height="42" rx="7" fill="#E8E0FC" stroke="#BFA9EE"/>
+  <text x="830" y="1003" font-size="12" font-weight="700" fill="#442A75">Anthropic Claude</text>
+  <text x="830" y="1020" font-size="10.5" fill="#5C3F92">sonnet for reasoning/chat/breakdown · haiku for labels</text>
+  <rect x="816" y="1034" width="368" height="42" rx="7" fill="#E8E0FC" stroke="#BFA9EE"/>
+  <text x="830" y="1051" font-size="12" font-weight="700" fill="#442A75">User-supplied MCP servers</text>
+  <text x="830" y="1068" font-size="10.5" fill="#5C3F92">bring mail, notes and other tools to the chat agent</text>
+
+  <!-- footer -->
+  <rect x="40" y="1096" width="1160" height="40" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="56" y="1121" font-size="11.5" fill="#3C4753"><tspan font-weight="700">Block identity　block_key = {task_id}::{title}</tspan>　　shared by the client, pins, completion records and calendar tags; subtask_cache keeps it stable across regenerations</text>
+</svg>

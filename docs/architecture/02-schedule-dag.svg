@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="880" viewBox="0 0 1080 880"
+     font-family="-apple-system, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A8494"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1080" height="880" fill="#FFFFFF"/>
+
+  <text x="40" y="42" font-size="21" font-weight="700" fill="#111A22">每日生成日程 · LangGraph</text>
+  <text x="40" y="66" font-size="12.5" fill="#6B7683">graphs/schedule_graph.py 定义拓扑，agents/nodes.py 实现节点。状态 ScheduleState 在节点间传递，每个节点返回局部更新。</text>
+
+  <g stroke="#E4E8ED" stroke-width="1" stroke-dasharray="4 4">
+    <line x1="40" y1="176" x2="700" y2="176"/>
+    <line x1="40" y1="292" x2="700" y2="292"/>
+    <line x1="40" y1="410" x2="700" y2="410"/>
+    <line x1="40" y1="528" x2="700" y2="528"/>
+  </g>
+
+  <!-- START -->
+  <rect x="290" y="96" width="120" height="34" rx="17" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="350" y="118" font-size="12.5" font-weight="700" fill="#2B3440" text-anchor="middle">START</text>
+  <line x1="350" y1="130" x2="350" y2="192" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- fetch_health -->
+  <rect x="200" y="192" width="300" height="72" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="216" y="214" font-size="13" font-weight="700" fill="#14512F">fetch_health</text>
+  <text x="216" y="233" font-size="11" fill="#2E6647">能量曲线 + 健康摘要</text>
+  <text x="216" y="249" font-size="11" fill="#2E6647">按睡眠时长与时段算晨/午后/傍晚三个峰</text>
+
+  <!-- fan out -->
+  <path d="M300,264 L300,290 L190,290 L190,308" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <path d="M400,264 L400,290 L510,290 L510,308" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- fetch_calendar -->
+  <rect x="40" y="308" width="300" height="86" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="56" y="330" font-size="13" font-weight="700" fill="#14512F">fetch_calendar</text>
+  <text x="56" y="349" font-size="11" fill="#2E6647">用前端传来的 EventKit 事件算固定块 + 空档</text>
+  <text x="56" y="365" font-size="11" fill="#2E6647">同一批事件存进 calendar_snapshot</text>
+  <text x="56" y="381" font-size="11" fill="#2E6647">下次前端未带事件时读快照</text>
+
+  <!-- rank_tasks -->
+  <rect x="360" y="308" width="300" height="86" rx="8" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="376" y="330" font-size="13" font-weight="700" fill="#442A75">rank_tasks</text>
+  <text x="376" y="349" font-size="11" fill="#5C3F92">调度窗口筛选（deadline 在 5 天内）+ 排序</text>
+  <text x="376" y="365" font-size="11" fill="#5C3F92">sonnet 拆解成子任务，注入当天多天规划分片</text>
+  <text x="376" y="381" font-size="11" fill="#5C3F92">任务内容未变时复用 subtask_cache</text>
+  <text x="644" y="330" font-size="10.5" fill="#5C3F92" text-anchor="end">LLM</text>
+
+  <line x1="190" y1="394" x2="190" y2="426" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <line x1="510" y1="394" x2="510" y2="426" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- compute_meals -->
+  <rect x="40" y="426" width="300" height="66" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="56" y="448" font-size="13" font-weight="700" fill="#14512F">compute_meals</text>
+  <text x="56" y="467" font-size="11" fill="#2E6647">按偏好插三餐锚点块</text>
+  <text x="56" y="483" font-size="11" fill="#2E6647">默认每餐 50 分钟</text>
+
+  <!-- split_instant -->
+  <rect x="360" y="426" width="300" height="66" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="376" y="448" font-size="13" font-weight="700" fill="#14512F">split_instant</text>
+  <text x="376" y="467" font-size="11" fill="#2E6647">把「交作业 / 回邮件」这类即时项拆出来</text>
+  <text x="376" y="483" font-size="11" fill="#2E6647">钉在给定时刻，不参与能量排程</text>
+
+  <!-- converge -->
+  <path d="M190,492 L190,516 L350,516 L350,544" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <path d="M510,492 L510,516 L350,516 L350,544" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- apply_pins -->
+  <rect x="200" y="544" width="300" height="60" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="216" y="566" font-size="13" font-weight="700" fill="#14512F">apply_pins</text>
+  <text x="216" y="585" font-size="11" fill="#2E6647">用户钉住或拖过的块转成固定块</text>
+  <text x="216" y="600" font-size="11" fill="#2E6647">重排时保持它们的位置</text>
+  <line x1="350" y1="604" x2="350" y2="632" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- schedule -->
+  <rect x="200" y="632" width="300" height="60" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="216" y="654" font-size="13" font-weight="700" fill="#14512F">schedule</text>
+  <text x="216" y="673" font-size="11" fill="#2E6647">高认知负荷任务对齐能量高峰</text>
+  <text x="216" y="688" font-size="11" fill="#2E6647">放不下的进 unscheduled；同任务阶段保持先后</text>
+  <line x1="350" y1="692" x2="350" y2="720" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- assemble -->
+  <rect x="200" y="720" width="300" height="60" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="216" y="742" font-size="13" font-weight="700" fill="#14512F">assemble</text>
+  <text x="216" y="761" font-size="11" fill="#2E6647">组装 DaySchedule，join 出完成态</text>
+  <text x="216" y="776" font-size="11" fill="#2E6647">落 schedule_store + 版本号 +1</text>
+  <line x1="350" y1="780" x2="350" y2="806" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="290" y="806" width="120" height="34" rx="17" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="350" y="828" font-size="12.5" font-weight="700" fill="#2B3440" text-anchor="middle">END</text>
+
+  <!-- ══ right column ══ -->
+  <line x1="712" y1="96" x2="712" y2="840" stroke="#E4E8ED" stroke-width="1"/>
+
+  <rect x="736" y="96" width="304" height="112" rx="8" fill="#F0F5FF" stroke="#C4D6F5"/>
+  <text x="750" y="116" font-size="11.5" font-weight="700" fill="#17325E">跑图之前：多天规划</text>
+  <text x="750" y="135" font-size="11" fill="#3E5A87">project_service.ensure_multiday_plan 增量运行，</text>
+  <text x="750" y="151" font-size="11" fill="#3E5A87">给新进入 5 天窗口的项目节点排多天计划，</text>
+  <text x="750" y="167" font-size="11" fill="#3E5A87">已排过的不重跑；过去未完成的分片上浮到今天，</text>
+  <text x="750" y="183" font-size="11" fill="#3E5A87">标 carried_over。</text>
+  <text x="750" y="201" font-size="10.5" fill="#5A7BB0">→ 见图 4 的数据链路</text>
+
+  <rect x="736" y="224" width="304" height="92" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="244" font-size="11.5" font-weight="700" fill="#2B3440">执行顺序</text>
+  <text x="750" y="263" font-size="11" fill="#5A6673">fetch_health 先单独跑，SSE 随即发出健康卡；</text>
+  <text x="750" y="279" font-size="11" fill="#5A6673">日历与任务拆解并行 fan out；两条分支汇合后</text>
+  <text x="750" y="295" font-size="11" fill="#5A6673">进入 apply_pins → schedule → assemble。</text>
+
+  <rect x="736" y="332" width="304" height="112" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="352" font-size="11.5" font-weight="700" fill="#2B3440">缓存</text>
+  <text x="750" y="371" font-size="11" fill="#5A6673">subtask_cache 按任务内容 hash 复用上次的拆解，</text>
+  <text x="750" y="387" font-size="11" fill="#5A6673">子任务标题不变 → block_key 稳定，钉住与完成</text>
+  <text x="750" y="403" font-size="11" fill="#5A6673">记录不会失配。</text>
+  <text x="750" y="422" font-size="11" fill="#5A6673">_health_cache 按日期缓存曲线；_calendar_cache</text>
+  <text x="750" y="438" font-size="11" fill="#5A6673">300 秒 TTL。</text>
+
+  <rect x="736" y="460" width="304" height="92" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="480" font-size="11.5" font-weight="700" fill="#2B3440">两个出口</text>
+  <text x="750" y="499" font-size="11" fill="#5A6673">POST /schedule/generate —— 一次拿完整结果</text>
+  <text x="750" y="515" font-size="11" fill="#5A6673">POST /schedule/stream —— SSE 按节点推事件：</text>
+  <text x="750" y="531" font-size="11" fill="#5A6673">health → fixed → schedule → done</text>
+
+  <rect x="736" y="568" width="304" height="96" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="588" font-size="11.5" font-weight="700" fill="#2B3440">重排：不重跑整张图</text>
+  <text x="750" y="607" font-size="11" fill="#5A6673">拖动或改时长后调 /schedule/{date}/pin，</text>
+  <text x="750" y="623" font-size="11" fill="#5A6673">reflow_after_pin 就地应用 PinSpec，把后面的</text>
+  <text x="750" y="639" font-size="11" fill="#5A6673">可移动块绕开固定块顺延，其余位置不变。</text>
+
+  <rect x="736" y="680" width="304" height="76" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="700" font-size="11.5" font-weight="700" fill="#2B3440">图例</text>
+  <rect x="750" y="710" width="14" height="14" rx="4" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="772" y="721" font-size="11" fill="#5A6673">规则计算的节点</text>
+  <rect x="750" y="732" width="14" height="14" rx="4" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="772" y="743" font-size="11" fill="#5A6673">调用 LLM 的节点</text>
+</svg>

@@ -25,7 +25,42 @@
 6. **用对话调整** → 需要确认时点一下确认。
 7. **同步**到 Apple 日历、把做完的**勾掉**;第二天没做完的自动结转。
 
-> 技术栈:FastAPI + LangGraph(经 LangChain 调 Claude)+ 原生 SwiftUI macOS 客户端。后端是纯逻辑,Swift 客户端经 EventKit 承担全部日历/提醒读写(不碰 iCloud/CalDAV)。实现看 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),全局蓝图与进度看 [docs/ROADMAP.md](docs/ROADMAP.md)。
+> 技术栈:FastAPI + LangGraph(经 LangChain 调 Claude)+ 原生 SwiftUI macOS 客户端。后端是纯逻辑,Swift 客户端经 EventKit 承担全部日历/提醒读写(不碰 iCloud/CalDAV)。整体怎么拼起来的,看下面的架构图。
+
+## 架构
+
+四层:持有日历与提醒的 macOS 系统 App、经 EventKit 读写它们的原生 Swift 前端、处理逻辑的 Python 后端,以及本地 JSON 存储。前后端之间流动的是变更集 `{create, update, delete}`,由前端应用到系统。
+
+![系统总览](docs/architecture/01-system-overview.svg)
+
+<details>
+<summary><b>每日生成日程 —— LangGraph DAG</b></summary>
+
+8 个节点、固定边。健康节点先出结果,SSE 立刻能推一张卡;日历读取与任务拆解并行,汇合后进入排程与组装。
+
+![每日生成 DAG](docs/architecture/02-schedule-dag.svg)
+
+</details>
+
+<details>
+<summary><b>对话式调整 —— ReAct agent</b></summary>
+
+LLM 调用日程工具修改当天安排。改动落在日程副本上,循环结束后求 diff,按影响面分级:minor 直接提交,major 转成提案等你确认。
+
+![ReAct agent](docs/architecture/03-chat-agent.svg)
+
+</details>
+
+<details>
+<summary><b>数据链路 —— 从一份课程大纲到日历上的时间块</b></summary>
+
+左边是跨周跨月的项目线,右边是当天才产生的输入,两条在每日排程处汇合;之后写回系统日历,并把实际完成的部分记下来供复盘。
+
+![数据链路](docs/architecture/04-data-flow.svg)
+
+</details>
+
+四张图在一页:[docs/architecture/index.html](docs/architecture/index.html)。
 
 ## 需要自己配什么
 
@@ -157,7 +192,7 @@ app 申请日历和提醒的**完全访问**(用途字符串在 `cal_swift_front
 
 ## 阶段状态
 
-当前:**Phase 4(进行中)**——纯本地转向:Swift 客户端经 EventKit 承担全部日历/提醒读写,后端是纯逻辑、只返回 `{create,update,delete}` 变更集(不碰 iCloud/CalDAV)。已有项目层 + 多天规划 + 每日结转 + 完成追踪。详细进度与整个大框架(含后续的 Apple Health 多源数据、用户自带 MCP、论文驱动的健康规则引擎)见 [docs/ROADMAP.md](docs/ROADMAP.md);现状/决策/技术债看 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前:**Phase 4(进行中)**——纯本地转向:Swift 客户端经 EventKit 承担全部日历/提醒读写,后端是纯逻辑、只返回 `{create,update,delete}` 变更集(不碰 iCloud/CalDAV)。已有项目层 + 多天规划 + 每日结转 + 完成追踪。后续方向:多源健康数据(Apple Health 等)、用户自带 MCP、论文驱动的健康规则引擎。
 
 ## 可选:LangSmith trace
 

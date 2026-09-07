@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="880" viewBox="0 0 1080 880"
+     font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A8494"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1080" height="880" fill="#FFFFFF"/>
+
+  <text x="40" y="42" font-size="21" font-weight="700" fill="#111A22">Daily schedule generation · LangGraph</text>
+  <text x="40" y="66" font-size="12.5" fill="#6B7683">Topology in graphs/schedule_graph.py, nodes in agents/nodes.py. ScheduleState flows between nodes; each node returns a partial update.</text>
+
+  <g stroke="#E4E8ED" stroke-width="1" stroke-dasharray="4 4">
+    <line x1="40" y1="176" x2="700" y2="176"/>
+    <line x1="40" y1="292" x2="700" y2="292"/>
+    <line x1="40" y1="410" x2="700" y2="410"/>
+    <line x1="40" y1="528" x2="700" y2="528"/>
+  </g>
+
+  <!-- START -->
+  <rect x="290" y="96" width="120" height="34" rx="17" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="350" y="118" font-size="12.5" font-weight="700" fill="#2B3440" text-anchor="middle">START</text>
+  <line x1="350" y1="130" x2="350" y2="192" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- fetch_health -->
+  <rect x="200" y="192" width="300" height="72" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="216" y="214" font-size="13" font-weight="700" fill="#14512F">fetch_health</text>
+  <text x="216" y="233" font-size="11" fill="#2E6647">Energy curve + health summary.</text>
+  <text x="216" y="249" font-size="11" fill="#2E6647">Morning / afternoon / evening peaks from sleep.</text>
+
+  <!-- fan out -->
+  <path d="M300,264 L300,290 L190,290 L190,308" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <path d="M400,264 L400,290 L510,290 L510,308" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- fetch_calendar -->
+  <rect x="40" y="308" width="300" height="86" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="56" y="330" font-size="13" font-weight="700" fill="#14512F">fetch_calendar</text>
+  <text x="56" y="349" font-size="11" fill="#2E6647">Turns the uploaded EventKit events into fixed</text>
+  <text x="56" y="365" font-size="11" fill="#2E6647">blocks and free windows, and stores them in</text>
+  <text x="56" y="381" font-size="11" fill="#2E6647">calendar_snapshot for later runs without events.</text>
+
+  <!-- rank_tasks -->
+  <rect x="360" y="308" width="300" height="86" rx="8" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="376" y="330" font-size="13" font-weight="700" fill="#442A75">rank_tasks</text>
+  <text x="376" y="349" font-size="11" fill="#5C3F92">Horizon filter (deadline within 5 days) + ranking.</text>
+  <text x="376" y="365" font-size="11" fill="#5C3F92">Sonnet breaks tasks down; today's planned chunks</text>
+  <text x="376" y="381" font-size="11" fill="#5C3F92">join in. Unchanged tasks reuse subtask_cache.</text>
+  <text x="644" y="330" font-size="10.5" fill="#5C3F92" text-anchor="end">LLM</text>
+
+  <line x1="190" y1="394" x2="190" y2="426" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <line x1="510" y1="394" x2="510" y2="426" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- compute_meals -->
+  <rect x="40" y="426" width="300" height="66" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="56" y="448" font-size="13" font-weight="700" fill="#14512F">compute_meals</text>
+  <text x="56" y="467" font-size="11" fill="#2E6647">Inserts three meal anchors per preferences,</text>
+  <text x="56" y="483" font-size="11" fill="#2E6647">50 minutes each by default.</text>
+
+  <!-- split_instant -->
+  <rect x="360" y="426" width="300" height="66" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="376" y="448" font-size="13" font-weight="700" fill="#14512F">split_instant</text>
+  <text x="376" y="467" font-size="11" fill="#2E6647">Splits off quick items ("submit", "reply"), pinned</text>
+  <text x="376" y="483" font-size="11" fill="#2E6647">to their given time and out of energy placement.</text>
+
+  <!-- converge -->
+  <path d="M190,492 L190,516 L350,516 L350,544" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <path d="M510,492 L510,516 L350,516 L350,544" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- apply_pins -->
+  <rect x="200" y="544" width="300" height="60" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="216" y="566" font-size="13" font-weight="700" fill="#14512F">apply_pins</text>
+  <text x="216" y="585" font-size="11" fill="#2E6647">Blocks the user pinned or dragged become fixed,</text>
+  <text x="216" y="600" font-size="11" fill="#2E6647">so a regeneration keeps them in place.</text>
+  <line x1="350" y1="604" x2="350" y2="632" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- schedule -->
+  <rect x="200" y="632" width="300" height="60" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="216" y="654" font-size="13" font-weight="700" fill="#14512F">schedule</text>
+  <text x="216" y="673" font-size="11" fill="#2E6647">Heavy cognitive load lands on energy peaks; the</text>
+  <text x="216" y="688" font-size="11" fill="#2E6647">rest goes to unscheduled. Task phases keep order.</text>
+  <line x1="350" y1="692" x2="350" y2="720" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- assemble -->
+  <rect x="200" y="720" width="300" height="60" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="216" y="742" font-size="13" font-weight="700" fill="#14512F">assemble</text>
+  <text x="216" y="761" font-size="11" fill="#2E6647">Builds the DaySchedule, joins completion state,</text>
+  <text x="216" y="776" font-size="11" fill="#2E6647">saves to schedule_store and bumps the version.</text>
+  <line x1="350" y1="780" x2="350" y2="806" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="290" y="806" width="120" height="34" rx="17" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="350" y="828" font-size="12.5" font-weight="700" fill="#2B3440" text-anchor="middle">END</text>
+
+  <!-- ══ right column ══ -->
+  <line x1="712" y1="96" x2="712" y2="840" stroke="#E4E8ED" stroke-width="1"/>
+
+  <rect x="736" y="96" width="304" height="112" rx="8" fill="#F0F5FF" stroke="#C4D6F5"/>
+  <text x="750" y="116" font-size="11.5" font-weight="700" fill="#17325E">Before the graph runs: multi-day planning</text>
+  <text x="750" y="135" font-size="11" fill="#3E5A87">project_service.ensure_multiday_plan runs</text>
+  <text x="750" y="151" font-size="11" fill="#3E5A87">incrementally: it plans project nodes that just</text>
+  <text x="750" y="167" font-size="11" fill="#3E5A87">entered the 5-day window, leaves planned ones</text>
+  <text x="750" y="183" font-size="11" fill="#3E5A87">alone, and floats unfinished chunks to today.</text>
+  <text x="750" y="201" font-size="10.5" fill="#5A7BB0">→ see fig. 4 for the full chain</text>
+
+  <rect x="736" y="224" width="304" height="92" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="244" font-size="11.5" font-weight="700" fill="#2B3440">Execution order</text>
+  <text x="750" y="263" font-size="11" fill="#5A6673">fetch_health runs alone first, so SSE can emit</text>
+  <text x="750" y="279" font-size="11" fill="#5A6673">the health card right away. Calendar and task</text>
+  <text x="750" y="295" font-size="11" fill="#5A6673">breakdown fan out, then the branches converge.</text>
+
+  <rect x="736" y="332" width="304" height="112" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="352" font-size="11.5" font-weight="700" fill="#2B3440">Caches</text>
+  <text x="750" y="371" font-size="11" fill="#5A6673">subtask_cache reuses the previous breakdown,</text>
+  <text x="750" y="387" font-size="11" fill="#5A6673">keyed by a hash of the task's content. Subtask</text>
+  <text x="750" y="403" font-size="11" fill="#5A6673">titles stay put, so block_key stays stable and</text>
+  <text x="750" y="419" font-size="11" fill="#5A6673">pins and completions keep matching.</text>
+  <text x="750" y="437" font-size="11" fill="#5A6673">_calendar_cache has a 300-second TTL.</text>
+
+  <rect x="736" y="460" width="304" height="92" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="480" font-size="11.5" font-weight="700" fill="#2B3440">Two entry points</text>
+  <text x="750" y="499" font-size="11" fill="#5A6673">POST /schedule/generate — one full result</text>
+  <text x="750" y="515" font-size="11" fill="#5A6673">POST /schedule/stream — SSE, node by node:</text>
+  <text x="750" y="531" font-size="11" fill="#5A6673">health → fixed → schedule → done</text>
+
+  <rect x="736" y="568" width="304" height="96" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="588" font-size="11.5" font-weight="700" fill="#2B3440">Reflow without rerunning the graph</text>
+  <text x="750" y="607" font-size="11" fill="#5A6673">A drag or duration change calls /schedule/</text>
+  <text x="750" y="623" font-size="11" fill="#5A6673">{date}/pin; reflow_after_pin applies the PinSpec</text>
+  <text x="750" y="639" font-size="11" fill="#5A6673">in place and pushes later movable blocks around</text>
+  <text x="750" y="655" font-size="11" fill="#5A6673">fixed ones, leaving everything else untouched.</text>
+
+  <rect x="736" y="680" width="304" height="76" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="750" y="700" font-size="11.5" font-weight="700" fill="#2B3440">Legend</text>
+  <rect x="750" y="710" width="14" height="14" rx="4" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="772" y="721" font-size="11" fill="#5A6673">rule-based node</text>
+  <rect x="750" y="732" width="14" height="14" rx="4" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="772" y="743" font-size="11" fill="#5A6673">node that calls an LLM</text>
+</svg>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Health-Aware AI Scheduling Agent · 架构图</title>
+<style>
+  :root {
+    --bg: #FBFBFC;
+    --card: #FFFFFF;
+    --ink: #16202B;
+    --muted: #6B7683;
+    --line: #E4E8ED;
+    --accent: #2F5FA8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181D;
+      --card: #1C2128;
+      --ink: #E6EAEF;
+      --muted: #9AA5B1;
+      --line: #2C333B;
+      --accent: #7BA7E8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.7 -apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .wrap { max-width: 1300px; margin: 0 auto; padding: 56px 32px 96px; }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 28px; margin-bottom: 40px; }
+  .toprow { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; }
+  h1 { font-size: 28px; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .lang { font-size: 13.5px; color: var(--accent); text-decoration: none; white-space: nowrap; }
+  .lede { color: var(--muted); font-size: 15px; max-width: 780px; margin: 0; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 16px; }
+
+  nav { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0 0; }
+  nav a {
+    color: var(--accent); text-decoration: none; font-size: 13.5px;
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px;
+  }
+  nav a:hover { border-color: var(--accent); }
+
+  section { margin-bottom: 56px; scroll-margin-top: 24px; }
+  h2 { font-size: 19px; margin: 0 0 6px; }
+  .note { color: var(--muted); font-size: 13.5px; margin: 0 0 18px; max-width: 880px; }
+  figure {
+    margin: 0; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px; overflow-x: auto;
+  }
+  figure img { display: block; width: 100%; height: auto; min-width: 900px; }
+
+  footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--muted); font-size: 13px; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="toprow">
+    <h1>Health-Aware AI Scheduling Agent</h1>
+    <a class="lang" href="index.en.html">English →</a>
+  </div>
+  <p class="lede">
+    一个 macOS 日程助理。它读你的睡眠状况算出当天的能量曲线，把课程大纲、待办和日历上的固定事件揉成一份排好的日程，
+    再用一句自然语言就能改。Swift 前端通过 EventKit 读写系统日历与提醒，Python 后端处理逻辑并返回变更集。
+  </p>
+  <p class="meta">
+    Python 3.13 · FastAPI · LangGraph · Claude（sonnet / haiku）　|　SwiftUI · EventKit　|　存储为本地 JSON
+  </p>
+  <nav>
+    <a href="#overview">1 · 系统总览</a>
+    <a href="#dag">2 · 每日生成 DAG</a>
+    <a href="#agent">3 · 对话式调整</a>
+    <a href="#flow">4 · 数据链路</a>
+  </nav>
+</header>
+
+<section id="overview">
+  <h2>1 · 系统总览</h2>
+  <p class="note">
+    四层：macOS 系统 App、Swift 前端、Python 后端、本地 JSON 存储。前后端之间流动的是变更集 <code>{create, update, delete}</code>，
+    由前端用 EventKit 应用到系统日历与提醒。
+  </p>
+  <figure>
+    <img src="01-system-overview.svg" alt="系统总览：macOS 系统层、Swift 前端、Python 后端、本地存储与外部服务的分层图">
+  </figure>
+</section>
+
+<section id="dag">
+  <h2>2 · 每日生成日程 · LangGraph</h2>
+  <p class="note">
+    8 个节点、固定边的 DAG。健康节点先出结果让 SSE 立刻推送，日历与任务拆解并行，汇合后进入排程与组装。
+  </p>
+  <figure>
+    <img src="02-schedule-dag.svg" alt="每日生成日程的 LangGraph DAG：从 START 经 fetch_health 扇出到 fetch_calendar 与 rank_tasks，再汇合到 apply_pins、schedule、assemble">
+  </figure>
+</section>
+
+<section id="agent">
+  <h2>3 · 对话式调整 · ReAct agent</h2>
+  <p class="note">
+    LLM 调用日程工具修改当天安排。改动落在日程副本上，循环结束后求 diff，按影响面分级：minor 直接提交，major 转为提案等确认。
+  </p>
+  <figure>
+    <img src="03-chat-agent.svg" alt="聊天 agent 的 ReAct 循环、ScheduleScratch 日程副本、影响面分级与五个终止态">
+  </figure>
+</section>
+
+<section id="flow">
+  <h2>4 · 数据链路</h2>
+  <p class="note">
+    一份课程大纲怎么变成日历上的一个时间块：导入 → 复核 → 提醒 → 多天规划 → 每日排程 → 写回日历 → 完成记录 → 复盘。
+  </p>
+  <figure>
+    <img src="04-data-flow.svg" alt="数据链路：文档导入到项目任务、多天规划与结转、每日排程、写回日历、完成记录与复盘">
+  </figure>
+</section>
+
+<footer>
+  图为手写 SVG，可单独引用或拖进幻灯片。内容核对自 <code>graphs/</code> 与 <code>agents/</code> 下的实现。
+</footer>
+
+</div>
+</body>
+</html>

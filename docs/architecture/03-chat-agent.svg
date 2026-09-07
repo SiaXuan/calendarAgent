@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="742" viewBox="0 0 1160 742"
+     font-family="-apple-system, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A8494"/>
+    </marker>
+    <marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8A6BC4"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1160" height="742" fill="#FFFFFF"/>
+
+  <text x="40" y="42" font-size="21" font-weight="700" fill="#111A22">对话式调整 · ReAct agent</text>
+  <text x="40" y="66" font-size="12.5" fill="#6B7683">graphs/agent_run.py。LLM 调用日程工具修改当天安排，改动经影响面分级后提交或转为提案。</text>
+
+  <!-- 用户输入 -->
+  <rect x="40" y="180" width="190" height="76" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="56" y="202" font-size="12.5" font-weight="700" fill="#6B3E13">用户一句话</text>
+  <text x="56" y="222" font-size="11" fill="#7C5734">「下午没精神，把复习</text>
+  <text x="56" y="238" font-size="11" fill="#7C5734">挪到晚上，作业先删了」</text>
+  <line x1="230" y1="218" x2="272" y2="218" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- ReAct 容器 -->
+  <rect x="276" y="96" width="480" height="286" rx="10" fill="#F6F2FF" stroke="#C3ABF0"/>
+  <text x="292" y="120" font-size="13.5" font-weight="700" fill="#442A75">ReAct 循环 · create_react_agent</text>
+  <text x="292" y="138" font-size="11" fill="#6B54A0">上限 16 步 ≈ 8 轮模型↔工具往返；典型 2–4 轮</text>
+
+  <rect x="292" y="152" width="200" height="66" rx="8" fill="#E8E0FC" stroke="#BFA9EE"/>
+  <text x="306" y="174" font-size="12.5" font-weight="700" fill="#442A75">Claude Sonnet</text>
+  <text x="306" y="192" font-size="10.5" fill="#5C3F92">决定调用哪个工具、</text>
+  <text x="306" y="208" font-size="10.5" fill="#5C3F92">调用次数与顺序</text>
+
+  <path d="M496,170 L536,170" stroke="#8A6BC4" stroke-width="1.6" marker-end="url(#ahp)"/>
+  <path d="M536,200 L496,200" stroke="#8A6BC4" stroke-width="1.6" marker-end="url(#ahp)"/>
+  <text x="516" y="164" font-size="10" fill="#6B54A0" text-anchor="middle">调用</text>
+  <text x="516" y="218" font-size="10" fill="#6B54A0" text-anchor="middle">结果</text>
+
+  <rect x="540" y="152" width="200" height="66" rx="8" fill="#E8E0FC" stroke="#BFA9EE"/>
+  <text x="554" y="174" font-size="12.5" font-weight="700" fill="#442A75">工具带</text>
+  <text x="554" y="192" font-size="10.5" fill="#5C3F92">8 个日程工具 + 2 个信号</text>
+  <text x="554" y="208" font-size="10.5" fill="#5C3F92">工具 + 用户自带 MCP 工具</text>
+
+  <g font-size="10.5" fill="#442A75" text-anchor="middle">
+    <rect x="292" y="232" width="104" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="344" y="248">get_schedule</text>
+    <rect x="404" y="232" width="94" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="451" y="248">move_block</text>
+    <rect x="506" y="232" width="104" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="558" y="248">resize_block</text>
+    <rect x="618" y="232" width="110" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="673" y="248">remove_block</text>
+    <rect x="292" y="264" width="120" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="352" y="280">add_fixed_event</text>
+    <rect x="420" y="264" width="120" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="480" y="280">add_to_schedule</text>
+    <rect x="548" y="264" width="110" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="603" y="280">capacity_check</text>
+    <rect x="666" y="264" width="62" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="697" y="280">…</text>
+    <rect x="292" y="296" width="86" height="24" rx="6" fill="#FFF4E2" stroke="#E8C48C"/><text x="335" y="312">ask_user</text>
+    <rect x="386" y="296" width="118" height="24" rx="6" fill="#FFF4E2" stroke="#E8C48C"/><text x="445" y="312">report_blocked</text>
+  </g>
+  <text x="516" y="313" font-size="10.5" fill="#8A6B3C">← 信号工具：反问用户 / 报告无法完成</text>
+
+  <text x="292" y="342" font-size="10.5" fill="#6B54A0">system prompt 打了 Anthropic prompt cache 断点，一轮对话内第 2..N 次调用读缓存</text>
+  <text x="292" y="360" font-size="10.5" fill="#6B54A0">最多带 24 条历史；有待确认提案时，后续对话叠在提案上继续细化</text>
+  <text x="292" y="376" font-size="10.5" fill="#6B54A0">整轮是阻塞式 ainvoke，返回节点级结果</text>
+
+  <line x1="516" y1="382" x2="516" y2="412" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- Scratch -->
+  <rect x="276" y="412" width="480" height="72" rx="8" fill="#FFF6EF" stroke="#F2D2B4"/>
+  <text x="292" y="434" font-size="13" font-weight="700" fill="#8A4E17">ScheduleScratch —— 日程副本</text>
+  <text x="292" y="453" font-size="11" fill="#7C5734">块在副本里按开始时间编号 b1..bN，工具用这些 id 寻址。</text>
+  <text x="292" y="470" font-size="11" fill="#7C5734">循环结束后用副本和原件求 diff。</text>
+
+  <line x1="516" y1="484" x2="516" y2="514" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- Gate -->
+  <rect x="276" y="514" width="480" height="76" rx="8" fill="#E7EAEE" stroke="#8B95A2" stroke-width="1.6"/>
+  <text x="292" y="537" font-size="13" font-weight="700" fill="#1F2933">classify_impact(diff) —— 影响面分级</text>
+  <text x="292" y="556" font-size="11" fill="#4A5560">删除、新增固定事件、触及已同步的块、跨天移动、或 ≥2 块改动 → major</text>
+  <text x="292" y="573" font-size="11" fill="#4A5560">其余 → minor。minor 直接提交，major 转为提案等确认。</text>
+
+  <!-- 分支到终止态 -->
+  <path d="M756,552 L800,552 L800,148 L836,148" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M800,552 L800,236 L836,236" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M800,552 L800,324 L836,324" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M756,300 L780,300 L780,398 L836,398" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M780,398 L780,472 L836,472" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+
+  <text x="836" y="112" font-size="12.5" font-weight="700" fill="#3C4753">五个终止态</text>
+
+  <rect x="836" y="120" width="288" height="56" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="850" y="140" font-size="12" font-weight="700" fill="#14512F">success — minor，已提交</text>
+  <text x="850" y="159" font-size="10.5" fill="#2E6647">原子写回 schedule_store + 版本号 +1</text>
+
+  <rect x="836" y="208" width="288" height="56" rx="8" fill="#FFF4E2" stroke="#E8C48C"/>
+  <text x="850" y="228" font-size="12" font-weight="700" fill="#8A4E17">proposal — major，待确认</text>
+  <text x="850" y="247" font-size="10.5" fill="#7C5734">5 分钟 TTL + 版本号乐观并发</text>
+
+  <rect x="836" y="296" width="288" height="56" rx="8" fill="#F4F5F7" stroke="#C2C8D0"/>
+  <text x="850" y="316" font-size="12" font-weight="700" fill="#2B3440">no_change — diff 为空</text>
+  <text x="850" y="335" font-size="10.5" fill="#5A6673">对话完成，日程未变</text>
+
+  <rect x="836" y="370" width="288" height="56" rx="8" fill="#FFF4E2" stroke="#E8C48C"/>
+  <text x="850" y="390" font-size="12" font-weight="700" fill="#8A4E17">clarification — 反问用户</text>
+  <text x="850" y="409" font-size="10.5" fill="#7C5734">agent 调用了 ask_user</text>
+
+  <rect x="836" y="444" width="288" height="56" rx="8" fill="#FBE4E4" stroke="#E3A9A9"/>
+  <text x="850" y="464" font-size="12" font-weight="700" fill="#7A2E2E">degraded — 无法完成</text>
+  <text x="850" y="483" font-size="10.5" fill="#8F4A4A">调用 report_blocked，或超出步数上限 / 异常</text>
+
+  <!-- 确认回路 -->
+  <path d="M980,264 L980,282 L1140,282 L1140,576 L762,576" fill="none" stroke="#B08A4A" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah)"/>
+  <text x="1126" y="566" font-size="10.5" fill="#8A6B3C" text-anchor="end">用户点确认 → confirm_proposal 校验版本后原子提交</text>
+
+  <!-- 提交到 live -->
+  <line x1="276" y1="552" x2="234" y2="552" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <rect x="40" y="514" width="190" height="76" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="56" y="536" font-size="12.5" font-weight="700" fill="#14512F">线上日程</text>
+  <text x="56" y="555" font-size="10.5" fill="#2E6647">schedule_store + 版本号</text>
+  <text x="56" y="571" font-size="10.5" fill="#2E6647">提交后前端重新拉取</text>
+
+  <!-- 埋点 -->
+  <rect x="40" y="628" width="1084" height="76" rx="8" fill="#F0F5FF" stroke="#C4D6F5"/>
+  <text x="56" y="650" font-size="13" font-weight="700" fill="#17325E">运行记录</text>
+  <text x="56" y="669" font-size="11" fill="#3E5A87">每次 run 落一条 data/agent_run_log.jsonl：输入 + 冻结的日程快照 + 能量曲线 + diff + 工具调用序列 + 影响面 + 延迟。</text>
+  <text x="56" y="686" font-size="11" fill="#3E5A87">用户的 Apply / 忽略再落一条 outcome，用 proposal_id 关联，可把一条真实 case 回放成回归用例。</text>
+</svg>

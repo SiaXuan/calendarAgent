@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Health-Aware AI Scheduling Agent · Architecture</title>
+<style>
+  :root {
+    --bg: #FBFBFC;
+    --card: #FFFFFF;
+    --ink: #16202B;
+    --muted: #6B7683;
+    --line: #E4E8ED;
+    --accent: #2F5FA8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181D;
+      --card: #1C2128;
+      --ink: #E6EAEF;
+      --muted: #9AA5B1;
+      --line: #2C333B;
+      --accent: #7BA7E8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.7 -apple-system, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  }
+  .wrap { max-width: 1300px; margin: 0 auto; padding: 56px 32px 96px; }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 28px; margin-bottom: 40px; }
+  .toprow { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; }
+  h1 { font-size: 28px; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .lang { font-size: 13.5px; color: var(--accent); text-decoration: none; white-space: nowrap; }
+  .lede { color: var(--muted); font-size: 15px; max-width: 780px; margin: 0; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 16px; }
+
+  nav { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0 0; }
+  nav a {
+    color: var(--accent); text-decoration: none; font-size: 13.5px;
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px;
+  }
+  nav a:hover { border-color: var(--accent); }
+
+  section { margin-bottom: 56px; scroll-margin-top: 24px; }
+  h2 { font-size: 19px; margin: 0 0 6px; }
+  .note { color: var(--muted); font-size: 13.5px; margin: 0 0 18px; max-width: 880px; }
+  figure {
+    margin: 0; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px; overflow-x: auto;
+  }
+  figure img { display: block; width: 100%; height: auto; min-width: 900px; }
+
+  footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--muted); font-size: 13px; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="toprow">
+    <h1>Health-Aware AI Scheduling Agent</h1>
+    <a class="lang" href="index.html">中文 →</a>
+  </div>
+  <p class="lede">
+    A macOS scheduling assistant. It turns your sleep into an energy curve for the day, folds course outlines,
+    to-dos and fixed calendar events into a planned schedule, and lets you rearrange it in a sentence.
+    The Swift client reads and writes system Calendar and Reminders through EventKit; the Python backend
+    holds the logic and returns change-sets.
+  </p>
+  <p class="meta">
+    Python 3.13 · FastAPI · LangGraph · Claude (sonnet / haiku)　|　SwiftUI · EventKit　|　local JSON storage
+  </p>
+  <nav>
+    <a href="#overview">1 · System overview</a>
+    <a href="#dag">2 · Daily generation DAG</a>
+    <a href="#agent">3 · Conversational adjustment</a>
+    <a href="#flow">4 · Data flow</a>
+  </nav>
+</header>
+
+<section id="overview">
+  <h2>1 · System overview</h2>
+  <p class="note">
+    Four layers: macOS system apps, the Swift client, the Python backend and local JSON storage. What crosses the
+    boundary is a change-set <code>{create, update, delete}</code>, which the client applies through EventKit.
+  </p>
+  <figure>
+    <img src="en/01-system-overview.svg" alt="System overview: macOS system apps, Swift client, Python backend, local storage and external services">
+  </figure>
+</section>
+
+<section id="dag">
+  <h2>2 · Daily schedule generation · LangGraph</h2>
+  <p class="note">
+    An eight-node DAG with fixed edges. Health resolves first so SSE can push immediately; calendar reading and
+    task breakdown run in parallel, then converge into placement and assembly.
+  </p>
+  <figure>
+    <img src="en/02-schedule-dag.svg" alt="The daily generation LangGraph DAG: START through fetch_health, fanning out to fetch_calendar and rank_tasks, converging on apply_pins, schedule and assemble">
+  </figure>
+</section>
+
+<section id="agent">
+  <h2>3 · Conversational adjustment · the ReAct agent</h2>
+  <p class="note">
+    The model calls schedule tools to edit the day. Edits land on a copy of the schedule; the resulting diff is
+    classified by impact — minor commits directly, major becomes a proposal awaiting confirmation.
+  </p>
+  <figure>
+    <img src="en/03-chat-agent.svg" alt="The chat agent's ReAct loop, the ScheduleScratch copy, impact classification and five terminal states">
+  </figure>
+</section>
+
+<section id="flow">
+  <h2>4 · Data flow</h2>
+  <p class="note">
+    How a course outline becomes a block on the calendar: import → review → reminders → multi-day planning →
+    daily scheduling → written back → completion records → review.
+  </p>
+  <figure>
+    <img src="en/04-data-flow.svg" alt="Data flow: document import into project tasks, multi-day planning and carryover, daily scheduling, calendar write-back, completion records and review">
+  </figure>
+</section>
+
+<footer>
+  The figures are hand-written SVG — reference them individually or drop them into slides. Their contents are checked
+  against the implementation under <code>graphs/</code> and <code>agents/</code>.
+</footer>
+
+</div>
+</body>
+</html>

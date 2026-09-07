@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="742" viewBox="0 0 1160 742"
+     font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A8494"/>
+    </marker>
+    <marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8A6BC4"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1160" height="742" fill="#FFFFFF"/>
+
+  <text x="40" y="42" font-size="21" font-weight="700" fill="#111A22">Conversational adjustment · the ReAct agent</text>
+  <text x="40" y="66" font-size="12.5" fill="#6B7683">graphs/agent_run.py. The model calls schedule tools to edit the day; the resulting diff is classified by impact, then committed or staged for confirmation.</text>
+
+  <!-- user input -->
+  <rect x="40" y="180" width="190" height="76" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="56" y="202" font-size="12.5" font-weight="700" fill="#6B3E13">One sentence</text>
+  <text x="56" y="222" font-size="11" fill="#7C5734">"Low energy this afternoon —</text>
+  <text x="56" y="238" font-size="11" fill="#7C5734">move revision to tonight."</text>
+  <line x1="230" y1="218" x2="272" y2="218" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- ReAct container -->
+  <rect x="276" y="96" width="480" height="286" rx="10" fill="#F6F2FF" stroke="#C3ABF0"/>
+  <text x="292" y="120" font-size="13.5" font-weight="700" fill="#442A75">ReAct loop · create_react_agent</text>
+  <text x="292" y="138" font-size="11" fill="#6B54A0">Capped at 16 steps ≈ 8 model↔tool rounds; typically 2–4.</text>
+
+  <rect x="292" y="152" width="200" height="66" rx="8" fill="#E8E0FC" stroke="#BFA9EE"/>
+  <text x="306" y="174" font-size="12.5" font-weight="700" fill="#442A75">Claude Sonnet</text>
+  <text x="306" y="192" font-size="10.5" fill="#5C3F92">picks which tools to call,</text>
+  <text x="306" y="208" font-size="10.5" fill="#5C3F92">how many times, in what order</text>
+
+  <path d="M496,170 L536,170" stroke="#8A6BC4" stroke-width="1.6" marker-end="url(#ahp)"/>
+  <path d="M536,200 L496,200" stroke="#8A6BC4" stroke-width="1.6" marker-end="url(#ahp)"/>
+  <text x="516" y="164" font-size="10" fill="#6B54A0" text-anchor="middle">call</text>
+  <text x="516" y="218" font-size="10" fill="#6B54A0" text-anchor="middle">result</text>
+
+  <rect x="540" y="152" width="200" height="66" rx="8" fill="#E8E0FC" stroke="#BFA9EE"/>
+  <text x="554" y="174" font-size="12.5" font-weight="700" fill="#442A75">Tool belt</text>
+  <text x="554" y="192" font-size="10.5" fill="#5C3F92">8 schedule tools, 2 signal</text>
+  <text x="554" y="208" font-size="10.5" fill="#5C3F92">tools, plus any MCP tools</text>
+
+  <g font-size="10.5" fill="#442A75" text-anchor="middle">
+    <rect x="292" y="232" width="104" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="344" y="248">get_schedule</text>
+    <rect x="404" y="232" width="94" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="451" y="248">move_block</text>
+    <rect x="506" y="232" width="104" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="558" y="248">resize_block</text>
+    <rect x="618" y="232" width="110" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="673" y="248">remove_block</text>
+    <rect x="292" y="264" width="120" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="352" y="280">add_fixed_event</text>
+    <rect x="420" y="264" width="120" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="480" y="280">add_to_schedule</text>
+    <rect x="548" y="264" width="110" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="603" y="280">capacity_check</text>
+    <rect x="666" y="264" width="62" height="24" rx="6" fill="#FFFFFF" stroke="#D6C7F2"/><text x="697" y="280">…</text>
+    <rect x="292" y="296" width="86" height="24" rx="6" fill="#FFF4E2" stroke="#E8C48C"/><text x="335" y="312">ask_user</text>
+    <rect x="386" y="296" width="118" height="24" rx="6" fill="#FFF4E2" stroke="#E8C48C"/><text x="445" y="312">report_blocked</text>
+  </g>
+  <text x="516" y="313" font-size="10.5" fill="#8A6B3C">← signal tools: ask back / report blocked</text>
+
+  <text x="292" y="342" font-size="10.5" fill="#6B54A0">System prompt carries a prompt-cache breakpoint; rounds 2..N of a turn read cache.</text>
+  <text x="292" y="360" font-size="10.5" fill="#6B54A0">Up to 24 history messages. A pending proposal is what follow-up turns refine.</text>
+  <text x="292" y="376" font-size="10.5" fill="#6B54A0">The turn is a blocking ainvoke; it returns when the loop finishes.</text>
+
+  <line x1="516" y1="382" x2="516" y2="412" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- Scratch -->
+  <rect x="276" y="412" width="480" height="72" rx="8" fill="#FFF6EF" stroke="#F2D2B4"/>
+  <text x="292" y="434" font-size="13" font-weight="700" fill="#8A4E17">ScheduleScratch — a copy of the day</text>
+  <text x="292" y="453" font-size="11" fill="#7C5734">Blocks are numbered b1..bN by start time, and tools address them by those ids.</text>
+  <text x="292" y="470" font-size="11" fill="#7C5734">When the loop ends, the copy is diffed against the original.</text>
+
+  <line x1="516" y1="484" x2="516" y2="514" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- Gate -->
+  <rect x="276" y="514" width="480" height="76" rx="8" fill="#E7EAEE" stroke="#8B95A2" stroke-width="1.6"/>
+  <text x="292" y="537" font-size="13" font-weight="700" fill="#1F2933">classify_impact(diff) — impact classification</text>
+  <text x="292" y="556" font-size="11" fill="#4A5560">A delete, a new fixed event, a synced block touched, a cross-day move, or ≥2</text>
+  <text x="292" y="573" font-size="11" fill="#4A5560">changed blocks → major. Otherwise minor. Minor commits; major becomes a proposal.</text>
+
+  <!-- branches -->
+  <path d="M756,552 L800,552 L800,148 L836,148" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M800,552 L800,236 L836,236" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M800,552 L800,324 L836,324" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M756,300 L780,300 L780,398 L836,398" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M780,398 L780,472 L836,472" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+
+  <text x="836" y="112" font-size="12.5" font-weight="700" fill="#3C4753">Five terminal states</text>
+
+  <rect x="836" y="120" width="288" height="56" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="850" y="140" font-size="12" font-weight="700" fill="#14512F">success — minor, committed</text>
+  <text x="850" y="159" font-size="10.5" fill="#2E6647">atomic write to schedule_store, version +1</text>
+
+  <rect x="836" y="208" width="288" height="56" rx="8" fill="#FFF4E2" stroke="#E8C48C"/>
+  <text x="850" y="228" font-size="12" font-weight="700" fill="#8A4E17">proposal — major, awaiting confirm</text>
+  <text x="850" y="247" font-size="10.5" fill="#7C5734">5-minute TTL, optimistic version check</text>
+
+  <rect x="836" y="296" width="288" height="56" rx="8" fill="#F4F5F7" stroke="#C2C8D0"/>
+  <text x="850" y="316" font-size="12" font-weight="700" fill="#2B3440">no_change — empty diff</text>
+  <text x="850" y="335" font-size="10.5" fill="#5A6673">the turn answered, the day is untouched</text>
+
+  <rect x="836" y="370" width="288" height="56" rx="8" fill="#FFF4E2" stroke="#E8C48C"/>
+  <text x="850" y="390" font-size="12" font-weight="700" fill="#8A4E17">clarification — asked back</text>
+  <text x="850" y="409" font-size="10.5" fill="#7C5734">the agent called ask_user</text>
+
+  <rect x="836" y="444" width="288" height="56" rx="8" fill="#FBE4E4" stroke="#E3A9A9"/>
+  <text x="850" y="464" font-size="12" font-weight="700" fill="#7A2E2E">degraded — could not be done</text>
+  <text x="850" y="483" font-size="10.5" fill="#8F4A4A">report_blocked, step limit, or an error</text>
+
+  <!-- confirm loop -->
+  <path d="M980,264 L980,282 L1140,282 L1140,576 L762,576" fill="none" stroke="#B08A4A" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah)"/>
+  <text x="1126" y="566" font-size="10.5" fill="#8A6B3C" text-anchor="end">Apply → confirm_proposal checks the version, then commits atomically</text>
+
+  <!-- live schedule -->
+  <line x1="276" y1="552" x2="234" y2="552" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <rect x="40" y="514" width="190" height="76" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="56" y="536" font-size="12.5" font-weight="700" fill="#14512F">Live schedule</text>
+  <text x="56" y="555" font-size="10.5" fill="#2E6647">schedule_store + version</text>
+  <text x="56" y="571" font-size="10.5" fill="#2E6647">the client refetches after a commit</text>
+
+  <!-- run log -->
+  <rect x="40" y="628" width="1084" height="76" rx="8" fill="#F0F5FF" stroke="#C4D6F5"/>
+  <text x="56" y="650" font-size="13" font-weight="700" fill="#17325E">Run log</text>
+  <text x="56" y="669" font-size="11" fill="#3E5A87">Every run appends to data/agent_run_log.jsonl: the input, a frozen schedule snapshot, the energy curve, the diff,</text>
+  <text x="56" y="686" font-size="11" fill="#3E5A87">the tool-call sequence, the impact and the latency. Apply or dismiss adds an outcome row linked by proposal_id, so a real case replays as a regression fixture.</text>
+</svg>

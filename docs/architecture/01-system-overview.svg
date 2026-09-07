@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1156" viewBox="0 0 1240 1156"
+     font-family="-apple-system, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A8494"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1240" height="1156" fill="#FFFFFF"/>
+
+  <text x="40" y="42" font-size="21" font-weight="700" fill="#111A22">Health-Aware AI Scheduling Agent · 系统总览</text>
+  <text x="40" y="66" font-size="12.5" fill="#6B7683">macOS 日程助理。Swift 前端通过 EventKit 读写系统日历与提醒，Python 后端处理逻辑并返回变更集。</text>
+
+  <!-- ══ Band 1: macOS 系统 ══ -->
+  <rect x="40" y="88" width="1160" height="100" rx="10" fill="#F4F5F7" stroke="#D6DAE0"/>
+  <text x="56" y="112" font-size="14" font-weight="700" fill="#3C4753">macOS 系统</text>
+
+  <rect x="440" y="124" width="180" height="48" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="530" y="146" font-size="13" font-weight="700" fill="#2B3440" text-anchor="middle">日历 Calendar.app</text>
+  <text x="530" y="163" font-size="11" fill="#5A6673" text-anchor="middle">时间块落地的地方</text>
+
+  <rect x="640" y="124" width="180" height="48" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="730" y="146" font-size="13" font-weight="700" fill="#2B3440" text-anchor="middle">提醒 Reminders.app</text>
+  <text x="730" y="163" font-size="11" fill="#5A6673" text-anchor="middle">项目未来节点</text>
+
+  <text x="856" y="142" font-size="11.5" fill="#6B7683">写入的事件与提醒在备注里带标识：</text>
+  <text x="856" y="160" font-size="11.5" fill="#6B7683">[agent-scheduled] · [agent-reminder] · [agent-project]</text>
+
+  <!-- arrows band1 <-> band2 -->
+  <line x1="430" y1="190" x2="430" y2="248" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="444" y="212" font-size="11.5" font-weight="600" fill="#4A5560">读：当天固定事件 · 空档</text>
+  <text x="444" y="229" font-size="11" fill="#6B7683">（排除订阅日历与生日日历）</text>
+
+  <line x1="800" y1="248" x2="800" y2="190" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="814" y="212" font-size="11.5" font-weight="600" fill="#4A5560">写：事件 &amp; 提醒变更集</text>
+  <text x="814" y="229" font-size="11" fill="#6B7683">{create · update · delete}，先删后建</text>
+
+  <!-- ══ Band 2: Swift 前端 ══ -->
+  <rect x="40" y="252" width="1160" height="196" rx="10" fill="#FFF6EF" stroke="#F2D2B4"/>
+  <text x="56" y="276" font-size="14" font-weight="700" fill="#8A4E17">Swift 前端 · ScheduleAgent.app（SwiftUI，原生 macOS）</text>
+  <text x="520" y="276" font-size="11" fill="#A87441">分 ScheduleAgentApp（UI + EventKit）和 ScheduleAgentCore（逻辑库，可单测）两个 target</text>
+
+  <rect x="52" y="288" width="272" height="58" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="66" y="308" font-size="12.5" font-weight="700" fill="#6B3E13">悬浮侧栏 SidebarView</text>
+  <text x="66" y="325" font-size="11" fill="#7C5734">今日时间轴 · 能量曲线 · 拖拽重排</text>
+  <text x="66" y="340" font-size="11" fill="#7C5734">对话气泡 · 完成勾 · 番茄增减</text>
+
+  <rect x="342" y="288" width="272" height="58" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="356" y="308" font-size="12.5" font-weight="700" fill="#6B3E13">项目 ProjectsView / Detail</text>
+  <text x="356" y="325" font-size="11" fill="#7C5734">导入大纲 · 左对话右计划节点</text>
+  <text x="356" y="340" font-size="11" fill="#7C5734">复核后写入日历</text>
+
+  <rect x="632" y="288" width="272" height="58" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="646" y="308" font-size="12.5" font-weight="700" fill="#6B3E13">复盘 ReviewView</text>
+  <text x="646" y="325" font-size="11" fill="#7C5734">完成热力图 · 连续天数</text>
+  <text x="646" y="340" font-size="11" fill="#7C5734">数据来自 completion_store</text>
+
+  <rect x="922" y="288" width="272" height="58" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="936" y="308" font-size="12.5" font-weight="700" fill="#6B3E13">邮件 MailView</text>
+  <text x="936" y="325" font-size="11" fill="#7C5734">triage 结果分栏</text>
+  <text x="936" y="340" font-size="11" fill="#7C5734">抽出的邀请可落进日程</text>
+
+  <rect x="52" y="360" width="560" height="72" rx="8" fill="#FBD9B8" stroke="#DFA469"/>
+  <text x="66" y="382" font-size="13" font-weight="700" fill="#6B3E13">AppleCalendarAdapter — EventKit 层</text>
+  <text x="66" y="401" font-size="11" fill="#6E4B25">读当天事件与空档、未来 30 天容量 · 应用事件与提醒变更集</text>
+  <text x="66" y="418" font-size="11" fill="#6E4B25">按项目建提醒列表（用项目颜色）· 以 .app 包运行并申请日历/提醒权限</text>
+
+  <rect x="634" y="360" width="560" height="72" rx="8" fill="#FBD9B8" stroke="#DFA469"/>
+  <text x="648" y="382" font-size="13" font-weight="700" fill="#6B3E13">DayflowAPIClient — 后端客户端</text>
+  <text x="648" y="401" font-size="11" fill="#6E4B25">REST + SSE；生成走 POST /schedule/stream（body 带当天日历事件）</text>
+  <text x="648" y="418" font-size="11" fill="#6E4B25">解码日程、项目、完成记录与邮件报告</text>
+
+  <!-- arrows band2 <-> band3 -->
+  <line x1="430" y1="450" x2="430" y2="508" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="444" y="472" font-size="11.5" font-weight="600" fill="#4A5560">POST /schedule/stream · /chat/agent</text>
+  <text x="444" y="489" font-size="11" fill="#6B7683">上传当天事件 + 未来 30 天容量</text>
+
+  <line x1="800" y1="508" x2="800" y2="450" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="814" y="472" font-size="11.5" font-weight="600" fill="#4A5560">SSE 节点级流式 · DaySchedule</text>
+  <text x="814" y="489" font-size="11" fill="#6B7683">变更集 {create, update, delete}</text>
+
+  <!-- ══ Band 3: Python 后端 ══ -->
+  <rect x="40" y="512" width="1160" height="380" rx="10" fill="#F0F5FF" stroke="#C4D6F5"/>
+  <text x="56" y="536" font-size="14" font-weight="700" fill="#17325E">Python 后端 · FastAPI</text>
+
+  <!-- api layer -->
+  <rect x="52" y="548" width="1142" height="52" rx="8" fill="#F7FAFF" stroke="#CFDDF5"/>
+  <text x="68" y="579" font-size="12.5" font-weight="700" fill="#17325E">api/ 路由</text>
+  <g font-size="11.5" fill="#25303B">
+    <rect x="150" y="561" width="78" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="189" y="578" text-anchor="middle">/schedule</text>
+    <rect x="238" y="561" width="60" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="268" y="578" text-anchor="middle">/tasks</text>
+    <rect x="308" y="561" width="54" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="335" y="578" text-anchor="middle">/chat</text>
+    <rect x="372" y="561" width="86" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="415" y="578" text-anchor="middle">/chat/task</text>
+    <rect x="468" y="561" width="78" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="507" y="578" text-anchor="middle">/projects</text>
+    <rect x="556" y="561" width="66" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="589" y="578" text-anchor="middle">/health</text>
+    <rect x="632" y="561" width="60" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="662" y="578" text-anchor="middle">/email</text>
+    <rect x="702" y="561" width="70" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="737" y="578" text-anchor="middle">/memory</text>
+    <rect x="782" y="561" width="98" height="26" rx="6" fill="#DFEAFE" stroke="#A8C3EE"/><text x="831" y="578" text-anchor="middle">/preferences</text>
+  </g>
+  <text x="898" y="578" font-size="11" fill="#6B7683">9 个 router，由 main.py 统一挂载 · 约 55 个端点</text>
+
+  <!-- graphs layer -->
+  <rect x="52" y="612" width="1142" height="122" rx="8" fill="#F7FAFF" stroke="#CFDDF5"/>
+  <text x="68" y="634" font-size="12.5" font-weight="700" fill="#17325E">graphs/ 编排层（LangGraph）</text>
+
+  <rect x="68" y="646" width="358" height="76" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="82" y="667" font-size="12.5" font-weight="700" fill="#17325E">schedule_graph.py — 每日生成</text>
+  <text x="82" y="685" font-size="11" fill="#3E5A87">8 个节点、固定边的 DAG</text>
+  <text x="82" y="701" font-size="11" fill="#3E5A87">健康 → 日历与任务拆解并行 → 排程 → 组装</text>
+  <text x="82" y="716" font-size="11" fill="#3E5A87">节点定义在 agents/nodes.py（见图 2）</text>
+
+  <rect x="442" y="646" width="358" height="76" rx="8" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="456" y="667" font-size="12.5" font-weight="700" fill="#442A75">agent_run.py — 对话调整</text>
+  <text x="456" y="685" font-size="11" fill="#5C3F92">ReAct 循环，LLM 调用日程工具</text>
+  <text x="456" y="701" font-size="11" fill="#5C3F92">改动落在日程副本上，结束后求 diff</text>
+  <text x="456" y="716" font-size="11" fill="#5C3F92">按影响面分级提交或转为提案（见图 3）</text>
+
+  <rect x="816" y="646" width="358" height="76" rx="8" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="830" y="667" font-size="12.5" font-weight="700" fill="#442A75">email_triage.py · user_mcp.py</text>
+  <text x="830" y="685" font-size="11" fill="#5C3F92">邮件分类与总结，输出结构化报告</text>
+  <text x="830" y="701" font-size="11" fill="#5C3F92">按工具名筛出邮件类工具</text>
+  <text x="830" y="716" font-size="11" fill="#5C3F92">用户配置的 MCP server 工具在此接入</text>
+
+  <!-- agents layer -->
+  <rect x="52" y="746" width="1142" height="134" rx="8" fill="#F7FAFF" stroke="#CFDDF5"/>
+  <text x="68" y="768" font-size="12.5" font-weight="700" fill="#17325E">agents/ 逻辑 + memory/ 记忆</text>
+
+  <g>
+    <rect x="68" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="80" y="797" font-size="11.5" font-weight="700" fill="#17325E">health_agent</text>
+    <text x="80" y="813" font-size="10.5" fill="#3E5A87">由睡眠数据算 24 小时能量曲线</text>
+
+    <rect x="292" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="304" y="797" font-size="11.5" font-weight="700" fill="#17325E">task_agent</text>
+    <text x="304" y="813" font-size="10.5" fill="#3E5A87">排序 + 拆解成子任务</text>
+
+    <rect x="516" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="528" y="797" font-size="11.5" font-weight="700" fill="#17325E">scheduler_agent</text>
+    <text x="528" y="813" font-size="10.5" fill="#3E5A87">按能量匹配排程，同任务阶段保序</text>
+
+    <rect x="740" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="752" y="797" font-size="11.5" font-weight="700" fill="#17325E">multiday_planner</text>
+    <text x="752" y="813" font-size="10.5" fill="#3E5A87">多天摊分 + 未完成结转</text>
+
+    <rect x="964" y="780" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="976" y="797" font-size="11.5" font-weight="700" fill="#17325E">project_service</text>
+    <text x="976" y="813" font-size="10.5" fill="#3E5A87">项目 · 进度 · 重新同步</text>
+
+    <rect x="68" y="832" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="80" y="849" font-size="11.5" font-weight="700" fill="#17325E">calendar / reminder_reconcile</text>
+    <text x="80" y="865" font-size="10.5" fill="#3E5A87">算出事件与提醒变更集</text>
+
+    <rect x="292" y="832" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="304" y="849" font-size="11.5" font-weight="700" fill="#17325E">plan_import_agent</text>
+    <text x="304" y="865" font-size="10.5" fill="#3E5A87">文档 · 图片 → 计划节点</text>
+
+    <rect x="516" y="832" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="528" y="849" font-size="11.5" font-weight="700" fill="#17325E">project_chat</text>
+    <text x="528" y="865" font-size="10.5" fill="#3E5A87">项目多轮对话，改计划 + 报进度</text>
+
+    <rect x="740" y="832" width="214" height="44" rx="7" fill="#E6DBFF" stroke="#C3ABF0"/>
+    <text x="752" y="849" font-size="11.5" font-weight="700" fill="#442A75">scratch</text>
+    <text x="752" y="865" font-size="10.5" fill="#5C3F92">日程副本 + classify_impact 分级</text>
+
+    <rect x="964" y="832" width="214" height="44" rx="7" fill="#DFEAFE" stroke="#A8C3EE"/>
+    <text x="976" y="849" font-size="11.5" font-weight="700" fill="#17325E">memory/</text>
+    <text x="976" y="865" font-size="10.5" fill="#3E5A87">观察 → 记忆 → 注入 prompt</text>
+  </g>
+
+  <!-- arrows band3 <-> band4 -->
+  <line x1="400" y1="894" x2="400" y2="946" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="414" y="920" font-size="11.5" font-weight="600" fill="#4A5560">读写 JSON 快照</text>
+
+  <line x1="960" y1="894" x2="960" y2="946" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="974" y="920" font-size="11.5" font-weight="600" fill="#4A5560">LLM 调用 · MCP 工具</text>
+
+  <!-- ══ Band 4: 存储 + 外部 ══ -->
+  <rect x="40" y="950" width="740" height="128" rx="10" fill="#EFF8F3" stroke="#B8DCC8"/>
+  <text x="56" y="974" font-size="14" font-weight="700" fill="#14512F">本地存储 · data/*.json</text>
+  <g font-size="11" fill="#1E5C3A" text-anchor="middle">
+    <rect x="56" y="986" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="141" y="1005">task_store</text>
+    <rect x="236" y="986" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="321" y="1005">schedule_store</text>
+    <rect x="416" y="986" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="501" y="1005">project_store</text>
+    <rect x="596" y="986" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="681" y="1005">project_task_store</text>
+    <rect x="56" y="1022" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="141" y="1041">completion_store</text>
+    <rect x="236" y="1022" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="321" y="1041">multiday_plan_store</text>
+    <rect x="416" y="1022" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="501" y="1041">memory_store</text>
+    <rect x="596" y="1022" width="170" height="30" rx="6" fill="#DCF0E4" stroke="#9FCFB4"/><text x="681" y="1041">subtask_cache</text>
+  </g>
+  <text x="56" y="1068" font-size="10.5" fill="#3C6B52">另有 calendar_snapshot · project_plan · project_chat · preferences · agent_run_log 等，共 20 个状态容器</text>
+
+  <rect x="800" y="950" width="400" height="128" rx="10" fill="#F6F4FF" stroke="#D2C7F0"/>
+  <text x="816" y="974" font-size="14" font-weight="700" fill="#442A75">外部服务</text>
+  <rect x="816" y="986" width="368" height="42" rx="7" fill="#E8E0FC" stroke="#BFA9EE"/>
+  <text x="830" y="1003" font-size="12" font-weight="700" fill="#442A75">Anthropic Claude</text>
+  <text x="830" y="1020" font-size="10.5" fill="#5C3F92">sonnet 推理/对话/拆解 · haiku 分类与翻译</text>
+  <rect x="816" y="1034" width="368" height="42" rx="7" fill="#E8E0FC" stroke="#BFA9EE"/>
+  <text x="830" y="1051" font-size="12" font-weight="700" fill="#442A75">用户自带 MCP server</text>
+  <text x="830" y="1068" font-size="10.5" fill="#5C3F92">把邮件、笔记等外部工具接进聊天 agent</text>
+
+  <!-- footer -->
+  <rect x="40" y="1096" width="1160" height="40" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="56" y="1121" font-size="11.5" fill="#3C4753"><tspan font-weight="700">块身份　block_key = {task_id}::{title}</tspan>　　前端、钉住、完成记录、日历与提醒标识都用它对齐；subtask_cache 负责让它在重新生成后保持稳定</text>
+</svg>

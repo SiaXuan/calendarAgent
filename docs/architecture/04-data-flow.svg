@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"
+     font-family="-apple-system, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A8494"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="800" fill="#FFFFFF"/>
+
+  <text x="40" y="42" font-size="21" font-weight="700" fill="#111A22">数据链路 · 从一份课程大纲到日历上的一个时间块</text>
+  <text x="40" y="66" font-size="12.5" fill="#6B7683">左边是跨周跨月的项目线，右边是当天才产生的输入，两条在每日排程处汇合。</text>
+
+  <!-- ═══ 项目线 ═══ -->
+  <rect x="40" y="92" width="700" height="482" rx="10" fill="#F0F5FF" stroke="#C4D6F5"/>
+  <text x="56" y="116" font-size="14" font-weight="700" fill="#17325E">项目线</text>
+
+  <rect x="56" y="130" width="310" height="76" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="70" y="152" font-size="12.5" font-weight="700" fill="#17325E">① 导入材料</text>
+  <text x="70" y="171" font-size="11" fill="#3E5A87">课程大纲 / PRD / 截图 / 一句话</text>
+  <text x="70" y="187" font-size="11" fill="#3E5A87">pdf 用 layout 模式抽表格，图片走 Claude 视觉</text>
+  <text x="70" y="200" font-size="10" fill="#5A7BB0">integrations/document_parser · plan_import_agent</text>
+
+  <line x1="366" y1="168" x2="408" y2="168" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="412" y="130" width="312" height="76" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="426" y="152" font-size="12.5" font-weight="700" fill="#17325E">② Project + Task[]</text>
+  <text x="426" y="171" font-size="11" fill="#3E5A87">粗节点，保留大纲原始日期，不做子步骤拆解</text>
+  <text x="426" y="187" font-size="11" fill="#3E5A87">存 project_task_store</text>
+  <text x="426" y="200" font-size="10" fill="#5A7BB0">项目任务与每日调度池 task_store 分开存放</text>
+
+  <path d="M568,206 L568,226 L200,226 L200,246" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="56" y="246" width="310" height="84" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="70" y="268" font-size="12.5" font-weight="700" fill="#17325E">③ 项目页复核 · 对话修改</text>
+  <text x="70" y="287" font-size="11" fill="#3E5A87">左边多轮对话，右边计划节点</text>
+  <text x="70" y="303" font-size="11" fill="#3E5A87">同名任务改动保留 id，进度与提醒随之对齐</text>
+  <text x="70" y="322" font-size="10" fill="#5A7BB0">project_chat · project_chat_store（全历史落盘）</text>
+
+  <line x1="366" y1="288" x2="408" y2="288" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="412" y="246" width="312" height="84" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="426" y="268" font-size="12.5" font-weight="700" fill="#6B3E13">④ 写入日历 → 提醒变更集</text>
+  <text x="426" y="287" font-size="11" fill="#7C5734">未来节点写成带到期日的提醒，不占时间块</text>
+  <text x="426" y="303" font-size="11" fill="#7C5734">每个项目一个提醒列表，用项目颜色</text>
+  <text x="426" y="322" font-size="10" fill="#8A6B3C">reminder_reconcile 出清单，前端用 EventKit 应用</text>
+
+  <path d="M568,330 L568,350 L200,350 L200,370" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="56" y="370" width="310" height="88" rx="8" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="70" y="392" font-size="12.5" font-weight="700" fill="#442A75">⑤ 多天规划（每日生成前增量运行）</text>
+  <text x="70" y="411" font-size="11" fill="#5C3F92">为 deadline 在 5 天窗口内、尚未排过的节点规划</text>
+  <text x="70" y="427" font-size="11" fill="#5C3F92">LLM 读原文定出阶段步骤，每步 30–120 分钟</text>
+  <text x="70" y="443" font-size="11" fill="#5C3F92">按每天实际空档扣容量，另有贪心兜底</text>
+  <text x="70" y="456" font-size="10" fill="#7A63B8">→ PlannedChunk[]（带日期），存 multiday_plan_store</text>
+
+  <line x1="366" y1="414" x2="408" y2="414" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="412" y="370" width="312" height="88" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="426" y="392" font-size="12.5" font-weight="700" fill="#17325E">⑥ 结转</text>
+  <text x="426" y="411" font-size="11" fill="#3E5A87">规划底稿不变，完成记录作为叠加层</text>
+  <text x="426" y="427" font-size="11" fill="#3E5A87">日期 ≤ 今天且未完成的分片浮到今天</text>
+  <text x="426" y="443" font-size="11" fill="#3E5A87">标题不变，前端显示为「继续：…」</text>
+  <text x="426" y="456" font-size="10" fill="#5A7BB0">勾选完成后停止结转</text>
+
+  <rect x="56" y="474" width="668" height="84" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="70" y="496" font-size="12" font-weight="700" fill="#2B3440">调度窗口 SCHEDULE_HORIZON_DAYS = 5</text>
+  <text x="70" y="516" font-size="11" fill="#5A6673">只有 deadline 落在今天起 5 天内的任务进入排程；过期的和没有日期的普通提醒也进。</text>
+  <text x="70" y="533" font-size="11" fill="#5A6673">更远的 deadline 留在提醒里，等它滚进窗口，再由多天规划把工作量摊到 deadline 之前的几天。</text>
+  <text x="70" y="550" font-size="11" fill="#5A6673">窗口逻辑在 nodes._within_horizon 与 project_service._in_window_project_nodes。</text>
+
+  <!-- ═══ 今天线 ═══ -->
+  <rect x="760" y="92" width="400" height="482" rx="10" fill="#F4F5F7" stroke="#D6DAE0"/>
+  <text x="776" y="116" font-size="14" font-weight="700" fill="#3C4753">当天输入</text>
+
+  <rect x="776" y="130" width="368" height="76" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="790" y="152" font-size="12.5" font-weight="700" fill="#2B3440">系统「提醒」App 里的待办</text>
+  <text x="790" y="171" font-size="11" fill="#5A6673">同步进 task_store，按关键词 + haiku 两段式</text>
+  <text x="790" y="187" font-size="11" fill="#5A6673">分类认知负荷；标题为默认名时取备注首行</text>
+  <text x="790" y="200" font-size="10" fill="#7A8494">POST /tasks/sync/reminders</text>
+
+  <rect x="776" y="220" width="368" height="66" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="790" y="242" font-size="12.5" font-weight="700" fill="#2B3440">临时加的任务</text>
+  <text x="790" y="261" font-size="11" fill="#5A6673">手输，或从邮件 triage 抽出的会议 / 面试</text>
+  <text x="790" y="277" font-size="10" fill="#7A8494">POST /tasks · add_to_schedule 工具</text>
+
+  <rect x="776" y="300" width="368" height="76" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="790" y="322" font-size="12.5" font-weight="700" fill="#2B3440">当天的固定事件</text>
+  <text x="790" y="341" font-size="11" fill="#5A6673">前端用 EventKit 读本地日历并上传</text>
+  <text x="790" y="357" font-size="11" fill="#5A6673">排除订阅日历、生日日历与全天事件</text>
+  <text x="790" y="370" font-size="10" fill="#7A8494">→ 固定块 + 空档 + 未来 30 天容量</text>
+
+  <rect x="776" y="390" width="368" height="76" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="790" y="412" font-size="12.5" font-weight="700" fill="#14512F">健康数据 → 能量曲线</text>
+  <text x="790" y="431" font-size="11" fill="#2E6647">手动输入睡眠时段，或经 HealthAdapter 接入</text>
+  <text x="790" y="447" font-size="11" fill="#2E6647">Apple Health / Oura / WHOOP 等数据源</text>
+  <text x="790" y="460" font-size="10" fill="#3C6B52">无数据时 energy_source=none，排程按能量中性处理</text>
+
+  <rect x="776" y="480" width="368" height="78" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="790" y="502" font-size="12" font-weight="700" fill="#2B3440">block_key = {task_id}::{title}</text>
+  <text x="790" y="521" font-size="11" fill="#5A6673">块的逻辑身份，跨前端、钉住、完成记录与日历</text>
+  <text x="790" y="538" font-size="11" fill="#5A6673">标识对齐。任务内容未变时复用上次的拆解结果，</text>
+  <text x="790" y="551" font-size="11" fill="#5A6673">标题与 key 保持稳定。</text>
+
+  <!-- 汇合 -->
+  <path d="M390,558 L390,596 L600,596 L600,616" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <path d="M960,558 L960,596 L600,596 L600,616" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="300" y="616" width="600" height="56" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="600" y="639" font-size="13.5" font-weight="700" fill="#17325E" text-anchor="middle">每日排程 DAG → Subtask[] → TimeBlock[] → DaySchedule</text>
+  <text x="600" y="659" font-size="11" fill="#3E5A87" text-anchor="middle">高认知负荷的排在能量高峰，放不下的进 unscheduled（见图 2）</text>
+
+  <rect x="40" y="698" width="360" height="66" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="56" y="720" font-size="12.5" font-weight="700" fill="#6B3E13">写进系统日历</text>
+  <text x="56" y="739" font-size="11" fill="#7C5734">后端算出变更集，前端用 EventKit 先删后建</text>
+  <text x="56" y="755" font-size="11" fill="#7C5734">已完成的块跳过，已同步的块改动会跟着更新</text>
+
+  <rect x="420" y="698" width="360" height="66" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="436" y="720" font-size="12.5" font-weight="700" fill="#14512F">侧栏勾选完成</text>
+  <text x="436" y="739" font-size="11" fill="#2E6647">写 CompletionRecord（completion_store）</text>
+  <text x="436" y="755" font-size="11" fill="#2E6647">按 block_key 记录块是否实际完成</text>
+
+  <rect x="800" y="698" width="360" height="66" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="816" y="720" font-size="12.5" font-weight="700" fill="#14512F">复盘热力图 · 项目进度</text>
+  <text x="816" y="739" font-size="11" fill="#2E6647">按天统计完成数，供热力图与连续天数</text>
+  <text x="816" y="755" font-size="11" fill="#2E6647">项目进度按节点完成比例聚合</text>
+
+  <path d="M600,672 L600,684 L220,684 L220,698" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M400,731 L420,731" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M780,731 L800,731" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+</svg>

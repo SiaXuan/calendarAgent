@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"
+     font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7A8494"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="800" fill="#FFFFFF"/>
+
+  <text x="40" y="42" font-size="21" font-weight="700" fill="#111A22">Data flow · from a course outline to a block on the calendar</text>
+  <text x="40" y="66" font-size="12.5" fill="#6B7683">The project track on the left spans weeks; the day's own inputs are on the right. They meet at daily scheduling.</text>
+
+  <!-- ═══ project track ═══ -->
+  <rect x="40" y="92" width="700" height="482" rx="10" fill="#F0F5FF" stroke="#C4D6F5"/>
+  <text x="56" y="116" font-size="14" font-weight="700" fill="#17325E">Project track</text>
+
+  <rect x="56" y="130" width="310" height="76" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="70" y="152" font-size="12.5" font-weight="700" fill="#17325E">1 · Import the material</text>
+  <text x="70" y="171" font-size="11" fill="#3E5A87">A syllabus, a PRD, a screenshot, a sentence.</text>
+  <text x="70" y="187" font-size="11" fill="#3E5A87">PDFs use layout mode; images go to Claude vision.</text>
+  <text x="70" y="200" font-size="10" fill="#5A7BB0">integrations/document_parser · plan_import_agent</text>
+
+  <line x1="366" y1="168" x2="408" y2="168" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="412" y="130" width="312" height="76" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="426" y="152" font-size="12.5" font-weight="700" fill="#17325E">2 · Project + Task[]</text>
+  <text x="426" y="171" font-size="11" fill="#3E5A87">Coarse nodes keeping the outline's own dates;</text>
+  <text x="426" y="187" font-size="11" fill="#3E5A87">no sub-step breakdown yet. Held in project_task_store.</text>
+  <text x="426" y="200" font-size="10" fill="#5A7BB0">Project tasks live apart from the daily pool, task_store.</text>
+
+  <path d="M568,206 L568,226 L200,226 L200,246" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="56" y="246" width="310" height="84" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="70" y="268" font-size="12.5" font-weight="700" fill="#17325E">3 · Review and edit by chat</text>
+  <text x="70" y="287" font-size="11" fill="#3E5A87">A thread on the left, plan nodes on the right.</text>
+  <text x="70" y="303" font-size="11" fill="#3E5A87">Edited tasks keep their ids, so progress and</text>
+  <text x="70" y="319" font-size="11" fill="#3E5A87">reminders stay attached.</text>
+
+  <line x1="366" y1="288" x2="408" y2="288" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="412" y="246" width="312" height="84" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="426" y="268" font-size="12.5" font-weight="700" fill="#6B3E13">4 · Write to calendar → reminder change-set</text>
+  <text x="426" y="287" font-size="11" fill="#7C5734">Future nodes become reminders with due dates,</text>
+  <text x="426" y="303" font-size="11" fill="#7C5734">not time blocks. One reminder list per project,</text>
+  <text x="426" y="319" font-size="11" fill="#7C5734">tinted with the project color.</text>
+
+  <path d="M568,330 L568,350 L200,350 L200,370" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="56" y="370" width="310" height="88" rx="8" fill="#EDE4FF" stroke="#C3ABF0"/>
+  <text x="70" y="392" font-size="12.5" font-weight="700" fill="#442A75">5 · Multi-day planning</text>
+  <text x="70" y="411" font-size="11" fill="#5C3F92">Runs incrementally before each daily generation,</text>
+  <text x="70" y="427" font-size="11" fill="#5C3F92">for nodes now inside the 5-day window. The model</text>
+  <text x="70" y="443" font-size="11" fill="#5C3F92">reads the source and names each 30–120 min step,</text>
+  <text x="70" y="456" font-size="10" fill="#7A63B8">within each day's real free capacity → PlannedChunk[]</text>
+
+  <line x1="366" y1="414" x2="408" y2="414" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="412" y="370" width="312" height="88" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="426" y="392" font-size="12.5" font-weight="700" fill="#17325E">6 · Carryover</text>
+  <text x="426" y="411" font-size="11" fill="#3E5A87">The plan itself is never rewritten; completion</text>
+  <text x="426" y="427" font-size="11" fill="#3E5A87">records act as an overlay. Chunks dated on or</text>
+  <text x="426" y="443" font-size="11" fill="#3E5A87">before today and still open float to today, titles</text>
+  <text x="426" y="456" font-size="10" fill="#5A7BB0">unchanged, shown as "continue: …". Checking it off stops the carry.</text>
+
+  <rect x="56" y="474" width="668" height="84" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="70" y="496" font-size="12" font-weight="700" fill="#2B3440">Scheduling horizon · SCHEDULE_HORIZON_DAYS = 5</text>
+  <text x="70" y="516" font-size="11" fill="#5A6673">Only work whose deadline falls within five days enters scheduling; overdue and undated reminders always do.</text>
+  <text x="70" y="533" font-size="11" fill="#5A6673">A deadline further out waits in Reminders until it rolls into the window, and the multi-day planner then spreads</text>
+  <text x="70" y="550" font-size="11" fill="#5A6673">the work over the days leading up to it. See nodes._within_horizon and project_service._in_window_project_nodes.</text>
+
+  <!-- ═══ today's inputs ═══ -->
+  <rect x="760" y="92" width="400" height="482" rx="10" fill="#F4F5F7" stroke="#D6DAE0"/>
+  <text x="776" y="116" font-size="14" font-weight="700" fill="#3C4753">The day's inputs</text>
+
+  <rect x="776" y="130" width="368" height="76" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="790" y="152" font-size="12.5" font-weight="700" fill="#2B3440">Reminders.app to-dos</text>
+  <text x="790" y="171" font-size="11" fill="#5A6673">Synced into task_store, then labelled for cognitive</text>
+  <text x="790" y="187" font-size="11" fill="#5A6673">load by keywords first and haiku for the rest.</text>
+  <text x="790" y="200" font-size="10" fill="#7A8494">POST /tasks/sync/reminders</text>
+
+  <rect x="776" y="220" width="368" height="66" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="790" y="242" font-size="12.5" font-weight="700" fill="#2B3440">Ad-hoc tasks</text>
+  <text x="790" y="261" font-size="11" fill="#5A6673">Typed in, or extracted from email triage</text>
+  <text x="790" y="277" font-size="10" fill="#7A8494">POST /tasks · the add_to_schedule tool</text>
+
+  <rect x="776" y="300" width="368" height="76" rx="8" fill="#E7EAEE" stroke="#C2C8D0"/>
+  <text x="790" y="322" font-size="12.5" font-weight="700" fill="#2B3440">Today's fixed events</text>
+  <text x="790" y="341" font-size="11" fill="#5A6673">Read from the local calendar via EventKit and</text>
+  <text x="790" y="357" font-size="11" fill="#5A6673">uploaded, minus subscription, birthday and all-day.</text>
+  <text x="790" y="370" font-size="10" fill="#7A8494">→ fixed blocks + free windows + 30-day capacity</text>
+
+  <rect x="776" y="390" width="368" height="76" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="790" y="412" font-size="12.5" font-weight="700" fill="#14512F">Health data → energy curve</text>
+  <text x="790" y="431" font-size="11" fill="#2E6647">A sleep window entered by hand, or pulled through</text>
+  <text x="790" y="447" font-size="11" fill="#2E6647">HealthAdapter from Apple Health / Oura / WHOOP.</text>
+  <text x="790" y="460" font-size="10" fill="#3C6B52">With no data, energy_source=none and placement stays energy-neutral.</text>
+
+  <rect x="776" y="480" width="368" height="78" rx="8" fill="#FAFBFC" stroke="#E2E6EB"/>
+  <text x="790" y="502" font-size="12" font-weight="700" fill="#2B3440">block_key = {task_id}::{title}</text>
+  <text x="790" y="521" font-size="11" fill="#5A6673">A block's logical identity, shared by the client, pins,</text>
+  <text x="790" y="538" font-size="11" fill="#5A6673">completion records and calendar tags. Unchanged tasks</text>
+  <text x="790" y="551" font-size="11" fill="#5A6673">reuse their breakdown, so titles and keys hold still.</text>
+
+  <!-- converge -->
+  <path d="M390,558 L390,596 L600,596 L600,616" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+  <path d="M960,558 L960,596 L600,596 L600,616" fill="none" stroke="#7A8494" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="300" y="616" width="600" height="56" rx="8" fill="#DFEAFE" stroke="#A8C3EE"/>
+  <text x="600" y="639" font-size="13.5" font-weight="700" fill="#17325E" text-anchor="middle">Daily DAG → Subtask[] → TimeBlock[] → DaySchedule</text>
+  <text x="600" y="659" font-size="11" fill="#3E5A87" text-anchor="middle">Heavy work lands on energy peaks; what doesn't fit goes to unscheduled (fig. 2)</text>
+
+  <rect x="40" y="698" width="360" height="66" rx="8" fill="#FFE8D4" stroke="#E8B98C"/>
+  <text x="56" y="720" font-size="12.5" font-weight="700" fill="#6B3E13">Written to the system calendar</text>
+  <text x="56" y="739" font-size="11" fill="#7C5734">The backend computes the change-set; the client</text>
+  <text x="56" y="755" font-size="11" fill="#7C5734">applies it, deleting before creating.</text>
+
+  <rect x="420" y="698" width="360" height="66" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="436" y="720" font-size="12.5" font-weight="700" fill="#14512F">Checked off in the sidebar</text>
+  <text x="436" y="739" font-size="11" fill="#2E6647">Writes a CompletionRecord to completion_store,</text>
+  <text x="436" y="755" font-size="11" fill="#2E6647">keyed by block_key.</text>
+
+  <rect x="800" y="698" width="360" height="66" rx="8" fill="#DCF0E4" stroke="#9FCFB4"/>
+  <text x="816" y="720" font-size="12.5" font-weight="700" fill="#14512F">Heatmap and project progress</text>
+  <text x="816" y="739" font-size="11" fill="#2E6647">Daily counts feed the heatmap and streak;</text>
+  <text x="816" y="755" font-size="11" fill="#2E6647">project progress aggregates node completion.</text>
+
+  <path d="M600,672 L600,684 L220,684 L220,698" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M400,731 L420,731" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+  <path d="M780,731 L800,731" fill="none" stroke="#7A8494" stroke-width="1.4" marker-end="url(#ah)"/>
+</svg>

@@ -52,8 +52,52 @@ you say so.
 
 > Built with FastAPI + LangGraph (Claude via LangChain) + a native SwiftUI macOS
 > client. The backend is pure logic; the Swift client owns all Calendar/Reminders
-> I/O via EventKit (no iCloud/CalDAV). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-> for how it works and [docs/ROADMAP.md](docs/ROADMAP.md) for where it's going.
+> I/O via EventKit (no iCloud/CalDAV). The diagrams below cover how it fits
+> together.
+
+## Architecture
+
+Four layers: the macOS apps that hold your Calendar and Reminders, a native Swift
+client that reads and writes them through EventKit, a Python backend that holds
+the logic, and local JSON storage. What crosses between client and backend is a
+change-set — `{create, update, delete}` — which the client applies.
+
+![System overview](docs/architecture/en/01-system-overview.svg)
+
+<details>
+<summary><b>Daily schedule generation — the LangGraph DAG</b></summary>
+
+Eight nodes with fixed edges. Health resolves first so the SSE stream can push a
+card right away; calendar reading and task breakdown run in parallel, then
+converge into placement and assembly.
+
+![Daily generation DAG](docs/architecture/en/02-schedule-dag.svg)
+
+</details>
+
+<details>
+<summary><b>Conversational adjustment — the ReAct agent</b></summary>
+
+The model calls schedule tools to edit the day. Edits land on a copy of the
+schedule; the resulting diff is classified by impact — minor commits directly,
+major becomes a proposal awaiting your confirmation.
+
+![ReAct agent](docs/architecture/en/03-chat-agent.svg)
+
+</details>
+
+<details>
+<summary><b>Data flow — from a course outline to a block on the calendar</b></summary>
+
+The project track spans weeks, the day's own inputs arrive on the right, and the
+two meet at daily scheduling. From there the day is written back to the calendar,
+and what you actually finish is recorded for review.
+
+![Data flow](docs/architecture/en/04-data-flow.svg)
+
+</details>
+
+All four on one page: [docs/architecture/index.en.html](docs/architecture/index.en.html).
 
 ## Daily startup
 
@@ -143,8 +187,7 @@ python3.13 -m venv .venv
 cp .env.example .env
 # Edit .env: ANTHROPIC_API_KEY is the only required value.
 # CALDAV_* is legacy — Phase 4 moved calendar/reminder I/O to local EventKit in
-# the Swift client (see docs/ARCHITECTURE.md §0); leave it unset unless you run
-# the older CalDAV path.
+# the Swift client; leave it unset unless you run the older CalDAV path.
 
 # Web frontend is shelved (see "Web frontend" below) — no install needed.
 ```
@@ -212,8 +255,8 @@ xfail flag) / `error`. Known bad cases (e.g. "one-off errand over-decomposed", s
 Current: **Phase 4 (in progress)** — pure-local pivot: the Swift client owns all
 Calendar/Reminders I/O via EventKit, the backend is pure logic returning
 create/update/delete change-sets (no iCloud/CalDAV). Project layer + multi-day
-planning + daily carryover. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §0
-(most current) and [docs/ROADMAP.md](docs/ROADMAP.md) for the global roadmap.
+planning + daily carryover are in place. Still open: re-import reconcile, the
+review/heatmap polish, and a distributable signed `.app`.
 
 ## Optional LangSmith tracing
 

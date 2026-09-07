@@ -82,5 +82,6 @@ tests/eval/decomp_last_run.json
 # 个人梳理笔记（不纳入版本控制）
 notes/
 
-# 内部文档（不公开）
-docs/
+# 内部文档（不公开）。例外：架构图要在 README 里显示，必须进版本控制
+docs/*
+!docs/architecture/
