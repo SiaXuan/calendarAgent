@@ -93,3 +93,60 @@ def test_chat_revises_plan_and_preserves_ids(clean_stores, monkeypatch):
     # snapshot rebuilt → 计划节点 reflects the revision
     plan = client.get(f"/projects/{pid}/plan").json()
     assert {i["title"] for i in plan["items"]} == {"作业1", "作业1 复盘"}
+
+
+def test_chat_revision_preserves_id_through_restyled_title(clean_stores, monkeypatch):
+    """
+    The chat used to match on exact title, so restyling a heading read as
+    "old node deleted, new node added" — orphaning its completion record and
+    resetting the reminder. Both paths now share plan_reconcile's normalisation.
+    """
+    pid = _project_with_task()
+    from models.project import CompletionRecord, CompletionStatus
+    storage.completion_store["t1::作业1"] = CompletionRecord(
+        block_key="t1::作业1", project_id=pid, task_id="t1", title="作业1",
+        status=CompletionStatus.done)
+
+    monkeypatch.setattr(project_chat, "converse", AsyncMock(return_value=PlanChatResult(
+        reply="改个名。", tasks=[CandidateTask(title="1. 作业1", estimated_hours=4)])))
+    r = client.post(f"/projects/{pid}/chat", data={"message": "给作业1 加个序号"})
+    assert r.status_code == 200 and r.json()["plan_changed"] is True
+
+    tasks = [t for t in storage.project_task_store.values() if t.project_id == pid]
+    assert len(tasks) == 1 and tasks[0].id == "t1" and tasks[0].title == "1. 作业1"
+    # the done flag followed the rename instead of being stranded
+    assert "t1::作业1" not in storage.completion_store
+    assert storage.completion_store["t1::1. 作业1"].status == "done"
+
+
+def test_chat_revision_keeps_finished_task_it_stops_mentioning(clean_stores, monkeypatch):
+    """A revision that omits already-done work shouldn't erase the record of it."""
+    pid = _project_with_task()
+    from models.project import CompletionRecord, CompletionStatus
+    storage.completion_store["t1::作业1"] = CompletionRecord(
+        block_key="t1::作业1", project_id=pid, task_id="t1", title="作业1",
+        status=CompletionStatus.done)
+
+    monkeypatch.setattr(project_chat, "converse", AsyncMock(return_value=PlanChatResult(
+        reply="换成新任务。", tasks=[CandidateTask(title="作业2", estimated_hours=2)])))
+    client.post(f"/projects/{pid}/chat", data={"message": "改成做作业2"})
+
+    titles = {t.title for t in storage.project_task_store.values() if t.project_id == pid}
+    assert titles == {"作业1", "作业2"}
+    assert storage.completion_store["t1::作业1"].status == "done"
+
+
+def test_chat_revision_forgets_completions_of_dropped_pending_task(clean_stores, monkeypatch):
+    """A dropped node that was never finished takes its leftovers with it."""
+    pid = _project_with_task()
+    from models.project import CompletionRecord, CompletionStatus
+    storage.completion_store["t1::作业1"] = CompletionRecord(
+        block_key="t1::作业1", project_id=pid, task_id="t1", title="作业1",
+        status=CompletionStatus.skipped)
+
+    monkeypatch.setattr(project_chat, "converse", AsyncMock(return_value=PlanChatResult(
+        reply="换掉。", tasks=[CandidateTask(title="作业2", estimated_hours=2)])))
+    client.post(f"/projects/{pid}/chat", data={"message": "改成做作业2"})
+
+    assert "t1" not in storage.project_task_store
+    assert "t1::作业1" not in storage.completion_store

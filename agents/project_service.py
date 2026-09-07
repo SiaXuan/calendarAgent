@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 
 from agents import calendar_writeback as cw
 from agents import plan_import_agent
+from agents import plan_reconcile
 from agents import task_agent
 from api.preferences import get_current_prefs
 from integrations import document_parser
@@ -270,16 +271,26 @@ def _plan_context(project_id: str) -> str:
 
 
 def _apply_task_revision(project_id: str, candidates) -> None:
-    """Replace the project's tasks with the chat's revised set, preserving a
-    task's id when its title is unchanged (so completion/reminders survive), then
-    rebuild the plan snapshot."""
+    """Replace the project's tasks with the chat's revised set, preserving ids so
+    completion/reminders survive, then rebuild the plan snapshot.
+
+    Shares `plan_reconcile.match_candidates` with the re-import path — the chat
+    ("drop week 3") and a revised document are the same operation described two
+    ways, and they used to disagree: this matched on exact title only, so a chat
+    that restyled a heading silently orphaned its completion record and dropped
+    finished work off the plan.
+    """
     proj = project_store[project_id]
-    existing = {t.title: t for t in project_tasks(project_id)}
+    existing = project_tasks(project_id)
+    pairing, diff = plan_reconcile.match_candidates(existing, candidates)
+    plan_reconcile.migrate_completion_keys(diff.completion_migrations)
+
     kept: dict[str, Task] = {}
-    for c in candidates:
+    for i, c in enumerate(candidates):
         deadline = c.explicit_deadline or c.explicit_date
-        if c.title in existing:
-            t = existing[c.title]
+        t = pairing.get(i)
+        if t is not None:
+            t.title = c.title
             if c.description is not None:
                 t.description = c.description
             if c.estimated_hours:
@@ -292,7 +303,6 @@ def _apply_task_revision(project_id: str, candidates) -> None:
                 t.cognitive_load = c.cognitive_load
             if c.source_excerpt:
                 t.source_excerpt = c.source_excerpt
-            kept[t.id] = t
         else:
             t = Task(
                 id=str(uuid.uuid4()), title=c.title, description=c.description,
@@ -300,9 +310,16 @@ def _apply_task_revision(project_id: str, candidates) -> None:
                 cognitive_load=c.cognitive_load or CognitiveLoad.medium,
                 estimated_hours=c.estimated_hours or 1.0, deadline=deadline,
                 source="chat", project_id=project_id, source_excerpt=c.source_excerpt)
-            kept[t.id] = t
+        kept[t.id] = t
+    # Already-finished nodes stay even when the revision stops mentioning them.
+    for k in diff.kept_done:
+        done_task = project_task_store.get(k["task_id"])
+        if done_task is not None:
+            kept[done_task.id] = done_task
+
     for t in list(project_task_store.values()):
         if t.project_id == project_id and t.id not in kept:
+            _forget_task_completions(t.id)
             del project_task_store[t.id]
     for t in kept.values():
         project_task_store[t.id] = t
@@ -312,6 +329,19 @@ def _apply_task_revision(project_id: str, candidates) -> None:
     save_project_store()
     project_plan_store.pop(project_id, None)   # rebuilt below from the new tasks
     get_or_build_plan(project_id)
+
+
+def _forget_task_completions(task_id: str) -> None:
+    """Drop a deleted task's completion records so they don't linger forever.
+
+    Only ever reached for nodes that weren't done (done ones are kept, not
+    deleted), so this discards skipped/pending leftovers — until now nothing but
+    `delete_project` ever cleaned these up."""
+    stale = [k for k, r in completion_store.items() if r.task_id == task_id]
+    for k in stale:
+        del completion_store[k]
+    if stale:
+        save_completion_store()
 
 
 async def chat_about_plan(
@@ -410,6 +440,29 @@ async def decompose_project(project_id: str) -> list[Subtask]:
     return subs
 
 
+def pairing_ids(pairing: dict) -> set[str]:
+    """Ids of the existing tasks this import is reusing."""
+    return {t.id for t in pairing.values()}
+
+
+def _task_from_candidate(c, project_id: str, *, reuse: Task | None) -> Task:
+    """Build the Task for one candidate, keeping `reuse`'s id when the node
+    already exists so its block_key — and with it completion, reminders, and
+    multi-day chunks — survives the revision."""
+    return Task(
+        id=reuse.id if reuse else str(uuid.uuid4()),
+        title=c.title,
+        description=c.description,
+        priority=c.priority or Priority.medium,
+        cognitive_load=c.cognitive_load or CognitiveLoad.medium,
+        estimated_hours=c.estimated_hours or 1.0,
+        deadline=c.explicit_deadline or c.explicit_date,
+        source="import",
+        project_id=project_id,
+        source_excerpt=c.source_excerpt,
+    )
+
+
 async def import_plan(
     project_id: str,
     *,
@@ -436,9 +489,16 @@ async def import_plan(
     is_plan/confidence. On `dry_run` nothing is persisted and no reminders are
     produced — the caller previews the tasks and confirms before a real import.
 
+    Re-importing a revised document REVISES the project rather than duplicating
+    it: candidates are matched against the existing tasks by normalised title and
+    reuse their ids, so completion records / reminders / multi-day chunks survive
+    (see `agents/plan_reconcile.py`). Nodes the revision drops are deleted —
+    unless they're already done, which is kept. Because that's destructive, a
+    re-import's `dry_run` result carries a `reconcile` summary to confirm against.
+
     Returns {accepted, doc_kind, confidence, ...}. When accepted, includes the
-    created (or would-be-created) tasks + project_meta; a confirmed import also
-    includes the reminder change-set + affected_dates.
+    created (or would-be-created) tasks + project_meta, plus `reconcile` when
+    this import revises an existing plan.
     """
     proj = project_store[project_id]
     language = get_current_prefs().language
@@ -485,20 +545,15 @@ async def import_plan(
     from agents import plan_reschedule
     candidates = plan_reschedule.apply_adjustment(plan.candidate_tasks, plan.adjustment)
 
+    # Re-import reconcile: match candidates against what this project already has
+    # so a revised document REVISES it instead of duplicating it. On a first
+    # import `existing` is empty and every candidate simply falls through as new.
+    existing = project_tasks(project_id)
+    pairing, diff = plan_reconcile.match_candidates(existing, candidates)
+
     new_tasks = [
-        Task(
-            id=str(uuid.uuid4()),
-            title=c.title,
-            description=c.description,
-            priority=c.priority or Priority.medium,
-            cognitive_load=c.cognitive_load or CognitiveLoad.medium,
-            estimated_hours=c.estimated_hours or 1.0,
-            deadline=c.explicit_deadline or c.explicit_date,
-            source="import",
-            project_id=project_id,
-            source_excerpt=c.source_excerpt,
-        )
-        for c in candidates
+        _task_from_candidate(c, project_id, reuse=pairing.get(i))
+        for i, c in enumerate(candidates)
     ]
 
     result = {
@@ -510,15 +565,28 @@ async def import_plan(
         "project_meta": plan.project_meta.model_dump(mode="json"),
         "tasks": [t.model_dump(mode="json") for t in new_tasks],
     }
+    if not diff.is_first_import:
+        result["reconcile"] = diff.model_dump(mode="json")
     if dry_run:
         return result
+
+    # A re-import DELETES the nodes the revised document dropped, so renames must
+    # carry their completion records over first — block_key is half title, and a
+    # record left under the old key would never be looked up again.
+    plan_reconcile.migrate_completion_keys(diff.completion_migrations)
 
     # Project tasks go into the project-scoped store, NOT the global scheduling
     # task_store — they're unconfirmed plan nodes and must not be auto-scheduled
     # on the daily path.
+    kept_done_ids = {k["task_id"] for k in diff.kept_done}
+    for t in list(project_task_store.values()):
+        if t.project_id == project_id and t.id not in pairing_ids(pairing) \
+                and t.id not in kept_done_ids:
+            _forget_task_completions(t.id)
+            del project_task_store[t.id]
     for t in new_tasks:
         project_task_store[t.id] = t
-    proj.task_ids.extend(t.id for t in new_tasks)
+    proj.task_ids = [t.id for t in project_tasks(project_id)]
     proj.updated_at = datetime.now()
     save_project_task_store()
     save_project_store()
@@ -532,11 +600,20 @@ async def import_plan(
     project_plan_store[project_id] = [_snapshot_item(s, project_id) for s in coarse]
     save_project_plan_store()
 
-    titles = "、".join(t.title for t in new_tasks[:6])
-    more = "…" if len(new_tasks) > 6 else ""
-    record_chat_turn(
-        project_id, "assistant",
-        f"已整理出 {len(new_tasks)} 个计划节点：{titles}{more}。要调整就直接说。")
+    if diff.is_first_import:
+        titles = "、".join(t.title for t in new_tasks[:6])
+        more = "…" if len(new_tasks) > 6 else ""
+        note = f"已整理出 {len(new_tasks)} 个计划节点：{titles}{more}。要调整就直接说。"
+    else:
+        parts = [f"对上了 {len(diff.matched)} 个原有节点"]
+        if diff.added:
+            parts.append(f"新增 {len(diff.added)} 个")
+        if diff.removed:
+            parts.append(f"移除 {len(diff.removed)} 个")
+        if diff.kept_done:
+            parts.append(f"{len(diff.kept_done)} 个已完成的保留未动")
+        note = f"按改版文档更新了计划：{'，'.join(parts)}。"
+    record_chat_turn(project_id, "assistant", note)
     return result
 
 
