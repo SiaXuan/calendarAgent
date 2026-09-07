@@ -20,7 +20,9 @@ cp .env.example .env
 .venv/bin/uvicorn main:app --reload
 ```
 
-See [docs/deployment.md](docs/deployment.md) for the local vs cloud config split.
+`docs/deployment.md` covers the local vs cloud config split. Note: `docs/` is
+gitignored except `docs/architecture/`, so these notes exist only in a local
+working copy, not in a fresh clone.
 
 ## Key Conventions
 
@@ -47,16 +49,18 @@ The frontend uses `react-i18next` with locale files under `src/locales/{lang}.js
 
 ## Phase Status
 
-See **[docs/ROADMAP.md](docs/ROADMAP.md)** for the authoritative global roadmap and
-done/not-done status (this section is a pointer, not the source of truth).
+`docs/ROADMAP.md` (local only — `docs/` is gitignored) is the authoritative global
+roadmap and done/not-done status. This section is a pointer, not the source of truth.
 
 Two parallel tracks:
 - **Grand framework (Phases A–E):** A LangGraph migration ✅ · B multi-source
   health data (Apple Health/Oura/WHOOP) 🔭 not started · C LangMem memory 🔨 partial
-  (C.4 reflection+decay not done) · D user-attached MCP 🔭 not started · E
+  (C.4 reflection+decay not done) · D user-attached MCP 🔨 partial (adapter
+  scaffold + `custom_mcp_servers` pref landed; no real server wired) · E
   research-driven health-rules engine 🔭 not started.
 - **EventKit + project layer (the 2026-07 pure-local pivot):** Swift client owns all
   Calendar/Reminders I/O via EventKit; backend is pure logic returning
   create/update/delete change-sets (no iCloud/CalDAV). Project layer + multi-day
-  planning + daily carryover + completion tracking done; review/heatmap view, NL-reschedule
-  polish, repeat-import reconcile, and CalDAV→`legacy/` cleanup remain. See ROADMAP line B.
+  planning + daily carryover + completion tracking + review/heatmap view done;
+  undo for NL reschedules, repeat-import reconcile, and CalDAV→`legacy/` cleanup
+  remain. See ROADMAP line B.
