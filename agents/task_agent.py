@@ -55,16 +55,20 @@ CONTEXT — when a task has a "source_excerpt" (the snippet of an imported docum
 it came from), use it to understand what a terse title actually refers to and to
 break the work down faithfully; do not invent scope beyond what it implies.
 
-CRITICAL — DO NOT mark tasks as instant unless they are trivially quick (< 5 min, zero thinking):
-- is_instant=true ONLY for: pay a bill, click submit on a COMPLETED form, send a short email,
-  make a quick phone call, buy something online. These require NO preparation or thinking.
-- is_instant=false for EVERYTHING ELSE, especially:
-  * "X due" (e.g., "CV due", "ML due") = the X ASSIGNMENT is due. This requires hours of real work
-    (coding, writing, implementing). Always false, always estimate ≥ 60 min.
-  * "X test", "X exam", "X assessment" = multi-hour work requiring preparation + execution.
-  * "agent phase3", "project milestone", "implement X" = software/engineering work, false.
-  * Any task with estimated_hours > 0.1 → never instant.
-  All tasks passed to you have estimated_hours > 0.1, so set is_instant=false for ALL of them.
+INSTANT — a task the user just DOES, with no preparation and no thinking (< 5 min):
+paying a bill, clicking submit on an already-finished form, sending a short reply,
+a quick phone call, buying something online, picking up a parcel, booking an
+appointment. For these output ONE subtask with is_instant=true and
+estimated_minutes=5 — they get pinned as a quick action instead of scheduled.
+- is_instant=false for anything requiring real work, especially:
+  * "X due" (e.g. "CV due", "ML due") = the X ASSIGNMENT is due — hours of coding
+    or writing. Always false, always estimate ≥ 60 min.
+  * "X test", "X exam", "X assessment" = multi-hour prep + execution.
+  * "agent phase3", "project milestone", "implement X" = engineering work.
+- The user's own estimate is a strong signal: an errand is only plausible when
+  estimated_hours ≤ 0.25. Above that, false.
+- When genuinely torn, choose false — over-scheduling an errand costs a few
+  minutes, but treating real work as an errand loses it from the day.
 
 TIME ESTIMATION — use estimated_hours as your anchor (it was set by the user):
 - Honour estimated_hours: if a task has estimated_hours=2.0, total subtask minutes ≈ 120 min
@@ -132,16 +136,44 @@ def _disambiguate_titles(subtasks: list[Subtask]) -> list[Subtask]:
 
 def _is_instant_task(task: Task) -> bool:
     """
-    Check if a task should bypass Claude and go straight to the instant path.
-    Trust task.is_instant from the task store (set by api/tasks.py with exclusions).
-    Do NOT re-apply keyword heuristics here — that would override the exclusion list
-    and misclassify things like '提交 CV Assessment2' as instant.
+    Should this task bypass Claude and go straight to the instant path?
+
+    Only the pre-filter's CONFIDENT yes short-circuits here. `is_instant is None`
+    means it couldn't tell — those still go to Claude, which decides per subtask
+    (the prompt's INSTANT section). So the cheap path stays cheap without the
+    unknown cases being silently answered "no".
+
+    Do NOT re-apply keyword heuristics here — that would bypass the exclusion
+    list and misclassify things like '提交 CV Assessment2' as instant.
     """
-    if task.is_instant:
+    if task.is_instant is True:
         return True
     if task.estimated_hours <= 0.1:  # ≤ 6 min
         return True
     return False
+
+
+_INSTANT_MAX_HOURS = 0.25   # 15 min — above this, "errand" isn't credible
+
+
+def _accepts_instant(item, parent: Task | None, sibling_count: int) -> bool:
+    """Deterministic gate on Claude's is_instant, outside the model's reach.
+
+    Three conditions, all required:
+    - Claude said so.
+    - The keyword pre-filter didn't already rule it out. An explicit False beat
+      the LLM before it ever ran; it still wins now.
+    - It's a genuine errand shape: the user's own estimate is small AND it's the
+      task's only subtask. Anything split into steps is by definition not a
+      thing you just do.
+    """
+    if not item.is_instant:
+        return False
+    if parent is None or parent.is_instant is False:
+        return False
+    if parent.estimated_hours > _INSTANT_MAX_HOURS:
+        return False
+    return sibling_count == 1
 
 
 async def rank_and_decompose(
@@ -232,6 +264,7 @@ async def rank_and_decompose(
     deadline_sort_key = {t.id: (t.deadline or date.max) for t in regular_tasks}
     priority_by_id = {t.id: t.priority.value for t in regular_tasks}
     parent_hours = {t.id: t.estimated_hours for t in regular_tasks}
+    by_id = {t.id: t for t in regular_tasks}   # for the instant gate
 
     try:
         structured_llm = sonnet.with_structured_output(_LLMSubtaskList)
@@ -249,23 +282,32 @@ async def rank_and_decompose(
         ])
 
         # Map LLM subtasks → real Subtask, patching deadline + safety floors.
-        # Claude sometimes marks subtasks as instant (5 min) because titles start
-        # with action verbs ("完成X", "提交X") — these are regular work steps,
-        # not quick actions, so force is_instant=False and floor the duration.
+        #
+        # Claude's instant verdict is accepted, but only through a deterministic
+        # gate it can't argue past (`_accepts_instant`): left unguarded it marks
+        # regular work steps instant just because the title opens with an action
+        # verb ("完成X", "提交X"). Anything the gate rejects gets the usual 25-min
+        # floor, so a bad call costs a scheduled block, never a lost task.
+        subtasks_per_parent = Counter(item.parent_id for item in result.subtasks)
         claude_subtasks: list[Subtask] = []
         for item in result.subtasks:
-            minutes = item.estimated_minutes if item.estimated_minutes >= 25 \
-                else max(25, int(parent_hours.get(item.parent_id, 0.5) * 60))
+            instant = _accepts_instant(
+                item, by_id.get(item.parent_id), subtasks_per_parent[item.parent_id])
+            if instant:
+                minutes = 5
+            else:
+                minutes = item.estimated_minutes if item.estimated_minutes >= 25 \
+                    else max(25, int(parent_hours.get(item.parent_id, 0.5) * 60))
             claude_subtasks.append(Subtask(
                 parent_id=item.parent_id,
                 title=item.title,
-                cognitive_load=item.cognitive_load,
-                task_kind=item.task_kind,
+                cognitive_load=CognitiveLoad.light if instant else item.cognitive_load,
+                task_kind=TaskKind.admin if instant else item.task_kind,
                 estimated_minutes=minutes,
                 suggested_date=item.suggested_date,
                 deadline=deadline_by_id.get(item.parent_id),
                 phase_label=item.phase_label,
-                is_instant=False,
+                is_instant=instant,
             ))
 
         # Safety net: re-sort by parent task urgency

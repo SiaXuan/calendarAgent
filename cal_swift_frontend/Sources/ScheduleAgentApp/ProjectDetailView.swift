@@ -252,13 +252,21 @@ struct ProjectDetailView: View {
                     Task { await model.setColor(Self.hexString(from: newValue), for: project) }
                 }
                 Spacer()
+                if model.isWriting {
+                    ProgressView().controlSize(.small)
+                }
                 Button {
                     Task { await model.writeToCalendar(project: liveProject) }
                 } label: {
                     Label("写入", systemImage: "checkmark.circle")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!hasPlan)
+                .disabled(!hasPlan || model.isWriting)
+            }
+            if let status = model.statusMessage {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

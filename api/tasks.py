@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import uuid
 from datetime import date as date_type
 from typing import Literal
@@ -17,27 +18,43 @@ router = APIRouter()
 _log = logging.getLogger("dayflow")
 
 # ── Instant detection ────────────────────────────────────────────────────────
-_INSTANT_TRIGGERS = [
-    # English
-    'pay ', 'send ', 'email ', 'call ', 'text ', 'reply ', 'submit ', 'sign ',
-    'buy ', 'order ', 'book ', 'reserve ', 'print ', 'upload ', 'confirm ',
-    'transfer ', 'wire ', 'renew ', 'check in',
-    # Chinese
+# A cheap pre-filter, not the verdict: it runs before any LLM call so an errand
+# can skip decomposition entirely. What it can't call confidently it leaves to
+# the LLM (see `_INSTANT_UNDECIDED` / task_agent).
+#
+# English keywords are matched on WORD BOUNDARIES, Chinese ones as substrings
+# (no spaces to anchor on). The old version matched both as bare substrings,
+# which quietly wrecked recall: 'test' matched "contest", 'paper' matched
+# "paperwork", 'lab' matched "label", 'ps ' matched "apps ".
+_INSTANT_TRIGGERS_EN = [
+    'pay', 'send', 'email', 'mail', 'call', 'text', 'reply', 'submit', 'sign',
+    'buy', 'order', 'book', 'reserve', 'print', 'upload', 'confirm', 'rsvp',
+    'transfer', 'wire', 'renew', 'check in', 'pick up', 'drop off', 'schedule',
+    'register', 'cancel', 'return', 'refill', 'top up',
+]
+_INSTANT_TRIGGERS_ZH = [
     '交', '付款', '还款', '支付', '发送', '提交', '预约', '购买', '订购',
-    '签名', '打印', '转账', '汇款', '续费', '确认', '取件', '缴费', '转房租', '交租',
+    '签名', '签字', '打印', '转账', '汇款', '续费', '确认', '取件', '缴费',
+    '转房租', '交租', '交费', '充值', '报名', '注册', '退订', '取消',
+    '买', '取快递', '寄', '打电话', '回电', '回复', '发消息', '订', '约',
 ]
 
-# If ANY of these appear in the title, never treat as instant — it's a real task.
-# Catches "提交 CV Assessment", "submit homework", "完成 CS project", etc.
-_INSTANT_EXCLUSIONS = [
-    # English academic / work
+# If ANY of these appear, never instant — it's a real deliverable.
+# Catches "提交 CV Assessment", "submit homework", "完成 CS project".
+_INSTANT_EXCLUSIONS_EN = [
     'assignment', 'assessment', 'homework', 'project', 'report',
     'exam', 'quiz', 'midterm', 'final', 'paper', 'essay', 'test',
-    'proposal', 'presentation', 'lab', 'problem set', 'ps ',
-    # Chinese academic
-    '作业', '作文', '测验', '报告', '项目', '考试', '实验', '论文',
-    '期末', '期中', '大作业', '小作业', '课程', '完成',
+    'proposal', 'presentation', 'lab', 'problem set', 'ps',
+    'thesis', 'dissertation', 'draft',
 ]
+_INSTANT_EXCLUSIONS_ZH = [
+    '作业', '作文', '测验', '报告', '项目', '考试', '实验', '论文',
+    '期末', '期中', '大作业', '小作业', '课程', '复习', '备考', '答辩',
+]
+
+# Deliberately NOT an exclusion: '完成'. It's how a huge share of Chinese
+# reminders are phrased ("完成缴费", "完成注册"), and vetoing on it killed
+# nearly every Chinese instant. The nouns above already catch "完成作业".
 
 # ── High-confidence keyword rules (no LLM needed) ────────────────────────────
 # Rules here must hold regardless of surrounding context.
@@ -56,12 +73,35 @@ _CONFIDENT_LIGHT = [
 ]
 
 
-def _detect_instant(title: str) -> bool:
-    tl = title.lower()
-    # Never instant if the title looks like an academic/work deliverable
-    if any(ex in tl for ex in _INSTANT_EXCLUSIONS):
+def _has_en_word(text: str, words: list[str]) -> bool:
+    """Whole-word match, so 'test' doesn't fire on 'contest'."""
+    return any(re.search(rf"\b{re.escape(w)}\b", text) for w in words)
+
+
+def _detect_instant(title: str, notes: str | None = None) -> bool | None:
+    """Cheap pre-classification of "is this a two-minute errand?".
+
+    Returns True (clearly an errand), False (clearly a real deliverable), or
+    None — meaning "no idea", which hands the call to the LLM during
+    decomposition instead of silently defaulting to not-instant.
+
+    Triggers are checked BEFORE exclusions now. The old order let a single
+    exclusion word veto unconditionally, so "完成缴费" lost to '完成' despite
+    being exactly the errand this is meant to catch. An exclusion only wins
+    when no trigger fired, or when a deliverable noun is what's being acted on.
+    """
+    text = f"{title} {notes or ''}".lower()
+    excluded = (_has_en_word(text, _INSTANT_EXCLUSIONS_EN)
+                or any(x in text for x in _INSTANT_EXCLUSIONS_ZH))
+    triggered = (_has_en_word(text, _INSTANT_TRIGGERS_EN)
+                 or any(k in text for k in _INSTANT_TRIGGERS_ZH))
+
+    if excluded:
+        # "submit assignment" — the errand verb is attached to real work.
         return False
-    return any(kw in tl for kw in _INSTANT_TRIGGERS)
+    if triggered:
+        return True
+    return None   # nothing matched → let the LLM judge
 
 
 def _keyword_classify(title: str, description: str | None) -> CognitiveLoad | None:
@@ -169,6 +209,9 @@ async def create_task(payload: TaskInput):
         estimated_hours=payload.estimated_hours,
         deadline=deadline,
         source="manual",
+        # Manually-added tasks used to skip the classifier entirely, which meant
+        # a typed-in errand could never be one.
+        is_instant=_detect_instant(payload.title, payload.description),
     )
     task_store[task.id] = task
     save_task_store()

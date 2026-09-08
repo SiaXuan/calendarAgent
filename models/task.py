@@ -42,7 +42,12 @@ class Task(BaseModel):
     deadline_dt: datetime | None = None  # full due datetime, preserved from reminder
     source: str = "manual"   # "manual" | "todoist" | "reminders"
     is_uncertain: bool = False   # triggers ★ planning chat in frontend
-    is_instant: bool = False     # quick action (< 10 min), skip decomposition
+    # Quick action (< 10 min) → skip decomposition. Tri-state on purpose:
+    # True/False are the keyword pre-filter's confident calls, None means it
+    # couldn't tell and the LLM decides during decomposition. Defaulting an
+    # unknown to False is what made instants disappear — every path that never
+    # ran the classifier silently asserted "not an errand".
+    is_instant: bool | None = None
     project_id: str | None = None   # groups tasks imported/decomposed together (Phase 4)
     source_excerpt: str | None = None   # doc snippet this task came from — grounds
                                         # daily decomposition of an imported plan node

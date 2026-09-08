@@ -415,7 +415,9 @@ struct SidebarView: View {
     }
 
     private var quickControls: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+        // 2×2, not 3-up: at sidebar width three columns squeezed each tile's title
+        // onto two truncated lines ("Projec\nts").
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
             controlTile(title: "Projects", subtitle: "Import & plan", systemName: "folder", color: taskColor) {
                 ProjectsWindowController.shared.show()
             }
@@ -639,70 +641,73 @@ struct SidebarView: View {
                     .strikethrough(isDone, color: secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
-                    Text(taskTimingLabel(task))
-                        .font(.caption)
-                        .foregroundStyle(isCurrent ? activeColor : secondary)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)  // keep the timing legible; the badge yields, not this
-                        .layoutPriority(1)
-                    if let backendBadgeLabel {
-                        backendTaskBadge(backendBadgeLabel, cognitiveLoad: metadata?.cognitiveLoad)
-                    } else {
-                        priorityBadge(task.priority, prominent: false)
-                    }
-                }
+                Text(taskTimingLabel(task))
+                    .font(.caption)
+                    .foregroundStyle(isCurrent ? activeColor : secondary)
+                    .lineLimit(1)
             }
             Spacer()
-            // Synced blocks stay editable: an edit auto-updates the written
-            // calendar event (resyncCalendarIfSynced), so no need to lock them.
-            if metadata != nil {
-                pomodoroAdjustButton(
-                    systemName: "minus",
-                    help: atMinimumPomodoro ? "Delete this task" : "Remove one pomodoro"
-                ) {
-                    // Already at one pomodoro → pressing "−" again means "delete",
-                    // so confirm before removing the card from today's schedule.
-                    if atMinimumPomodoro {
-                        pendingDeleteTaskID = task.id
-                    } else {
-                        adjustTaskPomodoro(task.id, delta: -1)
+            // The badge sits ABOVE the controls rather than next to the timing
+            // text: sharing that line meant a long "3 x 25m · 85m" truncated it
+            // to "AN…", so the kind/load it encodes was never actually readable.
+            VStack(alignment: .trailing, spacing: 5) {
+                if let backendBadgeLabel {
+                    backendTaskBadge(backendBadgeLabel, cognitiveLoad: metadata?.cognitiveLoad)
+                } else {
+                    priorityBadge(task.priority, prominent: false)
+                }
+                HStack(spacing: 0) {
+                    // Synced blocks stay editable: an edit auto-updates the written
+                    // calendar event (resyncCalendarIfSynced), so no need to lock them.
+                    if metadata != nil {
+                        pomodoroAdjustButton(
+                            systemName: "minus",
+                            help: atMinimumPomodoro ? "Delete this task" : "Remove one pomodoro"
+                        ) {
+                            // Already at one pomodoro → pressing "−" again means "delete",
+                            // so confirm before removing the card from today's schedule.
+                            if atMinimumPomodoro {
+                                pendingDeleteTaskID = task.id
+                            } else {
+                                adjustTaskPomodoro(task.id, delta: -1)
+                            }
+                        }
+                        pomodoroAdjustButton(systemName: "plus", help: "Add one pomodoro") {
+                            adjustTaskPomodoro(task.id, delta: 1)
+                        }
+                    }
+                    Button {
+                        acceptSingleTask(task.id)
+                    } label: {
+                        // A calendar glyph (not a bare checkmark) so this reads as
+                        // "push to Apple Calendar", matching the icon on the Sync All
+                        // buttons. A checkmark here misread as "mark done".
+                        Image(systemName: isSynced ? "calendar.badge.checkmark" : "calendar.badge.plus")
+                            .foregroundStyle(isSynced ? syncedColor : calendarColor)
+                            .frame(width: 26, height: 24)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isSynced || isLoadingBackend)
+                    .help(isSynced ? "Already synced to calendar" : "Sync this task to Calendar")
+                    // Done toggle (far right = the "✓" the user expects). Feeds the
+                    // backend completion_store → 复盘/heatmap. Only shown once the task
+                    // has a backend block to key completion off.
+                    if blockKey != nil {
+                        Button {
+                            toggleTaskDone(task.id)
+                        } label: {
+                            Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 15, weight: .semibold))
+                                // Same rule: light hollow circle on dark, dark on light;
+                                // green fill once done.
+                                .foregroundStyle(isDone ? activeColor : controlGlyphColor)
+                                .frame(width: 26, height: 24)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(isLoadingBackend)
+                        .help(isDone ? "Mark not done" : "Mark done")
                     }
                 }
-                pomodoroAdjustButton(systemName: "plus", help: "Add one pomodoro") {
-                    adjustTaskPomodoro(task.id, delta: 1)
-                }
-            }
-            Button {
-                acceptSingleTask(task.id)
-            } label: {
-                // A calendar glyph (not a bare checkmark) so this reads as
-                // "push to Apple Calendar", matching the icon on the Sync All
-                // buttons. A checkmark here misread as "mark done".
-                Image(systemName: isSynced ? "calendar.badge.checkmark" : "calendar.badge.plus")
-                    .foregroundStyle(isSynced ? syncedColor : calendarColor)
-                    .frame(width: 26, height: 24)
-            }
-            .buttonStyle(.borderless)
-            .disabled(isSynced || isLoadingBackend)
-            .help(isSynced ? "Already synced to calendar" : "Sync this task to Calendar")
-            // Done toggle (far right = the "✓" the user expects). Feeds the
-            // backend completion_store → 复盘/heatmap. Only shown once the task
-            // has a backend block to key completion off.
-            if blockKey != nil {
-                Button {
-                    toggleTaskDone(task.id)
-                } label: {
-                    Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 15, weight: .semibold))
-                        // Same rule: light hollow circle on dark, dark on light;
-                        // green fill once done.
-                        .foregroundStyle(isDone ? activeColor : controlGlyphColor)
-                        .frame(width: 26, height: 24)
-                }
-                .buttonStyle(.borderless)
-                .disabled(isLoadingBackend)
-                .help(isDone ? "Mark not done" : "Mark done")
             }
         }
         .padding(9)
@@ -1374,6 +1379,7 @@ struct SidebarView: View {
         return Text(label)
             .font(.system(size: 8, weight: .bold))
             .lineLimit(1)
+            .fixedSize()   // never let the row's layout shave it down to "AN…"
             .padding(.horizontal, 5)
             .padding(.vertical, 2.5)
             .foregroundStyle(color)

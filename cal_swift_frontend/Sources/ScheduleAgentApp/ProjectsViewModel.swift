@@ -32,6 +32,10 @@ final class ProjectsViewModel: ObservableObject {
     @Published var importFileURL: URL?                   // set when a file was attached
     @Published var importImageData: Data?                // set when an image was pasted/attached (PNG)
     @Published var isImporting = false
+    @Published var isWriting = false
+    /// Result of the last action worth confirming (currently: write-to-reminders).
+    /// Success used to be silent — the value was set but no view read it, so a
+    /// successful write looked like the button did nothing.
     @Published var statusMessage: String?
 
     private let client: DayflowAPIClient
@@ -250,8 +254,11 @@ final class ProjectsViewModel: ObservableObject {
     /// we already own for this project and apply the change-set into a list named
     /// after the project, tinted with its color.
     func writeToCalendar(project: DayflowProject) async {
+        guard !isWriting else { return }
         statusMessage = nil
         errorMessage = nil
+        isWriting = true
+        defer { isWriting = false }
         let (granted, accessError) = await adapter.requestFullAccess()
         guard granted else {
             errorMessage = "需要「提醒事项」权限：\(accessError?.localizedDescription ?? "被拒绝")"
@@ -263,7 +270,9 @@ final class ProjectsViewModel: ObservableObject {
             try await adapter.applyReminderChangeset(
                 result.reminders, listName: project.name, colorHex: project.color)
             let r = result.reminders
-            statusMessage = "已写入：+\(r.create.count) ·改\(r.update.count) ·删\(r.delete.count)"
+            statusMessage = r.create.isEmpty && r.update.isEmpty && r.delete.isEmpty
+                ? "提醒已是最新"
+                : "已写入：新增 \(r.create.count) · 更新 \(r.update.count) · 删除 \(r.delete.count)"
             await loadDetail(project)
         } catch {
             errorMessage = friendly(error)
