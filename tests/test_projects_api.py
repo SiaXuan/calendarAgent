@@ -7,7 +7,6 @@ source of truth) and skips the CalDAV promote.
 """
 from datetime import date, datetime
 
-import pytest
 from fastapi.testclient import TestClient
 
 import storage
@@ -17,11 +16,8 @@ from models.project import CompletionStatus, PlanSnapshotItem
 client = TestClient(app)
 
 
-@pytest.fixture(autouse=True)
-def _no_caldav(monkeypatch):
-    """Keep tests hermetic + fast: no real iCloud calls even if .env has creds."""
-    import integrations.caldav_client as c
-    monkeypatch.setattr(c, "_make_client", lambda: None)
+# `_no_caldav` moved to conftest.py as a suite-wide autouse fixture — it was
+# protecting only this file while the rest of the suite hit real iCloud.
 
 
 def test_project_crud(clean_stores):

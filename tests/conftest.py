@@ -1,8 +1,10 @@
 """
-Shared pytest fixtures for the dayflow test suite.
+Shared fixtures for the dayflow test suite.
 
 Goal: every test runs without real network, real LLM, or real CalDAV calls.
-Each fixture is opt-in — tests that don't need it pay no cost.
+Most fixtures are opt-in — tests that don't need them pay no cost. The CalDAV
+block below is the exception: it's autouse, because opting *in* to hermeticism
+is the wrong default when the cost of forgetting is a live iCloud write.
 """
 from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
@@ -12,6 +14,28 @@ import pytest
 from models.health import HealthSnapshot, SleepData
 from models.schedule import BlockType, FreeWindow, TimeBlock
 from models.task import CognitiveLoad, Priority, Subtask, Task, TaskKind
+
+
+# ─── Never touch real iCloud ────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _no_caldav(monkeypatch):
+    """Cut every CalDAV path off at the client, for ALL tests.
+
+    This existed only inside test_projects_api.py, so the rest of the suite was
+    hitting real iCloud whenever .env had credentials — which it does on the dev
+    machine. `test_remove_block_takes_it_off_the_schedule` was spending 35s of
+    the suite's 37s in a network round-trip, and worse, it reached
+    `delete_events_with_tag` — a live DELETE against a real calendar account.
+    A test that deletes from your actual calendar is a bug regardless of speed.
+
+    Patching `_make_client` (rather than each caller) means new code paths are
+    covered automatically: an unconfigured client makes reads return [] and
+    writes raise CalDAVNotConfigured, which callers already handle as
+    "local-only mode".
+    """
+    import integrations.caldav_client as c
+    monkeypatch.setattr(c, "_make_client", lambda: None)
 
 
 # ─── Reset persistence between tests ────────────────────────────────────────
