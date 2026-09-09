@@ -120,13 +120,10 @@ async def run_schedule_graph(
     """
     await sync_reminders_if_due()
 
-    # Full regenerate = fresh day → drop the old conversation, pending proposal,
-    # and undo snapshot (the snapshot's blocks belong to a day that's about to be
-    # replaced wholesale, so offering to restore them would be wrong).
-    from storage import chat_sessions, pending_proposals, undo_snapshots
-    chat_sessions.pop(target_date, None)
-    pending_proposals.pop(target_date, None)
-    undo_snapshots.pop(target_date, None)
+    # Full regenerate = fresh day → drop the conversation, pending proposal, and
+    # undo snapshot together.
+    from graphs.agent_run import clear_day_session_state
+    clear_day_session_state(target_date)
 
     initial_state: ScheduleState = {
         "target_date": target_date,

@@ -63,8 +63,9 @@ data/
 local_data/
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
-frontend/node_modules/
-frontend/dist/
+# The web UI moved to legacy/web-frontend/ (2026-09-07) — see legacy/README.md
+legacy/web-frontend/node_modules/
+legacy/web-frontend/dist/
 
 # Claude Code 共享设置（session 级权限白名单老被自动追加，不纳入版本控制）
 .claude/settings.json

@@ -143,7 +143,7 @@ app 申请日历和提醒的**完全访问**(用途字符串在 `cal_swift_front
 
 **已暂时弃用。** Web UI 在浏览器里跑,读不了本地 EventKit,原先靠后端联网读 iCloud 日历(CalDAV)拿你的真实日程。为消除冷启动时 CalDAV 全量拉取的卡顿(实测一次刷新 ~15–45 秒),后端已**停用 CalDAV 读日历**,改成只接受 Swift 客户端经 EventKit 上传的日历。Web 端因此拿不到你的真实日历、排程会和固定事件撞车,故暂时搁置。
 
-代码仍在 `frontend/`,CalDAV 适配器(`integrations/caldav_client.py`)也保留着;将来要恢复 Web 或做移动端时,把那条读取路径接回即可(见 `agents/nodes.py::fetch_calendar_node` 里注释保留的 CalDAV 分支)。
+代码已移到 `legacy/web-frontend/`,CalDAV 适配器(`integrations/caldav_client.py`)也保留着;将来要恢复 Web 或做移动端时,把那条读取路径接回即可(见 `agents/nodes.py::fetch_calendar_node` 里注释保留的 CalDAV 分支)。
 
 ## 跑测试
 
@@ -186,7 +186,7 @@ app 申请日历和提醒的**完全访问**(用途字符串在 `cal_swift_front
 - `models/` — Pydantic 模型(Task、Subtask、TimeBlock、DaySchedule…)
 - `storage.py` — JSON 落盘的内存 store(健康、任务、日程、项目、完成态…)
 - `integrations/caldav_client.py` — iCloud CalDAV 适配器(legacy 兜底;Swift 主线走 EventKit)
-- `frontend/` — React/Vite UI(暂时弃用,见「Web 前端」)
+- `legacy/` — 弃用但留着当参考的代码;`web-frontend/` 是搁置的 React/Vite UI
 - `cal_swift_frontend/` — 原生 SwiftUI macOS 客户端(EventKit,主前端)
 - `tests/` — pytest 套件(离线)
 

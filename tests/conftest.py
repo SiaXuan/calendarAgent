@@ -75,12 +75,16 @@ def clean_stores(tmp_path, monkeypatch):
 # ─── Mock external integrations ─────────────────────────────────────────────
 
 @pytest.fixture
-def mock_caldav(monkeypatch):
+def mock_calendar_snapshot(monkeypatch):
     """
     Provide a deterministic calendar snapshot for the no-frontend-events fallback
     (which replaced the CalDAV fetch — ARCHITECTURE §11). For any date, the
     persisted snapshot yields one fixed block 13:00–14:00 (lunch meeting), which
     fetch_calendar turns into two free windows around it (work_start–13, 14–work_end).
+
+    Named `mock_caldav` until 2026-09-07, by which point it hadn't touched CalDAV
+    for a while — it patches `calendar_snapshot_store`. The old name kept
+    suggesting these tests still exercised the iCloud path.
     """
     lunch = [{"title": "Lunch meeting", "start": "13:00", "end": "14:00"}]
 

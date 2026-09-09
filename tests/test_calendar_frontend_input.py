@@ -56,9 +56,9 @@ async def test_agent_tagged_event_excluded_from_fixed(clean_stores):
     assert [b.title for b in patch["fixed_blocks"]] == ["User meeting"]
 
 
-async def test_none_falls_back_to_snapshot(clean_stores, mock_caldav):
+async def test_none_falls_back_to_snapshot(clean_stores, mock_calendar_snapshot):
     # No calendar_events key → fall back to the last persisted EventKit snapshot
-    # (mock_caldav seeds a lunch block), never the network.
+    # (mock_calendar_snapshot seeds a lunch block), never the network.
     patch = await fetch_calendar_node({"target_date": D})
     assert any(b.title == "Lunch meeting" for b in patch["fixed_blocks"])
 

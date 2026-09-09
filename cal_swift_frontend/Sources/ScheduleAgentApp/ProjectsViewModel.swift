@@ -24,7 +24,6 @@ final class ProjectsViewModel: ObservableObject {
     @Published var isChatting = false
 
     // Import flow.
-    @Published var importPreview: DayflowImportResult?   // dry-run result awaiting confirm
     // One composer field. With no file it's the plan text (may embed an
     // instruction like "move to 2027"); with a file attached it's the note about
     // how to handle that file.
@@ -181,72 +180,11 @@ final class ProjectsViewModel: ObservableObject {
         NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
     }
 
-    /// Dry-run preview — no persistence, no reminder access prompt.
-    func previewImport(project: DayflowProject) async {
-        isImporting = true
-        statusMessage = nil
-        errorMessage = nil
-        defer { isImporting = false }
-        let composer = importText.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            importPreview = try await callImport(project: project, composer: composer, dryRun: true)
-        } catch let e as DayflowRequestError {
-            errorMessage = e.message ?? "无法从这份内容里读出计划。"
-        } catch {
-            errorMessage = friendly(error)
-        }
-    }
-
-    /// Confirm — create the project's tasks and write the plan snapshot (fills
-    /// "计划节点" for review). Reminders are NOT written here; the user reviews the
-    /// snapshot and then presses "写入日历" (→ replan) to sync the Reminders app.
-    func confirmImport(project: DayflowProject) async {
-        isImporting = true
-        statusMessage = nil
-        errorMessage = nil
-        defer { isImporting = false }
-        let composer = importText.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            let result = try await callImport(project: project, composer: composer, dryRun: false)
-            clearImportInputs()
-            statusMessage = "已导入 \(result.tasks?.count ?? 0) 个任务"
-            await loadDetail(project)
-        } catch let e as DayflowRequestError {
-            errorMessage = e.message ?? "导入失败。"
-        } catch {
-            errorMessage = friendly(error)
-        }
-    }
-
-    private func callImport(
-        project: DayflowProject, composer: String, dryRun: Bool
-    ) async throws -> DayflowImportResult {
-        if let image = importImageData {
-            // Pasted image → Claude vision; composer text is a note about it.
-            return try await client.importPlan(
-                id: project.id, imageData: image, instruction: composer, dryRun: dryRun)
-        }
-        if let url = importFileURL {
-            // File is the content; the composer text is a note about it.
-            return try await client.importPlan(
-                id: project.id, fileURL: url, instruction: composer, dryRun: dryRun)
-        }
-        // Composer text IS the plan; the backend picks up any embedded instruction.
-        return try await client.importPlan(id: project.id, text: composer, dryRun: dryRun)
-    }
-
-    func cancelImportPreview() {
-        importPreview = nil
-        importFileURL = nil
-        importImageData = nil
-    }
-
-    private func clearImportInputs() {
-        importPreview = nil
-        importText = ""
-        importFileURL = nil
-        importImageData = nil
-    }
+    // The dry-run preview → confirm import flow (previewImport / confirmImport /
+    // callImport / cancelImportPreview / importPreview) was removed 2026-09-07:
+    // no view had referenced it since the composer moved to the project chat
+    // (`submitComposer` → POST /projects/{id}/chat). The backend's /import route
+    // and its dry_run are still live and tested — they just have no UI caller.
 
     // MARK: Write to calendar → project's reminders via EventKit
 

@@ -3,7 +3,6 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from graphs.adjust_graph import run_adjust_graph
 from graphs.agent_run import (
     AgentChatResult,
     confirm_proposal,
@@ -12,8 +11,11 @@ from graphs.agent_run import (
     run_chat_agent,
     undo_last_commit,
 )
-from models.schedule import DaySchedule
-from storage import schedule_store
+
+# Retired POST /chat also needed:
+#   from graphs.adjust_graph import run_adjust_graph
+#   from models.schedule import DaySchedule
+#   from storage import schedule_store
 
 router = APIRouter()
 
@@ -23,22 +25,32 @@ class ChatRequest(BaseModel):
     date: str   # YYYY-MM-DD
 
 
-@router.post("/chat", response_model=DaySchedule)
-async def chat(payload: ChatRequest):
-    """Legacy fixed-schema adjustment (fallback). New UI uses /chat/agent."""
-    try:
-        d = date.fromisoformat(payload.date)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
-
-    if schedule_store.get(d) is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No schedule for {payload.date}. Generate one first via POST /schedule/generate.",
-        )
-
-    updated, _params = await run_adjust_graph(d, payload.message)
-    return updated
+# ─── Retired: POST /chat ─────────────────────────────────────────────────────
+# The pre-ReAct adjustment path: one structured-output call filling a fixed
+# 6-field schema (`agents/chat_agent.py` via `graphs/adjust_graph.py`). Every
+# client moved to /chat/agent — the Swift app and the shelved web UI both call
+# only that — so this route was reachable but never reached.
+#
+# Route unregistered 2026-09-07; the modules behind it stay (still imported by
+# `scripts/visualize_graphs.py` and covered by tests) so the fallback can be
+# re-registered by uncommenting if the agent path ever needs a dumb backstop.
+#
+# @router.post("/chat", response_model=DaySchedule)
+# async def chat(payload: ChatRequest):
+#     """Legacy fixed-schema adjustment (fallback). New UI uses /chat/agent."""
+#     try:
+#         d = date.fromisoformat(payload.date)
+#     except ValueError:
+#         raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
+#
+#     if schedule_store.get(d) is None:
+#         raise HTTPException(
+#             status_code=404,
+#             detail=f"No schedule for {payload.date}. Generate one first via POST /schedule/generate.",
+#         )
+#
+#     updated, _params = await run_adjust_graph(d, payload.message)
+#     return updated
 
 
 # ─── Conversational ReAct agent (S3) ─────────────────────────────────────────

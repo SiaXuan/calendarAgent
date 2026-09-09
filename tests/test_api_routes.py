@@ -35,7 +35,7 @@ def test_generate_schedule_invalid_date(client):
 
 
 def test_generate_schedule_happy_path(
-    client, mock_sonnet, mock_caldav, mock_reminders_sync, sample_task,
+    client, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync, sample_task,
 ):
     """POST /schedule/generate returns a DaySchedule + populates schedule_store."""
     from storage import task_store
@@ -68,16 +68,23 @@ def test_write_schedule_404_when_not_generated(client):
     assert r.status_code == 404
 
 
-# ─── /chat route ────────────────────────────────────────────────────────────
+# ─── /chat route (retired 2026-09-07) ───────────────────────────────────────
 
-def test_chat_404_when_no_schedule(client):
-    r = client.post("/chat", json={"message": "tired", "date": "2026-05-15"})
-    assert r.status_code == 404
+def test_legacy_chat_route_is_retired(client):
+    """
+    `POST /chat` (the pre-ReAct fixed-schema path) is commented out in
+    api/chat.py — every client uses /chat/agent.
 
-
-def test_chat_invalid_date(client):
-    r = client.post("/chat", json={"message": "tired", "date": "bogus"})
-    assert r.status_code == 422
+    Worth asserting rather than just deleting the old tests: one of them checked
+    "404 when no schedule for that date", which kept passing after the route
+    was unregistered because a missing route 404s too. A test that can't tell
+    "not found" from "not routed" isn't testing anything.
+    """
+    assert client.post("/chat", json={"message": "tired", "date": "2026-05-15"}).status_code == 404
+    # A live route would 422 on a malformed date; an absent one 404s first.
+    assert client.post("/chat", json={"message": "tired", "date": "bogus"}).status_code == 404
+    # The replacement is registered.
+    assert client.post("/chat/agent", json={"message": "x", "date": "bogus"}).status_code == 422
 
 
 # ─── /tasks routes ──────────────────────────────────────────────────────────

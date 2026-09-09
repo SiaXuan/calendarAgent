@@ -254,13 +254,22 @@ def _record_turn(target_date: date, user_message: str, assistant_message: str) -
         chat_sessions[target_date] = session[-_MAX_HISTORY_MSGS:]
 
 
-def clear_chat_session(target_date: date) -> None:
-    """Drop conversation history (called on full regenerate — fresh schedule).
+def clear_day_session_state(target_date: date) -> None:
+    """Forget everything the agent was holding about a day.
 
-    NOTE: currently unused — `run_schedule_graph` clears the per-date session
-    state inline (chat_sessions + pending_proposals + undo_snapshots) instead.
+    Called on a full regenerate: the day is being replaced wholesale, so the
+    conversation, any staged proposal, and the undo snapshot all describe a
+    schedule that no longer exists. Keeping any of them would let the user act
+    on stale state — confirm a proposal built from the old blocks, or undo into
+    an arrangement that was never theirs.
+
+    Lives here rather than inline in `run_schedule_graph` so the three stores
+    that make up a day's agent state get cleared together; they were drifting
+    apart (undo_snapshots was added to one site and not the other).
     """
     chat_sessions.pop(target_date, None)
+    pending_proposals.pop(target_date, None)
+    undo_snapshots.pop(target_date, None)
 
 
 def get_chat_history(target_date: date) -> list[dict]:

@@ -151,7 +151,7 @@ def client(clean_stores):
 
 
 @pytest.fixture
-async def seeded_schedule(client, mock_sonnet, mock_caldav, mock_reminders_sync, sample_task):
+async def seeded_schedule(client, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync, sample_task):
     """Generate a schedule first so the pin endpoints have something to mutate."""
     from storage import task_store
     task_store[sample_task.id] = sample_task
@@ -215,7 +215,7 @@ async def test_pin_endpoint_conflict_resolution(client, seeded_schedule):
     """
     task_id = seeded_schedule
     block_key = f"{task_id}::Energy curve work"
-    # Lunch meeting fixture starts at 13:00 (see conftest.mock_caldav)
+    # Lunch meeting fixture starts at 13:00 (see conftest.mock_calendar_snapshot)
     # Try to pin at 13:30 (inside lunch)
     r = client.post(
         f"/schedule/2026-05-15/pin",
@@ -319,7 +319,7 @@ async def test_pin_endpoint_does_not_call_llm(client, seeded_schedule, mock_sonn
 
 
 async def test_pin_falls_back_to_full_graph_when_no_schedule(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync,
 ):
     """
     If schedule_store has nothing for the date (e.g. server restarted),

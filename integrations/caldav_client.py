@@ -134,21 +134,22 @@ def fetch_reminders() -> list[dict]:
     """
     Return incomplete VTODO items from iCloud Reminders.
 
-    iCloud's public CalDAV interface blocks all /reminders/ access (HTTP 400).
-    Strategy A: CalDAV — only finds the 提醒⚠️ spam collection under /calendars/.
-    Strategy B: macOS AppleScript — reads directly from Reminders.app (authoritative).
-    """
-    # Strategy A: CalDAV (collects any VTODO-capable collections under /calendars/)
-    reminders: list[dict] = _fetch_reminders_caldav()
+    iCloud's public CalDAV interface blocks all /reminders/ access (HTTP 400),
+    so CalDAV only ever finds the 提醒⚠️ spam collection under /calendars/.
+    AppleScript reads Reminders.app directly and is authoritative.
 
-    # Strategy B: macOS Reminders.app via AppleScript
+    AppleScript is therefore tried FIRST on macOS. It used to run second, after
+    an unconditional CalDAV round-trip whose result was then thrown away wholesale
+    — a wasted iCloud discovery + PROPFIND on every schedule generation (this runs
+    via `sync_reminders_if_due`). CalDAV now only serves the non-macOS fallback,
+    or a Mac whose Reminders.app returned nothing.
+    """
     if sys.platform == "darwin":
         applescript_items = _fetch_reminders_applescript()
         if applescript_items:
-            # Merge: AppleScript is authoritative — replace CalDAV results entirely
             return applescript_items
 
-    return reminders
+    return _fetch_reminders_caldav()
 
 
 def _fetch_reminders_caldav() -> list[dict]:

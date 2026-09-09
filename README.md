@@ -173,7 +173,7 @@ measured), the backend now **no longer reads CalDAV** — it only accepts the
 calendar the Swift client uploads via EventKit. The web UI therefore can't see
 your real events and would schedule over your fixed commitments, so it's parked.
 
-The code still lives in `frontend/`, and the CalDAV adapter
+The code moved to `legacy/web-frontend/`, and the CalDAV adapter
 (`integrations/caldav_client.py`) is kept; to revive the web or a mobile client,
 wire that read path back in (see the commented-out CalDAV branch in
 `agents/nodes.py::fetch_calendar_node`).
@@ -246,7 +246,7 @@ xfail flag) / `error`. Known bad cases (e.g. "one-off errand over-decomposed", s
 - `models/` — Pydantic schemas (Task, Subtask, TimeBlock, DaySchedule, …)
 - `storage.py` — JSON-backed in-memory stores (health, tasks, schedules)
 - `integrations/caldav_client.py` — iCloud CalDAV adapter (legacy fallback; Swift path uses EventKit)
-- `frontend/` — React/Vite UI (Today / Tasks / Chat / Settings) — shelved (see "Web frontend")
+- `legacy/` — parked code kept for reference; `web-frontend/` is the shelved React/Vite UI
 - `cal_swift_frontend/` — native SwiftUI macOS client (EventKit) — primary frontend
 - `tests/` — pytest suite (fully offline; `--ignore=tests/eval` to skip live-LLM eval)
 

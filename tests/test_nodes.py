@@ -75,8 +75,8 @@ async def test_fetch_health_uses_cache_on_second_call(
 
 # ─── fetch_calendar_node ────────────────────────────────────────────────────
 
-async def test_fetch_calendar_returns_caldav_results(
-    clean_stores, mock_caldav, sample_date,
+async def test_fetch_calendar_returns_snapshot_results(
+    clean_stores, mock_calendar_snapshot, sample_date,
 ):
     """Calendar fetch yields fixed_blocks + free_windows from the stub."""
     state = {"target_date": sample_date, "language": Language.en}
@@ -86,7 +86,7 @@ async def test_fetch_calendar_returns_caldav_results(
     assert len(patch["free_windows"]) == 2
 
 
-async def test_fetch_calendar_uses_cache(clean_stores, mock_caldav, sample_date):
+async def test_fetch_calendar_uses_cache(clean_stores, mock_calendar_snapshot, sample_date):
     state = {"target_date": sample_date, "language": Language.en}
     first = await fetch_calendar_node(state)
     second = await fetch_calendar_node(state)
@@ -271,7 +271,7 @@ def test_assemble_combines_and_sorts_blocks(clean_stores, sample_date):
 # ─── apply_adjustment_node ──────────────────────────────────────────────────
 
 async def test_apply_adjustment_removes_blocks_after_hour(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync,
     sample_task, sample_date,
 ):
     """remove_blocks_after_hour=15 → no scheduled blocks past 15:00."""

@@ -11,7 +11,7 @@ from models.task import CognitiveLoad, TaskKind
 
 
 async def test_event_order_is_health_then_fixed_then_schedule_then_done(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync,
     sample_task, sample_snapshot, sample_date,
 ):
     """SSE must produce events in this exact order for the UI to render right."""
@@ -38,7 +38,7 @@ async def test_event_order_is_health_then_fixed_then_schedule_then_done(
 
 
 async def test_schedule_event_fires_exactly_once(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync,
     sample_task, sample_snapshot, sample_date,
 ):
     """
@@ -66,7 +66,7 @@ async def test_schedule_event_fires_exactly_once(
 
 
 async def test_health_event_payload_shape(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync,
     sample_task, sample_snapshot, sample_date,
 ):
     """Health event must include energy_curve (24 floats) + health_summary string."""
@@ -83,7 +83,7 @@ async def test_health_event_payload_shape(
 
 
 async def test_schedule_event_payload_shape(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync,
     sample_task, sample_snapshot, sample_date,
 ):
     """Schedule event must include block list with ISO-string starts."""

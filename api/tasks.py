@@ -448,14 +448,15 @@ from fastapi import Request
 
 @router.post("/tasks/push-reminder")
 async def push_reminder(request: Request):
-    """Add a single reminder. Call inside Shortcuts loop after clear-reminders."""
+    """Add a single reminder pushed from iPhone Shortcuts.
+
+    Body: one reminder object {title, due, priority, list}. Called inside a
+    Shortcuts loop after clear-reminders. No in-repo caller — the Swift client
+    doesn't use it; it exists for the Shortcuts entry point.
+    """
     body = await request.json()
     items = [ReminderItem.model_validate(body)]
-    """
-    Receive reminders pushed from iPhone Shortcuts.
-    Body: {"reminders": [{title, due, priority, list}, ...]}
-    Replaces all reminders-sourced tasks with the new batch.
-    """
+
     from datetime import datetime
 
     added = 0

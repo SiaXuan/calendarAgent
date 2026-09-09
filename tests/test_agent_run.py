@@ -226,7 +226,7 @@ async def test_followup_builds_on_pending_proposal(clean_stores, patch_agent):
     assert seen["history_len"] >= 3
 
 
-async def test_regenerate_clears_chat_session(clean_stores, patch_agent, mock_sonnet, mock_caldav, mock_reminders_sync):
+async def test_regenerate_clears_chat_session(clean_stores, patch_agent, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync):
     """A full regenerate drops the conversation history + pending proposal."""
     _seed([_scheduled("t1", "A", 9, 10)])
     patch_agent([("ask_user", {"question": "哪个?"})], final="哪个?")
@@ -364,7 +364,7 @@ async def test_undo_logs_undone_outcome_linked_to_run(clean_stores, patch_agent)
 
 
 async def test_regenerate_clears_undo_snapshot(clean_stores, patch_agent, mock_sonnet,
-                                               mock_caldav, mock_reminders_sync):
+                                               mock_calendar_snapshot, mock_reminders_sync):
     """After a regenerate the snapshot describes a day that no longer exists."""
     _seed([_scheduled("t1", "Work", 9, 10)])
     await _minor_move(patch_agent)

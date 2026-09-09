@@ -60,7 +60,7 @@ def test_fan_in_nodes_have_same_depth_upstreams():
 
 
 async def test_run_schedule_graph_end_to_end(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync,
     sample_task, sample_snapshot, sample_date,
 ):
     """
@@ -101,7 +101,7 @@ async def test_run_schedule_graph_end_to_end(
 
 
 async def test_meals_are_inserted_exactly_once(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync,
     sample_task, sample_date,
 ):
     """
@@ -130,7 +130,7 @@ async def test_meals_are_inserted_exactly_once(
 
 
 async def test_run_schedule_graph_with_no_tasks(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync, sample_date,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync, sample_date,
 ):
     """Empty task store still produces a valid schedule (fixed + meals only)."""
     schedule = await run_schedule_graph(sample_date)
@@ -142,7 +142,7 @@ async def test_run_schedule_graph_with_no_tasks(
 
 
 async def test_graph_handles_llm_error_gracefully(
-    clean_stores, mock_sonnet, mock_caldav, mock_reminders_sync,
+    clean_stores, mock_sonnet, mock_calendar_snapshot, mock_reminders_sync,
     sample_task, sample_date,
 ):
     """LLM failure → heuristic fallback in task_agent → graph still completes."""
