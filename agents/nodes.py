@@ -200,9 +200,13 @@ async def fetch_health_node(state: dict) -> dict:
 
     sleep_end_hour = 7
     sleep_start_hour = 23
+    wake_hour = 7
     if snapshot:
         if snapshot.sleep.sleep_end.hour >= 5:
             sleep_end_hour = snapshot.sleep.sleep_end.hour
+            # Round up past a partial hour: waking at 10:30 means 10:00–10:30 is
+            # still sleep, so the first hour actually available for work is 11.
+            wake_hour = sleep_end_hour + (1 if snapshot.sleep.sleep_end.minute else 0)
         if snapshot.sleep.sleep_start.hour >= 20:
             sleep_start_hour = snapshot.sleep.sleep_start.hour
 
@@ -212,17 +216,33 @@ async def fetch_health_node(state: dict) -> dict:
         "health_summary": summary,
         "sleep_end_hour": sleep_end_hour,
         "sleep_start_hour": sleep_start_hour,
+        "wake_hour": wake_hour,
     }
 
 
-def _free_windows_or_whole_day(free_windows, prefs):
+def _work_start_hour(state: dict, prefs) -> int:
+    """The first hour the day is actually schedulable.
+
+    The preferred work start is a standing intention; the wake hour is what
+    happened. Scheduling used to use only the preference, so sleeping until 10:00
+    still produced blocks at 09:00 — the day was planned on top of the user's
+    sleep. Sleep already shaped the energy curve and the meal breaks; it just
+    never reached the window that bounds placement.
+    """
+    return max(prefs.work_start, state.get("wake_hour", prefs.work_start))
+
+
+def _free_windows_or_whole_day(free_windows, prefs, start_hour: int | None = None):
     """A day with no gaps between fixed blocks still has the whole work day free."""
     if free_windows:
         return free_windows
+    start = prefs.work_start if start_hour is None else start_hour
+    if start >= prefs.work_end:
+        return []   # woke up after the work day ended — nothing to schedule into
     return [FreeWindow(
-        start_hour=prefs.work_start,
+        start_hour=start,
         end_hour=prefs.work_end,
-        duration_minutes=(prefs.work_end - prefs.work_start) * 60,
+        duration_minutes=(prefs.work_end - start) * 60,
     )]
 
 
@@ -239,6 +259,7 @@ async def fetch_calendar_node(state: dict) -> dict:
     """
     target_date: date = state["target_date"]
     prefs = get_current_prefs()
+    work_start = _work_start_hour(state, prefs)
 
     supplied = state.get("calendar_events")
     if supplied is not None:
@@ -249,10 +270,10 @@ async def fetch_calendar_node(state: dict) -> dict:
         save_calendar_snapshot()
         fixed_blocks = calendar_agent.events_to_fixed_blocks(supplied, target_date)
         free_windows = calendar_agent.extract_free_windows(
-            fixed_blocks, target_date, prefs.work_start, prefs.work_end)
+            fixed_blocks, target_date, work_start, prefs.work_end)
         return {
             "fixed_blocks": fixed_blocks,
-            "free_windows": _free_windows_or_whole_day(free_windows, prefs),
+            "free_windows": _free_windows_or_whole_day(free_windows, prefs, work_start),
         }
 
     # ── No frontend calendar supplied → use the last EventKit snapshot the
@@ -271,10 +292,10 @@ async def fetch_calendar_node(state: dict) -> dict:
         if snapshot:
             fixed_blocks = calendar_agent.events_to_fixed_blocks(snapshot, target_date)
             free_windows = calendar_agent.extract_free_windows(
-                fixed_blocks, target_date, prefs.work_start, prefs.work_end)
+                fixed_blocks, target_date, work_start, prefs.work_end)
         else:
             fixed_blocks, free_windows = [], []
-        free_windows = _free_windows_or_whole_day(free_windows, prefs)
+        free_windows = _free_windows_or_whole_day(free_windows, prefs, work_start)
         _calendar_cache[target_date] = (fixed_blocks, free_windows, time.monotonic())
 
     return {"fixed_blocks": fixed_blocks, "free_windows": free_windows}
@@ -351,8 +372,10 @@ def compute_meals_node(state: dict) -> dict:
         for start, end, label in meal_windows
     ]
     all_fixed = sorted(fixed_blocks + meal_blocks, key=lambda b: b.start)
+    # This recompute is what the scheduler actually places into, so the wake hour
+    # has to be honoured here too — not just in fetch_calendar_node.
     free_windows_with_meals = calendar_agent.extract_free_windows(
-        all_fixed, target_date, prefs.work_start, prefs.work_end
+        all_fixed, target_date, _work_start_hour(state, prefs), prefs.work_end
     )
     return {
         "meal_blocks": meal_blocks,

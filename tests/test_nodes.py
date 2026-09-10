@@ -304,3 +304,82 @@ async def test_apply_adjustment_removes_blocks_after_hour(
     for block in schedule.blocks:
         if block.block_type.value == "scheduled":
             assert block.start.hour < 15, f"Block at {block.start} should have been removed"
+
+
+# ─── wake hour bounds the schedulable day ───────────────────────────────────
+
+def _snapshot_waking_at(sample_date, hour, minute=0):
+    from datetime import timedelta
+    from models.health import HealthSnapshot, SleepData
+    return HealthSnapshot(
+        date=sample_date,
+        sleep=SleepData(
+            duration_hours=7.0,
+            sleep_start=datetime.combine(
+                sample_date - timedelta(days=1), datetime.min.time()).replace(hour=3),
+            sleep_end=datetime.combine(
+                sample_date, datetime.min.time()).replace(hour=hour, minute=minute),
+        ),
+    )
+
+
+async def test_late_wake_pushes_work_start_past_sleep(clean_stores, sample_date):
+    """
+    Regression: sleeping until 10:00 still produced blocks at 09:00.
+
+    The preferred work start (a standing intention) was the only input to the
+    free-window calculation; the wake hour never reached it, so the day got
+    planned on top of the user's sleep.
+    """
+    state = {
+        "target_date": sample_date,
+        "language": Language.en,
+        "snapshot": _snapshot_waking_at(sample_date, 10),
+    }
+    health = await fetch_health_node(state)
+    assert health["wake_hour"] == 10
+
+    patch = await fetch_calendar_node({**state, **health, "calendar_events": []})
+    assert patch["free_windows"][0].start_hour == 10
+
+
+async def test_partial_wake_hour_rounds_up(clean_stores, sample_date):
+    """Waking at 10:30 means 10:00–10:30 is still sleep — start at 11, not 10."""
+    state = {
+        "target_date": sample_date,
+        "language": Language.en,
+        "snapshot": _snapshot_waking_at(sample_date, 10, 30),
+    }
+    health = await fetch_health_node(state)
+    assert health["wake_hour"] == 11
+    # sleep_end_hour keeps its own meaning (the hour sleep ended) for meal breaks
+    assert health["sleep_end_hour"] == 10
+
+
+async def test_early_wake_does_not_pull_work_start_earlier(clean_stores, sample_date):
+    """The wake hour only ever delays the start — waking at 05:00 doesn't mean
+    the schedule should begin at 05:00."""
+    from api.preferences import get_current_prefs
+    prefs = get_current_prefs()
+    state = {
+        "target_date": sample_date,
+        "language": Language.en,
+        "snapshot": _snapshot_waking_at(sample_date, 5),
+    }
+    health = await fetch_health_node(state)
+    patch = await fetch_calendar_node({**state, **health, "calendar_events": []})
+    assert patch["free_windows"][0].start_hour == prefs.work_start
+
+
+async def test_meal_recompute_also_honours_wake_hour(clean_stores, sample_date):
+    """compute_meals_node recomputes the windows the scheduler actually uses, so
+    fixing only fetch_calendar_node would leave the bug in place."""
+    state = {
+        "target_date": sample_date,
+        "language": Language.en,
+        "snapshot": _snapshot_waking_at(sample_date, 10),
+    }
+    health = await fetch_health_node(state)
+    patch = compute_meals_node({**state, **health, "fixed_blocks": []})
+    assert all(w.start_hour >= 10 for w in patch["free_windows"])
+    assert all(b.start.hour >= 10 for b in patch["meal_blocks"])
