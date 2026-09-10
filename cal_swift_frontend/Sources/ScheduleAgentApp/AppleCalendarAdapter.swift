@@ -227,27 +227,58 @@ extension AppleCalendarAdapter {
     // MARK: Apply change-sets
 
     /// Apply a today's-time-blocks change-set to the calendar (delete-before-create).
+    /// Apply a day's change-set to the calendar.
+    ///
+    /// The decision of what to remove and what to write is `CalendarChangePlan`
+    /// (pure, unit-tested in Core); this only executes it. Everything is staged
+    /// with `commit: false` and committed once at the end, so a failure part-way
+    /// through doesn't leave the day half-written.
     func applyEventChangeset(_ changeset: DayflowEventChangeset, on date: Date) throws {
         let calendar = try eventCalendar()
         let byTag = agentActiveEventsByTagKey(on: date)
+        let plan = CalendarChangePlan.plan(for: changeset)
 
-        for ref in changeset.delete {
-            for event in byTag[ref.tagKey] ?? [] { try store.remove(event, span: .thisEvent, commit: false) }
+        for tagKey in plan.tagKeysToRemove {
+            for event in byTag[tagKey] ?? [] {
+                try store.remove(event, span: .thisEvent, commit: false)
+            }
         }
-        for spec in changeset.update {
-            for event in byTag[spec.tagKey] ?? [] { try store.remove(event, span: .thisEvent, commit: false) }
+        for planned in plan.eventsToUpdate {
+            // Edit in place so the event keeps its identity — and with it any
+            // notes, attachments or alerts the user added. Duplicates under one
+            // tag shouldn't happen, but if they do, the first is updated and the
+            // rest removed so the day converges on one event per block.
+            let existing = byTag[planned.tagKey] ?? []
+            if let event = existing.first {
+                apply(planned, to: event, in: calendar)
+                try store.save(event, span: .thisEvent, commit: false)
+                for duplicate in existing.dropFirst() {
+                    try store.remove(duplicate, span: .thisEvent, commit: false)
+                }
+            } else {
+                // The backend thought this existed; it doesn't (deleted by hand,
+                // or on another device). Write it rather than losing the block.
+                try create(planned, in: calendar)
+            }
         }
-        for spec in changeset.update + changeset.create {
-            guard let start = Self.parse(spec.start), let end = Self.parse(spec.end) else { continue }
-            let event = EKEvent(eventStore: store)
-            event.calendar = calendar
-            event.title = spec.title
-            event.startDate = start
-            event.endDate = end
-            event.notes = spec.notes ?? spec.tag
-            try store.save(event, span: .thisEvent, commit: false)
+        for planned in plan.eventsToCreate {
+            try create(planned, in: calendar)
         }
         try store.commit()
+    }
+
+    private func apply(_ planned: PlannedCalendarEvent, to event: EKEvent, in calendar: EKCalendar) {
+        event.calendar = calendar
+        event.title = planned.title
+        event.startDate = planned.start
+        event.endDate = planned.end
+        event.notes = planned.notes
+    }
+
+    private func create(_ planned: PlannedCalendarEvent, in calendar: EKCalendar) throws {
+        let event = EKEvent(eventStore: store)
+        apply(planned, to: event, in: calendar)
+        try store.save(event, span: .thisEvent, commit: false)
     }
 
     /// Apply a project's reminders change-set (delete-before-create). Reminders
@@ -380,25 +411,12 @@ extension AppleCalendarAdapter {
         return f
     }()
 
-    private static let isoDate: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-
-    static func iso(_ date: Date) -> String { isoDateTime.string(from: date) }
-    static func dayKey(_ date: Date) -> String { isoDate.string(from: date) }
-
-    static func parse(_ value: String) -> Date? {
-        if value.count >= 19, let d = isoDateTime.date(from: String(value.prefix(19))) { return d }
-        if let d = isoDate.date(from: value) { return d }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = iso.date(from: value) { return d }
-        iso.formatOptions = [.withInternetDateTime]
-        return iso.date(from: value)
-    }
+    // Date formatting lives in Core (`CalendarDateFormat`) so the change-set
+    // planner can parse without depending on this target. Kept as thin
+    // forwarders — call sites here are many and read better unqualified.
+    static func iso(_ date: Date) -> String { CalendarDateFormat.iso(date) }
+    static func dayKey(_ date: Date) -> String { CalendarDateFormat.dayKey(date) }
+    static func parse(_ value: String) -> Date? { CalendarDateFormat.parse(value) }
 
     private static func dayInterval(_ date: Date) -> DateInterval {
         let start = Calendar.current.startOfDay(for: date)

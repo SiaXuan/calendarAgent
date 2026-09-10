@@ -454,16 +454,9 @@ struct DayflowDeleteResult: Codable {
     }
 }
 
-struct DayflowTagRef: Codable, Identifiable {
-    var id: String { tagKey }
-    var tagKey: String
-    var tag: String
-
-    enum CodingKeys: String, CodingKey {
-        case tagKey = "tag_key"
-        case tag
-    }
-}
+// DayflowTagRef / DayflowEventSpec / DayflowEventChangeset moved to
+// ScheduleAgentCore/CalendarChangeset.swift so the change-set → calendar-write
+// decision can be unit-tested (the executable target isn't importable from tests).
 
 struct DayflowReminderSpec: Codable, Identifiable {
     var id: String { tagKey }
@@ -500,33 +493,6 @@ struct DayflowReplanResult: Codable {
         case reminders
         case affectedDates = "affected_dates"
     }
-}
-
-struct DayflowEventSpec: Codable, Identifiable {
-    var id: String { tagKey }
-    var blockKey: String
-    var tagKey: String
-    var tag: String
-    var title: String
-    var start: String
-    var end: String
-    var description: String?
-    var notes: String?
-    var projectID: String?
-
-    enum CodingKeys: String, CodingKey {
-        case blockKey = "block_key"
-        case tagKey = "tag_key"
-        case tag, title, start, end, description, notes
-        case projectID = "project_id"
-    }
-}
-
-struct DayflowEventChangeset: Codable {
-    var create: [DayflowEventSpec]
-    var update: [DayflowEventSpec]
-    var delete: [DayflowTagRef]
-    var unchanged: Int
 }
 
 struct DayflowProjectPlan: Codable {

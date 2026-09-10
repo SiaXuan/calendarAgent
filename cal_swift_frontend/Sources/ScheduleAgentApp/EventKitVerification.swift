@@ -1,4 +1,5 @@
 import Foundation
+import ScheduleAgentCore
 
 /// Manual on-device check for the Phase 4 EventKit executor. Because macOS TCC
 /// only prompts when the app is launched as a bundle by LaunchServices, run it
