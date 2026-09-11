@@ -58,6 +58,32 @@ class TestFindNearestSlot:
         # 10:23 → snapped to 10:15
         assert result == datetime(2026, 5, 15, 10, 15)
 
+    def test_impossible_block_clamps_into_work_hours(self):
+        """
+        When nothing is clear, the fallback must still return a legal position.
+
+        It used to hand back the requested start untouched, which is how a
+        325-minute block ended up at 08:00 on a day the user slept until 10:00:
+        no slot that long existed, every candidate conflicted, and the "give up"
+        branch returned the request as-is.
+        """
+        all_day = TimeBlock(
+            start=datetime(2026, 5, 15, 10, 0), end=datetime(2026, 5, 15, 20, 0),
+            block_type=BlockType.fixed, title="Conference",
+        )
+        result = find_nearest_slot(
+            datetime(2026, 5, 15, 8, 0), 325, [all_day], 10, 22,
+        )
+        assert result >= datetime(2026, 5, 15, 10, 0)
+        assert result + timedelta(minutes=325) <= datetime(2026, 5, 15, 22, 0)
+
+    def test_block_longer_than_the_day_starts_at_work_start(self):
+        """A block that can't fit at all still begins where the day begins."""
+        result = find_nearest_slot(
+            datetime(2026, 5, 15, 8, 0), 24 * 60, [], 10, 22,
+        )
+        assert result == datetime(2026, 5, 15, 10, 0)
+
     def test_respects_work_end(self):
         """A pin that would extend past work_end gets pushed back, not out of bounds."""
         result = find_nearest_slot(
@@ -407,3 +433,48 @@ async def test_reflow_preserves_pinned_block_position(
     )
     assert pinned is not None
     assert pinned["start"].startswith("2026-05-15T15:00:00")
+
+
+async def test_pin_cannot_park_a_block_in_the_hours_you_slept(
+    client, seeded_schedule, sample_task
+):
+    """
+    Regression (real-machine report): sleeping 03:00–10:00, then hitting "+" to
+    add a pomodoro walked the card backwards to 08:00.
+
+    Resizing goes through find_nearest_slot, which was bounded by the *preferred*
+    work start rather than the wake hour — a second copy of the bug fixed in the
+    schedule graph. It matters more here than there, because apply_pins_node
+    trusts a pin's position verbatim, so a regenerate never corrects it.
+    """
+    from datetime import datetime, timedelta
+    from models.health import HealthSnapshot, SleepData
+    from storage import health_store
+
+    d = date(2026, 5, 15)
+    health_store[d] = HealthSnapshot(
+        date=d,
+        sleep=SleepData(
+            duration_hours=7.0,
+            sleep_start=datetime.combine(d - timedelta(days=1), datetime.min.time()).replace(hour=3),
+            sleep_end=datetime.combine(d, datetime.min.time()).replace(hour=10),
+        ),
+    )
+
+    from agents import health_agent
+    from api.preferences import get_current_prefs
+    assert health_store.get(d) is not None, "snapshot didn't land in the store"
+    assert health_agent.day_start_hour(
+        health_store.get(d), get_current_prefs().work_start) == 10
+
+    r = client.post(
+        "/schedule/2026-05-15/pin",
+        json={
+            "block_key": f"{seeded_schedule}::Energy curve work",
+            "start_iso": "2026-05-15T08:00:00",
+            "duration_min": 325,
+        },
+    )
+    assert r.status_code == 200
+    placed = datetime.fromisoformat(r.json()["start"])
+    assert placed.hour >= 10, f"pinned into sleep at {placed:%H:%M}"

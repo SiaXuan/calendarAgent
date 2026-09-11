@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from agents import health_agent
 from agents.calendar_reconcile import reconcile_schedule
 from agents.calendar_writeback import (
     delete_block_from_calendar as _delete_block_from_calendar,
@@ -23,6 +24,7 @@ from storage import (
     PinSpec,
     bump_schedule_version,
     completion_store,
+    health_store,
     schedule_store,
     subtask_pins,
 )
@@ -348,8 +350,12 @@ async def pin_block(target_date: str, payload: PinRequest):
         if b.block_type in (BlockType.fixed, BlockType.meal)
         and not (b.task_id and f"{b.task_id}::{b.title}" == payload.block_key)
     ]
+    # Bound by when the user actually woke, not just their preferred start —
+    # otherwise resizing a card walks it backwards into the hours they slept
+    # through, and apply_pins_node then trusts that position verbatim.
+    day_start = health_agent.day_start_hour(health_store.get(d), prefs.work_start)
     placed_start = find_nearest_slot(
-        requested_start, duration_min, blocking, prefs.work_start, prefs.work_end,
+        requested_start, duration_min, blocking, day_start, prefs.work_end,
     )
 
     subtask_pins.setdefault(d, {})[payload.block_key] = PinSpec(

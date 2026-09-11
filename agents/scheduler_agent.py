@@ -100,9 +100,16 @@ def find_nearest_slot(
             return forward
         if not _conflicts(backward):
             return backward
-    # Last resort: return the snapped preferred even if it conflicts — caller
-    # decides whether to surface an error.
-    return base
+    # Last resort: nothing is clear — e.g. a 5-hour block on a day already broken
+    # up by meetings and meals. Clamp into the legal window instead of handing
+    # back the requested start: that used to park a long block at 08:00 on a day
+    # the user slept until 10:00, and because a pin is trusted verbatim by
+    # apply_pins_node, a regenerate never corrected it. Overlapping a block that
+    # will reflow is a smaller lie than scheduling over sleep.
+    latest = work_end - duration
+    if latest < work_start:
+        return work_start
+    return min(max(base, work_start), latest)
 
 # ── Meal break reference (circadian biology) ─────────────────────────────────
 # Sources: Panda (2019) "Circadian physiology of metabolism" Science;

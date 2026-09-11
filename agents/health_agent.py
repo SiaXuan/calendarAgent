@@ -24,9 +24,43 @@ from models.user import Language
 _HRV_BASELINE = 40.0   # ms — population median used when no personal history exists
 
 
+_DEFAULT_WAKE_HOUR = 7
+_EARLIEST_CREDIBLE_WAKE_HOUR = 5   # earlier than this reads as bad data, not a habit
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Public API
 # ──────────────────────────────────────────────────────────────────────────────
+
+def wake_hour(snapshot: HealthSnapshot | None) -> int:
+    """First hour the user could plausibly be working.
+
+    Rounds up past a partial hour — waking at 10:30 means 10:00–10:30 is still
+    sleep, so the first usable hour is 11.
+    """
+    if snapshot is None:
+        return _DEFAULT_WAKE_HOUR
+    end = snapshot.sleep.sleep_end
+    if end.hour < _EARLIEST_CREDIBLE_WAKE_HOUR:
+        return _DEFAULT_WAKE_HOUR
+    return end.hour + (1 if end.minute else 0)
+
+
+def day_start_hour(snapshot: HealthSnapshot | None, work_start: int) -> int:
+    """The hour the day actually opens for scheduling.
+
+    The preference is a standing intention ("I work from 8"); the wake hour is
+    what happened. Take the later — work can't start before you're awake, and
+    waking at 05:00 doesn't mean the day should begin then.
+
+    Every placement decision must go through this. It exists because "when does
+    the day start" was independently re-derived as `prefs.work_start` in four
+    places (free windows, the meal recompute, instant blocks, and the pin
+    endpoint), so fixing the schedule graph alone still left dragging or
+    resizing a card able to park it on top of the user's sleep.
+    """
+    return max(work_start, wake_hour(snapshot))
+
 
 def compute_energy_curve(snapshot: HealthSnapshot) -> list[float]:
     """

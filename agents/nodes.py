@@ -200,13 +200,9 @@ async def fetch_health_node(state: dict) -> dict:
 
     sleep_end_hour = 7
     sleep_start_hour = 23
-    wake_hour = 7
     if snapshot:
         if snapshot.sleep.sleep_end.hour >= 5:
             sleep_end_hour = snapshot.sleep.sleep_end.hour
-            # Round up past a partial hour: waking at 10:30 means 10:00–10:30 is
-            # still sleep, so the first hour actually available for work is 11.
-            wake_hour = sleep_end_hour + (1 if snapshot.sleep.sleep_end.minute else 0)
         if snapshot.sleep.sleep_start.hour >= 20:
             sleep_start_hour = snapshot.sleep.sleep_start.hour
 
@@ -216,19 +212,12 @@ async def fetch_health_node(state: dict) -> dict:
         "health_summary": summary,
         "sleep_end_hour": sleep_end_hour,
         "sleep_start_hour": sleep_start_hour,
-        "wake_hour": wake_hour,
+        "wake_hour": health_agent.wake_hour(snapshot),
     }
 
 
 def _work_start_hour(state: dict, prefs) -> int:
-    """The first hour the day is actually schedulable.
-
-    The preferred work start is a standing intention; the wake hour is what
-    happened. Scheduling used to use only the preference, so sleeping until 10:00
-    still produced blocks at 09:00 — the day was planned on top of the user's
-    sleep. Sleep already shaped the energy curve and the meal breaks; it just
-    never reached the window that bounds placement.
-    """
+    """The first hour this day is schedulable — see health_agent.day_start_hour."""
     return max(prefs.work_start, state.get("wake_hour", prefs.work_start))
 
 
@@ -342,7 +331,8 @@ def split_instant_node(state: dict) -> dict:
         if s.is_instant and (s.suggested_date is None or s.suggested_date <= target_date)
     ]
     regular_subtasks = [s for s in all_subtasks if not s.is_instant]
-    instant_blocks = _make_instant_blocks(instant_subtasks, target_date, prefs.work_start)
+    instant_blocks = _make_instant_blocks(
+        instant_subtasks, target_date, _work_start_hour(state, prefs))
     return {
         "subtasks": regular_subtasks,
         "instant_subtasks": instant_subtasks,
@@ -547,7 +537,9 @@ async def apply_adjustment_node(state: dict) -> dict:
         if s.is_instant and (s.suggested_date is None or s.suggested_date <= target_date)
     ]
     regular_subtasks = [s for s in all_subtasks if not s.is_instant]
-    instant_blocks = _make_instant_blocks(instant_subtasks, target_date, prefs.work_start)
+    instant_blocks = _make_instant_blocks(
+        instant_subtasks, target_date,
+        health_agent.day_start_hour(snapshot, prefs.work_start))
 
     sleep_start_hour = 23
     if snapshot and snapshot.sleep.sleep_start.hour >= 20:
