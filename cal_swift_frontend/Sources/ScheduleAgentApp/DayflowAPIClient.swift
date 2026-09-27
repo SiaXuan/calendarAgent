@@ -1,12 +1,6 @@
 import Foundation
 import ScheduleAgentCore
 
-struct DayflowWriteResponse: Decodable {
-    var written: Int
-    var deleted: Int?
-    var skipped: Bool?
-}
-
 struct DayflowPinResponse: Decodable {
     var blockKey: String
     var start: Date
@@ -232,13 +226,9 @@ final class DayflowAPIClient: @unchecked Sendable {
         }
     }
 
-    func writeSchedule(date: String) async throws -> DayflowWriteResponse {
-        try await request("/schedule/\(date)/write", method: "POST", encodedBody: nil)
-    }
-
-    func writeScheduleBlock(date: String, start: Date) async throws -> DayflowWriteResponse {
-        try await request("/schedule/\(date)/blocks/write", method: "POST", body: ["start": Self.backendDateString(from: start)])
-    }
+    // writeSchedule / writeScheduleBlock removed 2026-09-27: the backend no
+    // longer writes the calendar. Both callers now go through
+    // scheduleChangeset + AppleCalendarAdapter.applyEventChangeset.
 
     func pinBlock(date: String, blockKey: String, start: Date, durationMinutes: Int? = nil) async throws -> DayflowPinResponse {
         var body: [String: EncodableValue] = [

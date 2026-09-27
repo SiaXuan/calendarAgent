@@ -154,3 +154,71 @@ struct CalendarDateFormatTests {
         #expect(CalendarDateFormat.dayKey(original) == "2026-06-15")
     }
 }
+
+@Suite("Single-block change-set")
+struct ChangesetNarrowingTests {
+
+    private func spec(_ blockKey: String, _ tagKey: String) -> DayflowEventSpec {
+        DayflowEventSpec(
+            blockKey: blockKey, tagKey: tagKey, tag: "[agent-scheduled:dayflow:\(tagKey)]",
+            title: blockKey, start: "2026-06-15T09:00:00", end: "2026-06-15T10:00:00")
+    }
+
+    @Test("keeps only the requested block's creates and updates")
+    func keepsOnlyTheOneBlock() {
+        let narrowed = DayflowEventChangeset(
+            create: [spec("t1::A", "aaa"), spec("t2::B", "bbb")],
+            update: [spec("t3::C", "ccc")],
+            unchanged: 4
+        ).limited(toBlockKey: "t1::A")
+
+        #expect(narrowed.create.map(\.blockKey) == ["t1::A"])
+        #expect(narrowed.update.isEmpty)
+        #expect(narrowed.unchanged == 0)
+    }
+
+    @Test("an update to the requested block survives narrowing")
+    func keepsAnUpdate() {
+        let narrowed = DayflowEventChangeset(
+            create: [spec("t1::A", "aaa")],
+            update: [spec("t2::B", "bbb")]
+        ).limited(toBlockKey: "t2::B")
+
+        #expect(narrowed.create.isEmpty)
+        #expect(narrowed.update.map(\.blockKey) == ["t2::B"])
+    }
+
+    @Test("deletes are dropped — one row's sync button removes nothing")
+    func dropsDeletes() {
+        // A delete carries only a tag key, so it can't be attributed to a block
+        // key; applying the day's deletes off a single-row press would silently
+        // clear events the user never touched.
+        let narrowed = DayflowEventChangeset(
+            create: [spec("t1::A", "aaa")],
+            delete: [DayflowTagRef(tagKey: "zzz", tag: "t")]
+        ).limited(toBlockKey: "t1::A")
+
+        #expect(narrowed.delete.isEmpty)
+        #expect(narrowed.create.count == 1)
+    }
+
+    @Test("a block with nothing to do narrows to an empty change-set")
+    func unknownBlockIsEmpty() {
+        let narrowed = DayflowEventChangeset(
+            create: [spec("t1::A", "aaa")], unchanged: 3
+        ).limited(toBlockKey: "t9::missing")
+
+        #expect(narrowed.writeCount == 0)
+        #expect(narrowed.delete.isEmpty)
+    }
+
+    @Test("writeCount counts creates and updates, not unchanged")
+    func writeCountIgnoresUnchanged() {
+        let cs = DayflowEventChangeset(
+            create: [spec("t1::A", "aaa")],
+            update: [spec("t2::B", "bbb")],
+            delete: [DayflowTagRef(tagKey: "z", tag: "t")],
+            unchanged: 9)
+        #expect(cs.writeCount == 2)
+    }
+}

@@ -196,3 +196,26 @@ public enum CalendarDateFormat {
         return iso.date(from: value)
     }
 }
+
+// MARK: - Narrowing a change-set
+
+extension DayflowEventChangeset {
+    /// The slice of this change-set that concerns a single block.
+    ///
+    /// The per-row sync button means "put THIS block on my calendar", not "sync
+    /// my whole day" — the backend computes the day's diff wholesale, so the
+    /// narrowing happens here. Deletes are dropped entirely: they carry only a
+    /// tag key, so they can't be attributed to a block key, and a single-block
+    /// push has no business removing anything else.
+    public func limited(toBlockKey blockKey: String) -> DayflowEventChangeset {
+        DayflowEventChangeset(
+            create: create.filter { $0.blockKey == blockKey },
+            update: update.filter { $0.blockKey == blockKey },
+            delete: [],
+            unchanged: 0
+        )
+    }
+
+    /// How many calendar events this change-set writes.
+    public var writeCount: Int { create.count + update.count }
+}

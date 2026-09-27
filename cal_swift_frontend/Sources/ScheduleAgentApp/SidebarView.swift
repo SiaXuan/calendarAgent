@@ -1599,25 +1599,44 @@ struct SidebarView: View {
         }
     }
 
+    /// Push the day's schedule to the calendar via EventKit.
+    ///
+    /// The backend no longer writes the calendar: it diffs today's blocks against
+    /// the agent events we already own and returns a change-set, which the adapter
+    /// applies. `blockKey` narrows that to one row (the per-row sync button);
+    /// nil syncs the whole day.
+    ///
+    /// Returns the block keys that ended up on the calendar, so callers can mark
+    /// them synced without guessing.
+    @discardableResult
+    private func pushToCalendar(blockKey: String? = nil) async throws -> [String] {
+        guard let day = Self.date(from: scheduleDate) else { return [] }
+        let current = calendarAdapter.currentAgentEvents(on: day)
+        var changeset = try await dayflowClient.scheduleChangeset(
+            date: scheduleDate, currentEvents: current)
+        if let blockKey { changeset = changeset.limited(toBlockKey: blockKey) }
+        try calendarAdapter.applyEventChangeset(changeset, on: day)
+        return (changeset.create + changeset.update).map(\.blockKey)
+    }
+
     private func syncQueueToCalendar() {
         guard !isLoadingBackend else { return }
-        let blockKeys = state.todayQueue.compactMap { state.backendBlockKey(for: $0.id) }
         isLoadingBackend = true
-        state.statusMessage = "Writing Dayflow schedule to calendar..."
+        state.statusMessage = "Syncing schedule to calendar..."
         Task {
             do {
-                let response = try await dayflowClient.writeSchedule(date: scheduleDate)
+                let written = try await pushToCalendar()
                 await MainActor.run {
-                    for blockKey in blockKeys {
-                        state.markBackendBlockSynced(blockKey)
-                    }
-                    state.statusMessage = "Backend wrote \(response.written) calendar block\(response.written == 1 ? "" : "s")."
+                    for key in written { state.markBackendBlockSynced(key) }
+                    state.statusMessage = written.isEmpty
+                        ? "Calendar already up to date."
+                        : "Synced \(written.count) block\(written.count == 1 ? "" : "s") to calendar."
                     isLoadingBackend = false
                 }
                 await reloadAfterBackendMutation()
             } catch {
                 await MainActor.run {
-                    state.statusMessage = "Backend calendar write failed: \(error.localizedDescription)"
+                    state.statusMessage = "Calendar sync failed: \(error.localizedDescription)"
                     isLoadingBackend = false
                 }
             }
@@ -1625,29 +1644,27 @@ struct SidebarView: View {
     }
 
     private func acceptSingleTask(_ taskID: UUID) {
-        guard let start = state.backendStart(for: taskID),
-              let blockKey = state.backendBlockKey(for: taskID)
-        else {
+        guard let blockKey = state.backendBlockKey(for: taskID) else {
             state.statusMessage = "This task has no backend schedule block yet."
             return
         }
         guard !isLoadingBackend else { return }
         isLoadingBackend = true
-        state.statusMessage = "Writing one Dayflow block to calendar..."
+        state.statusMessage = "Syncing one block to calendar..."
         Task {
             do {
-                let response = try await dayflowClient.writeScheduleBlock(date: scheduleDate, start: start)
+                let written = try await pushToCalendar(blockKey: blockKey)
                 await MainActor.run {
                     state.markBackendBlockSynced(blockKey)
-                    state.statusMessage = response.skipped == true
-                        ? "Backend skipped this block because it is already synced."
-                        : "Backend wrote this block to calendar."
+                    state.statusMessage = written.isEmpty
+                        ? "This block is already up to date on the calendar."
+                        : "Synced this block to calendar."
                     isLoadingBackend = false
                 }
                 await reloadAfterBackendMutation()
             } catch {
                 await MainActor.run {
-                    state.statusMessage = "Single block write failed: \(error.localizedDescription)"
+                    state.statusMessage = "Single block sync failed: \(error.localizedDescription)"
                     isLoadingBackend = false
                 }
             }
@@ -1655,20 +1672,18 @@ struct SidebarView: View {
     }
 
     /// Push an edit (move / resize / drag) of an ALREADY-synced block through to
-    /// its calendar event. The backend keys events by a time-independent tag and
-    /// delete-before-writes, so writing the block again simply updates the event's
-    /// time. No-op for blocks that were never synced.
+    /// its calendar event. The block key is time-independent, so the change-set
+    /// reports the moved block as an update and the adapter edits the event in
+    /// place. No-op for blocks that were never synced.
     private func resyncCalendarIfSynced(_ taskID: UUID) async {
-        let start: Date? = await MainActor.run { () -> Date? in
+        let blockKey: String? = await MainActor.run { () -> String? in
             guard let key = state.backendBlockKey(for: taskID),
-                  state.isBackendBlockSynced(key),
-                  let s = state.backendStart(for: taskID)
-            else { return nil }
-            return s
+                  state.isBackendBlockSynced(key) else { return nil }
+            return key
         }
-        guard let start else { return }
+        guard let blockKey else { return }
         do {
-            _ = try await dayflowClient.writeScheduleBlock(date: scheduleDate, start: start)
+            try await pushToCalendar(blockKey: blockKey)
             await MainActor.run { state.statusMessage = "Updated the synced calendar event." }
         } catch {
             await MainActor.run {
@@ -1677,20 +1692,18 @@ struct SidebarView: View {
         }
     }
 
-    /// Re-push every currently-synced block to the calendar. Used after an agent
-    /// proposal that touched a synced block is confirmed — the confirm only
-    /// reloads the schedule, so the written events would otherwise go stale.
+    /// Re-push every currently-synced block. Used after an agent proposal that
+    /// touched a synced block is confirmed — the confirm only reloads the
+    /// schedule, so the written events would otherwise go stale. One whole-day
+    /// change-set covers them all; untouched blocks come back `unchanged`.
     private func resyncAllSyncedBlocks() async {
-        let starts: [Date] = await MainActor.run { () -> [Date] in
-            state.todayQueue.compactMap { task in
-                guard let key = state.backendBlockKey(for: task.id),
-                      state.isBackendBlockSynced(key) else { return nil }
-                return state.backendStart(for: task.id)
+        let hasSynced = await MainActor.run {
+            state.todayQueue.contains { task in
+                state.backendBlockKey(for: task.id).map { state.isBackendBlockSynced($0) } ?? false
             }
         }
-        for start in starts {
-            _ = try? await dayflowClient.writeScheduleBlock(date: scheduleDate, start: start)
-        }
+        guard hasSynced else { return }
+        _ = try? await pushToCalendar()
     }
 
     /// Toggle a task's done state. Optimistic (the checkmark flips instantly),
