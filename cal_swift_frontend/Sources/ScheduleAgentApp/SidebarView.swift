@@ -1769,6 +1769,7 @@ struct SidebarView: View {
             state.statusMessage = "This task has no backend block to remove."
             return
         }
+        let wasSynced = state.isBackendBlockSynced(blockKey)
         state.statusMessage = "Removing task from today…"
         Task {
             do {
@@ -1777,6 +1778,13 @@ struct SidebarView: View {
                 await MainActor.run {
                     state.applyDayflowSchedule(schedule, now: Date())
                     state.statusMessage = "Removed from today's schedule."
+                }
+                if wasSynced {
+                    // The block is gone from the day, so a whole-day change-set
+                    // now reports its event as a delete. Must NOT be narrowed to
+                    // the block key — narrowing drops deletes, which would leave
+                    // the calendar event orphaned.
+                    _ = try? await pushToCalendar()
                 }
             } catch {
                 await MainActor.run {
