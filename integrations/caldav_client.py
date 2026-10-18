@@ -180,12 +180,20 @@ def _fetch_reminders_applescript() -> list[dict]:
     Returns a list of reminder dicts compatible with _parse_todo() output.
     Falls back to [] on any error (permission denied, app not available, etc.).
     """
-    # AppleScript outputs one reminder per line, pipe-delimited:
+    # One reminder per RECORD, pipe-delimited:
     # list_name|title|due_date_iso_or_empty|priority_0_to_9|body_or_empty
+    # Records are separated by ASCII 30 (record separator), not newline: a
+    # reminder's body may contain newlines, which split one record across lines
+    # and left the continuation lines to be discarded as malformed — silently
+    # truncating the body. The body is not cosmetic: it supplies the title for
+    # reminders left at the default name, and feeds instant classification.
+    # (The old code carried a comment claiming newlines were replaced; nothing
+    # replaced them.) Pipes inside a body are harmless — the parser splits at
+    # most 4 times, so everything after the 4th pipe stays in the body.
     script = r"""
 tell application "Reminders"
     set sep to "|"
-    set nl to ASCII character 10
+    set nl to ASCII character 30
     set output to ""
     repeat with aList in every list
         set listName to name of aList
@@ -228,7 +236,6 @@ tell application "Reminders"
                         set rBody to ""
                     end try
                 end timeout
-                -- Replace pipe and newline in fields to avoid parsing errors
                 set output to output & listName & sep & rTitle & sep & rDue & sep & rPri & sep & rBody & nl
             end if
         end repeat
@@ -250,7 +257,7 @@ end tell
         return []
 
     reminders: list[dict] = []
-    for line in raw_output.splitlines():
+    for line in raw_output.split("\x1e"):
         parts = line.split("|", 4)
         if len(parts) < 4:
             continue
