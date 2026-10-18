@@ -9,7 +9,6 @@ from sse_starlette.sse import EventSourceResponse
 from agents import health_agent
 from agents.calendar_reconcile import reconcile_schedule
 from agents.calendar_writeback import (
-    delete_block_from_calendar as _delete_block_from_calendar,
     write_block_to_calendar as _writeback_block,
     write_schedule_to_calendar as _writeback_schedule,
 )
@@ -419,7 +418,13 @@ async def remove_scheduled_block(target_date: str, block_key: str):
     schedule_store[d] = current.model_copy(update={"blocks": kept})
     subtask_pins.get(d, {}).pop(block_key, None)
     bump_schedule_version(d)   # invalidates any stale pending Proposal + persists
-    # If the block was already written to the calendar, drop its event too
-    # (best-effort; no-op in local-only mode). Otherwise it would orphan.
-    await _delete_block_from_calendar(d, removed)
+    # The calendar event is NOT dropped here. This used to call
+    # delete_block_from_calendar, which goes out to iCloud over CalDAV: measured
+    # at ~20s against a real account even when the tag matches nothing, because
+    # it pulls the whole calendar down to search it. The request appeared to fail
+    # in the UI while the backend was still working, then "succeeded" on refresh.
+    # It was also pointless — events are written by the Swift client into a local
+    # EventKit calendar that CalDAV can't see. The client removes the event
+    # instead: once the block is gone from the day, its whole-day change-set
+    # reports that event as a delete (SidebarView.deleteTaskFromSchedule).
     return schedule_store[d]

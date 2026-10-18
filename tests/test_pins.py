@@ -292,20 +292,23 @@ async def test_remove_block_takes_it_off_the_schedule(client, seeded_schedule):
     assert gone
 
 
-async def test_remove_block_also_deletes_calendar_event(client, seeded_schedule, monkeypatch):
-    """A synced block's calendar event must be cleaned up on remove, not orphaned."""
-    import api.schedule as sched
-    seen = {}
+async def test_remove_block_does_not_touch_the_calendar(client, seeded_schedule):
+    """
+    Removing a block is a pure store operation — no calendar I/O.
 
-    async def _fake_delete(d, block):
-        seen["block_key"] = f"{block.task_id}::{block.title}"
-        return {"deleted": 1, "ok": True}
-
-    monkeypatch.setattr(sched, "_delete_block_from_calendar", _fake_delete)
+    It used to call delete_block_from_calendar, i.e. CalDAV out to iCloud:
+    ~20s against a real account even for a tag matching nothing, because it
+    pulls the whole calendar down to search. The UI reported failure while the
+    backend was still going, then showed success on refresh. It couldn't work
+    anyway — events live in a local EventKit calendar CalDAV can't see. The
+    Swift client now removes the event via a whole-day change-set, where the
+    departed block shows up as a delete.
+    """
     task_id = seeded_schedule
     r = client.post(f"/schedule/2026-05-15/blocks/{task_id}::Energy curve work/remove")
     assert r.status_code == 200
-    assert seen["block_key"] == f"{task_id}::Energy curve work"
+    blocks = r.json()["blocks"]
+    assert all(b.get("task_id") != task_id for b in blocks)
 
 
 async def test_remove_block_404_when_no_schedule(client):

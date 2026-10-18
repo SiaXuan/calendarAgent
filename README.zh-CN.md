@@ -70,11 +70,10 @@ LLM 调用日程工具修改当天安排。改动落在日程副本上,循环结
 |---|---|---|
 | `ANTHROPIC_API_KEY` | ✅ 必填 | 拆解任务、聊天调整、导入计划都调 Claude。没有它只剩一个退化的关键词兜底,核心功能用不了。到 <https://console.anthropic.com> 申请 |
 | `LLM_REASON_MODEL` / `LLM_FAST_MODEL` 等 | 可选 | 默认写死在 `agents/llm.py`。若你的 key 访问不到默认模型,或想换版本,再覆盖 |
-| `CALDAV_*` | ❌ 不用 | 走 Swift 主线时后端碰不到 iCloud——日历经 EventKit 由前端上传、提醒本地读。留空即可 |
 | `LANGSMITH_*` | 可选 | 只用于把 trace 发到 LangSmith 调试 |
 | OpenAI / embedding | ❌ 不用 | 当前记忆是 pre-embedding(置信度 + namespace 过滤) |
 
-前提:真正能跑主线的是 **macOS**(EventKit + Swift 客户端 + 本地提醒的 AppleScript)。非 Mac 目前没有可用前端——Web UI 已暂时弃用(原因见下方「Web 前端」)。
+前提: 非 Mac 目前没有可用前端——Web UI 已暂时弃用(原因见下方「Web 前端」)。
 
 ## 首次配置
 
