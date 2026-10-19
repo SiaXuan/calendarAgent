@@ -52,3 +52,90 @@ async def update_preferences(update: UserPreferencesUpdate):
         from graphs.user_mcp import load_mcp_tools
         await load_mcp_tools()   # apply server changes without a restart
     return _prefs
+
+
+# ─── MCP server presets ─────────────────────────────────────────────────────
+
+@router.get("/mcp/presets")
+async def list_mcp_presets():
+    """The MCP servers worth attaching, and whether their credentials are set.
+
+    Attaching one is already possible by hand (PATCH /preferences with a
+    custom_mcp_servers entry). This exists because the hard part isn't the
+    config, it's knowing which server is the real one — searching for a Canvas
+    MCP server returns a page of identical forks of the same project — and which
+    of its tools are safe to put on the agent's belt.
+    """
+    from graphs.user_mcp import get_mcp_tools
+    from integrations.mcp.presets import PRESETS
+
+    attached = {s.name for s in _prefs.custom_mcp_servers}
+    return {
+        "presets": [
+            {
+                "key": p.key,
+                "title": p.title,
+                "repo": p.repo,
+                "summary": p.summary,
+                "env_required": list(p.env_required),
+                "env_missing": p.missing_env(),
+                "ready": p.is_ready(),
+                "attached": p.key in attached,
+                "tool_allowlist": list(p.tool_allowlist),
+                "excluded_unsafe_tools": list(p.unsafe_tools),
+                "notes": p.notes,
+            }
+            for p in PRESETS.values()
+        ],
+        "tools_loaded": [t.name for t in get_mcp_tools()],
+    }
+
+
+@router.post("/mcp/presets/{key}/attach")
+async def attach_mcp_preset(key: str):
+    """Add a preset to `custom_mcp_servers` and reload the agent's tool belt.
+
+    Refuses while credentials are missing: attaching then would just log a
+    failed load on every reload and leave the belt silently short. The response
+    names the variables to set.
+    """
+    from fastapi import HTTPException
+
+    from graphs.user_mcp import load_mcp_tools
+    from integrations.mcp.presets import PRESETS
+
+    preset = PRESETS.get(key)
+    if preset is None:
+        raise HTTPException(status_code=404, detail=f"No MCP preset {key!r}.")
+    if not preset.is_ready():
+        raise HTTPException(status_code=409, detail={
+            "code": "credentials_missing",
+            "message": f"Set {', '.join(preset.missing_env())} in .env first.",
+            "env_missing": preset.missing_env(),
+            "notes": preset.notes,
+        })
+
+    _prefs.custom_mcp_servers = [
+        s for s in _prefs.custom_mcp_servers if s.name != key
+    ] + [preset.build()]
+    _save()
+    await load_mcp_tools()
+
+    from graphs.user_mcp import get_mcp_tools
+    return {"attached": key, "tools_loaded": [t.name for t in get_mcp_tools()]}
+
+
+@router.post("/mcp/presets/{key}/detach")
+async def detach_mcp_preset(key: str):
+    """Remove a preset's server and reload the belt."""
+    from graphs.user_mcp import get_mcp_tools, load_mcp_tools
+
+    before = len(_prefs.custom_mcp_servers)
+    _prefs.custom_mcp_servers = [s for s in _prefs.custom_mcp_servers if s.name != key]
+    _save()
+    await load_mcp_tools()
+    return {
+        "detached": key,
+        "was_attached": len(_prefs.custom_mcp_servers) < before,
+        "tools_loaded": [t.name for t in get_mcp_tools()],
+    }
