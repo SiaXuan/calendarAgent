@@ -53,13 +53,47 @@ def test_every_preset_narrows_the_belt(preset):
 
 @pytest.mark.parametrize("preset", PRESETS.values(), ids=lambda p: p.key)
 def test_presets_hold_no_secrets(preset):
-    """Credentials are named, never stored; build() reads them at call time."""
-    assert preset.env_required
-    built_env = preset.build().env
-    assert set(built_env) == set(preset.env_required)
+    """Credentials are named, never stored; build() reads them at call time.
+
+    Some presets need none at all (the official reference servers), so the
+    invariant is "env carries exactly the named variables", not "there are
+    variables".
+    """
+    assert set(preset.build().env) == set(preset.env_required)
 
 
 # ─── readiness ──────────────────────────────────────────────────────────────
+
+def test_readiness_covers_the_launcher_too(monkeypatch):
+    """
+    A missing launcher fails silently otherwise: the config looks right and the
+    server just never loads. Most Python MCP servers run via `uvx`.
+    """
+    from integrations.mcp.presets import TIME
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    monkeypatch.setattr("pathlib.Path.exists", lambda _: False)
+    assert not TIME.is_ready()
+    assert f"command:{TIME.command}" in TIME.blockers()
+
+
+def test_credential_free_presets_need_no_env():
+    """Time and Fetch are official reference servers — nothing to configure."""
+    from integrations.mcp.presets import FETCH, TIME
+    assert TIME.env_required == () and FETCH.env_required == ()
+    assert TIME.missing_env() == [] and FETCH.missing_env() == []
+
+
+def test_built_command_is_absolute_when_the_launcher_exists():
+    """The backend starts as .venv/bin/uvicorn, which doesn't put the venv on
+    PATH — so the config has to carry a resolved path, not a bare name."""
+    from integrations.mcp.presets import TIME
+    import os
+    resolved = TIME.resolved_command()
+    if resolved is None:
+        import pytest as _pytest
+        _pytest.skip("uvx not installed in this environment")
+    assert os.path.isabs(TIME.build().command)
+
 
 def test_preset_is_not_ready_without_its_env(monkeypatch):
     for key in CANVAS.env_required:
@@ -106,8 +140,9 @@ def test_attach_refuses_while_credentials_are_missing(client, monkeypatch):
     r = client.post("/mcp/presets/canvas/attach")
     assert r.status_code == 409
     detail = r.json()["detail"]
-    assert detail["code"] == "credentials_missing"
+    assert detail["code"] == "not_ready"
     assert set(detail["env_missing"]) == set(CANVAS.env_required)
+    assert "CANVAS_API_TOKEN" in detail["message"]
 
 
 def test_unknown_preset_is_404(client):

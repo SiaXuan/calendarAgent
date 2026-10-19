@@ -79,6 +79,9 @@ async def list_mcp_presets():
                 "summary": p.summary,
                 "env_required": list(p.env_required),
                 "env_missing": p.missing_env(),
+                "command": p.command,
+                "command_available": p.command_available(),
+                "blockers": p.blockers(),
                 "ready": p.is_ready(),
                 "attached": p.key in attached,
                 "tool_allowlist": list(p.tool_allowlist),
@@ -108,10 +111,20 @@ async def attach_mcp_preset(key: str):
     if preset is None:
         raise HTTPException(status_code=404, detail=f"No MCP preset {key!r}.")
     if not preset.is_ready():
+        missing_env = preset.missing_env()
+        parts = []
+        if missing_env:
+            parts.append(f"set {', '.join(missing_env)} in .env")
+        if not preset.command_available():
+            parts.append(f"install {preset.command!r} (most MCP servers launch "
+                         f"with uvx, from astral's uv: https://docs.astral.sh/uv/)")
         raise HTTPException(status_code=409, detail={
-            "code": "credentials_missing",
-            "message": f"Set {', '.join(preset.missing_env())} in .env first.",
-            "env_missing": preset.missing_env(),
+            "code": "not_ready",
+            "message": "First " + "; and ".join(parts) + ".",
+            "env_missing": missing_env,
+            "command": preset.command,
+            "command_available": preset.command_available(),
+            "blockers": preset.blockers(),
             "notes": preset.notes,
         })
 

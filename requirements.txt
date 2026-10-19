@@ -28,6 +28,10 @@ langsmith>=0.8.0
 # into the langchain.mcp namespace) and which pins mcp<2.0, blocking the client
 # the current spec needs. The mcp extra pulls fastmcp + mcp 2.x.
 langchain[mcp]>=1.4.6
+# Launcher for MCP servers distributed as Python packages (`uvx <server>`).
+# Needed by the Canvas / Gmail / Time / Fetch presets; without it a preset's
+# config looks right and the server simply never starts.
+uv>=0.13
 
 # LangMem long-term memory (Phase C). Pinned to 0.0.x line — pre-1.0.
 langmem>=0.0.30,<0.1

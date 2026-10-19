@@ -14,7 +14,10 @@ Verified 2026-10-19 against the GitHub API; `repo` is there so the next person
 can re-check rather than trust this file.
 """
 import os
+import shutil
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from models.user import MCPServerConfig
 
@@ -38,8 +41,35 @@ class MCPPreset:
     def missing_env(self) -> list[str]:
         return [k for k in self.env_required if not os.getenv(k)]
 
+    def resolved_command(self) -> str | None:
+        """Absolute path to the launcher, or None if it isn't installed.
+
+        Checked because the failure is otherwise silent and confusing: the
+        config looks right, the server just never loads. Most Python MCP servers
+        launch with `uvx` (from astral's uv), which isn't installed by default.
+
+        Falls back to looking beside the running interpreter, because a venv's
+        bin directory isn't necessarily on PATH — the backend is normally
+        started as `.venv/bin/uvicorn`, which doesn't activate the venv.
+        """
+        found = shutil.which(self.command)
+        if found:
+            return found
+        beside = Path(sys.executable).parent / self.command
+        return str(beside) if beside.exists() else None
+
+    def command_available(self) -> bool:
+        return self.resolved_command() is not None
+
+    def blockers(self) -> list[str]:
+        """Everything standing between this preset and a working tool belt."""
+        out = [f"env:{k}" for k in self.missing_env()]
+        if not self.command_available():
+            out.append(f"command:{self.command}")
+        return out
+
     def is_ready(self) -> bool:
-        return not self.missing_env()
+        return not self.blockers()
 
     def build(self) -> MCPServerConfig:
         """The config to drop into `custom_mcp_servers`.
@@ -50,7 +80,9 @@ class MCPPreset:
         return MCPServerConfig(
             name=self.key,
             transport="stdio",
-            command=self.command,
+            # Absolute path, so the server launches the same whether or not the
+            # venv is on PATH.
+            command=self.resolved_command() or self.command,
             args=list(self.args),
             env={k: os.getenv(k, "") for k in self.env_required},
             tool_allowlist=list(self.tool_allowlist),
@@ -113,4 +145,43 @@ GOOGLE_WORKSPACE = MCPPreset(
     ),
 )
 
-PRESETS: dict[str, MCPPreset] = {p.key: p for p in (CANVAS, GOOGLE_WORKSPACE)}
+# Official reference servers. Of the original set only seven are still
+# maintained — twelve (including Google Maps, Slack, GitHub) were moved to
+# modelcontextprotocol/servers-archived, so anything named
+# @modelcontextprotocol/server-* in an older guide needs checking first.
+# These two need no credentials at all.
+
+TIME = MCPPreset(
+    key="time",
+    title="时间与时区",
+    repo="https://github.com/modelcontextprotocol/servers/tree/main/src/time",
+    summary="时区换算。问「波士顿周三上午十点在国内是几点」这类问题时用。",
+    env_required=(),
+    command="uvx",
+    args=("mcp-server-time",),
+    tool_allowlist=("get_current_time", "convert_time"),
+    notes=(
+        "官方参考实现，无需凭据。注意本项目的日期算术是确定性代码在做"
+        "（ARCHITECTURE §10.4），这个工具只用于回答用户的时区问题，"
+        "不参与排程计算。"
+    ),
+)
+
+FETCH = MCPPreset(
+    key="fetch",
+    title="抓网页",
+    repo="https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+    summary="把网页转成 markdown 读。课程网站、招聘页面上的截止日期可以直接抓。",
+    env_required=(),
+    command="uvx",
+    args=("mcp-server-fetch",),
+    tool_allowlist=("fetch",),
+    notes=(
+        "官方参考实现，无需凭据。会按 agent 给的 URL 出网——抓到的内容是"
+        "不可信输入，当数据看，不当指令看。"
+    ),
+)
+
+PRESETS: dict[str, MCPPreset] = {
+    p.key: p for p in (CANVAS, GOOGLE_WORKSPACE, TIME, FETCH)
+}
