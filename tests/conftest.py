@@ -23,6 +23,27 @@ from models.task import CognitiveLoad, Priority, Subtask, Task, TaskKind
 # CalDAV client moved to legacy/ and no live code path performs calendar I/O.
 # Needing such a fixture again would mean the EventKit migration had regressed.
 
+# ─── Never touch the real preferences file ─────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _isolated_preferences(tmp_path, monkeypatch):
+    """Point preferences persistence at a temp file and restore in-memory prefs.
+
+    Autouse for the same reason the CalDAV guard once was: opting *in* to not
+    touching real user data is the wrong default. Before this, any test that hit
+    PATCH /preferences or an /mcp/presets attach/detach called _save() on the
+    real data/preferences.json — one of them overwrote the user's configured MCP
+    server list with an empty one. clean_stores never redirected this file, and
+    several tests that write prefs don't use clean_stores anyway.
+    """
+    import api.preferences as prefs_mod
+
+    monkeypatch.setattr(prefs_mod, "_PREFS_FILE", tmp_path / "preferences.json")
+    snapshot = prefs_mod._prefs.model_copy(deep=True)
+    yield
+    prefs_mod._prefs = snapshot
+
+
 # ─── Reset persistence between tests ────────────────────────────────────────
 
 @pytest.fixture
