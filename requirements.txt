@@ -23,7 +23,11 @@ langgraph>=1.2.0
 langchain-anthropic>=1.4.0
 langchain-core>=1.4.0
 langsmith>=0.8.0
-langchain-mcp-adapters>=0.3.0   # Phase D: user-attached MCP servers → agent tool belt
+# Phase D: user-attached MCP servers → agent tool belt.
+# Was langchain-mcp-adapters, which LangChain archived 2026-09-17 (MCP moved
+# into the langchain.mcp namespace) and which pins mcp<2.0, blocking the client
+# the current spec needs. The mcp extra pulls fastmcp + mcp 2.x.
+langchain[mcp]>=1.4.6
 
 # LangMem long-term memory (Phase C). Pinned to 0.0.x line — pre-1.0.
 langmem>=0.0.30,<0.1

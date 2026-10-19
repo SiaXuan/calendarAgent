@@ -8,9 +8,10 @@ offline test suite instead of needing a third-party server and network.
 
 Run standalone: python tests/fixtures/echo_mcp_server.py
 """
-from mcp.server.fastmcp import FastMCP
+# mcp 2.x renamed FastMCP to MCPServer.
+from mcp.server.mcpserver import MCPServer
 
-mcp = FastMCP("echo")
+mcp = MCPServer("echo")
 
 
 @mcp.tool()
