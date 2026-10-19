@@ -109,18 +109,21 @@ final class DayflowAPIClient: @unchecked Sendable {
 
     func generateSchedule(
         date: String, calendarEvents: [DayflowCalendarEventInput]? = nil,
-        fixedMinutesByDate: [String: Int]? = nil
+        fixedMinutesByDate: [String: Int]? = nil,
+        reminders: [DayflowReminderInput]? = nil
     ) async throws -> DayflowSchedule {
         // Local/EventKit path: when the frontend has read the day's real events,
         // upload them so the backend schedules around them without reading CalDAV.
-        // `fixedMinutesByDate` (future-day committed minutes) drives the automatic
-        // multi-day planning the backend runs before generating.
-        if calendarEvents == nil && fixedMinutesByDate == nil {
+        // `reminders` is the task inbox read the same way, which keeps the backend
+        // off AppleScript. `fixedMinutesByDate` (future-day committed minutes)
+        // drives the automatic multi-day planning the backend runs before generating.
+        if calendarEvents == nil && fixedMinutesByDate == nil && reminders == nil {
             return try await request("/schedule/generate", method: "POST", body: ["date": date])
         }
         var payload: [String: Any] = ["date": date]
         if let calendarEvents { payload["calendar_events"] = calendarEvents.map { $0.jsonObject } }
         if let fixedMinutesByDate { payload["fixed_minutes_by_date"] = fixedMinutesByDate }
+        if let reminders { payload["reminders"] = reminders.map { $0.jsonObject } }
         let body = try JSONSerialization.data(withJSONObject: payload)
         return try await request("/schedule/generate", method: "POST", encodedBody: body)
     }
@@ -168,19 +171,21 @@ final class DayflowAPIClient: @unchecked Sendable {
     /// calendar (GET SSE can't carry a body); otherwise GET the plain stream.
     func streamSchedule(
         date: String, calendarEvents: [DayflowCalendarEventInput]? = nil,
-        fixedMinutesByDate: [String: Int]? = nil
+        fixedMinutesByDate: [String: Int]? = nil,
+        reminders: [DayflowReminderInput]? = nil
     ) -> AsyncThrowingStream<DayflowStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     var request: URLRequest
-                    if calendarEvents != nil || fixedMinutesByDate != nil {
+                    if calendarEvents != nil || fixedMinutesByDate != nil || reminders != nil {
                         request = URLRequest(url: baseURL.appending(path: "/schedule/stream"))
                         request.httpMethod = "POST"
                         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                         var payload: [String: Any] = ["date": date]
                         if let calendarEvents { payload["calendar_events"] = calendarEvents.map { $0.jsonObject } }
                         if let fixedMinutesByDate { payload["fixed_minutes_by_date"] = fixedMinutesByDate }
+                        if let reminders { payload["reminders"] = reminders.map { $0.jsonObject } }
                         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
                     } else {
                         request = URLRequest(url: baseURL.appending(path: "/schedule/stream/\(date)"))
@@ -376,6 +381,23 @@ struct DayflowCalendarEventInput {
         var o: [String: Any] = ["start": start, "end": end]
         if let title { o["title"] = title }
         if let description { o["description"] = description }
+        return o
+    }
+}
+
+struct DayflowReminderInput {
+    var identifier: String?
+    var title: String
+    var notes: String?
+    var due: String?
+    var priority: Int
+    var listName: String
+
+    var jsonObject: [String: Any] {
+        var o: [String: Any] = ["title": title, "priority": priority, "list_name": listName]
+        if let identifier { o["identifier"] = identifier }
+        if let notes { o["notes"] = notes }
+        if let due { o["due"] = due }
         return o
     }
 }

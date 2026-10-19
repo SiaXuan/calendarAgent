@@ -10,6 +10,7 @@ from agents import health_agent
 from agents.calendar_reconcile import reconcile_schedule
 from agents.scheduler_agent import find_nearest_slot
 from api.preferences import get_current_prefs
+from api.tasks import ReminderInput, ingest_reminders
 from graphs.schedule_graph import reflow_after_pin, run_schedule_graph
 from graphs.schedule_stream import stream_schedule_events
 from models.project import CompletionStatus
@@ -45,6 +46,11 @@ class GenerateRequest(BaseModel):
     # calendar over the scheduling horizon. Drives the automatic multi-day planning
     # that runs before generation; absent → future days treated as fully free.
     fixed_minutes_by_date: dict[str, int] | None = None
+    # Incomplete reminders read by the frontend via EventKit, uploaded with the
+    # request so the backend never has to go read Reminders.app itself (that
+    # path is AppleScript and takes 38-51s). Same contract as calendar_events:
+    # the client owns system I/O, the backend stays pure logic.
+    reminders: list[ReminderInput] | None = None
 
 
 def _parse_fixed_minutes(raw: dict[str, int] | None) -> dict[date, int] | None:
@@ -57,6 +63,19 @@ def _parse_fixed_minutes(raw: dict[str, int] | None) -> dict[date, int] | None:
         except (ValueError, TypeError):
             continue
     return out or None
+
+
+async def _ingest_uploaded_reminders(payload: "GenerateRequest") -> None:
+    """Fold the client's EventKit reminder read into task_store before generating.
+
+    Runs first so the day is built from what Reminders.app holds right now. An
+    omitted field (an older client, or a request made without EventKit access)
+    leaves task_store as it was and lets the throttled AppleScript fallback take
+    over.
+    """
+    if payload.reminders is None:
+        return
+    await ingest_reminders(payload.reminders)
 
 
 @router.post("/schedule/generate", response_model=DaySchedule)
@@ -72,6 +91,7 @@ async def generate_schedule(payload: GenerateRequest):
     )
     # Auto multi-day planning: fold any project nodes that have newly entered the
     # window into the plan before generating (replaces the old manual button).
+    await _ingest_uploaded_reminders(payload)
     from agents import project_service
     await project_service.ensure_multiday_plan(
         d, _parse_fixed_minutes(payload.fixed_minutes_by_date))
@@ -118,6 +138,7 @@ async def stream_schedule_post(payload: GenerateRequest):
         [e.model_dump() for e in payload.calendar_events]
         if payload.calendar_events is not None else None
     )
+    await _ingest_uploaded_reminders(payload)
     from agents import project_service
     await project_service.ensure_multiday_plan(
         d, _parse_fixed_minutes(payload.fixed_minutes_by_date))

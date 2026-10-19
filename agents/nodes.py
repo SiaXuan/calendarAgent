@@ -572,8 +572,21 @@ async def apply_adjustment_node(state: dict) -> dict:
 
 # ─── Pre-flight helper ──────────────────────────────────────────────────────
 
+def mark_reminders_synced() -> None:
+    """Record that reminders were just refreshed from the client's EventKit read,
+    so the throttled AppleScript fallback below stays asleep."""
+    global _last_sync_ts
+    _last_sync_ts = time.monotonic()
+
+
 async def sync_reminders_if_due() -> None:
-    """Best-effort throttled reminder sync. Called before generation graphs run."""
+    """Throttled AppleScript fallback for a backend with no client pushing to it.
+
+    The Swift client uploads reminders with each generate/stream request, which
+    calls `mark_reminders_synced` and keeps this from firing. Reading
+    Reminders.app over AppleScript measured 38-51s per call and was the main
+    source of UI lag during generation.
+    """
     global _last_sync_ts
     now = time.monotonic()
     if now - _last_sync_ts > _SYNC_THROTTLE_S:

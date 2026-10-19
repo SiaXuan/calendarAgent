@@ -246,16 +246,80 @@ def _reminder_effective_title(title: str | None, description: str | None) -> str
     return first_line[:80] if first_line else None
 
 
-async def do_sync_reminders() -> dict:
+class ReminderInput(BaseModel):
+    """One incomplete reminder, read by the Swift client via EventKit.
+
+    The client sends raw EventKit fields; the mapping to a Task happens here, so
+    it stays identical to the AppleScript path's. `identifier` is EventKit's
+    stable calendarItemIdentifier, which keeps a task's id steady across syncs —
+    the AppleScript path had to synthesise one from list+title+due, so renaming
+    a reminder there looked like a delete plus an add.
     """
-    Core sync logic — shared by the API endpoint and the startup hook.
-    Pulls incomplete reminders from iCloud and upserts them into task_store.
+    identifier: str | None = None
+    title: str
+    notes: str | None = None
+    due: str | None = None        # ISO datetime or date
+    priority: int = 0             # EventKit: 0 none, 1-4 high, 5 medium, 6-9 low
+    list_name: str = ""
+
+
+def _reminder_input_to_raw(r: ReminderInput) -> dict:
+    """Shape an uploaded reminder like the AppleScript parser's output, so
+    do_sync_reminders can't tell the two sources apart."""
+    from datetime import datetime as _dt
+
+    deadline = deadline_dt = None
+    if r.due:
+        try:
+            parsed = _dt.fromisoformat(r.due.replace("Z", "+00:00"))
+            deadline = parsed.date()
+            deadline_dt = parsed.replace(tzinfo=None)
+        except ValueError:
+            pass
+
+    priority = ("high" if 1 <= r.priority <= 4
+                else "low" if 6 <= r.priority <= 9
+                else "medium")
+    title = r.title.strip()
+    return {
+        "id": r.identifier or f"ek_{r.list_name}_{title}_{r.due or 'nodue'}",
+        "title": title,
+        "description": (r.notes or "").strip() or None,
+        "priority": priority,
+        "deadline": deadline,
+        "deadline_dt": deadline_dt,
+        "source_list": r.list_name,
+    }
+
+
+async def ingest_reminders(items: list[ReminderInput]) -> dict:
+    """Upsert reminders the client read via EventKit.
+
+    Marks the throttle as satisfied so `sync_reminders_if_due` won't then go run
+    AppleScript over the same data — reading Reminders.app that way measured
+    38-51s per call and was the main source of UI lag during generation.
+    """
+    from agents import nodes
+    result = await do_sync_reminders([_reminder_input_to_raw(r) for r in items])
+    nodes.mark_reminders_synced()
+    return result
+
+
+async def do_sync_reminders(raw: list[dict] | None = None) -> dict:
+    """
+    Core sync logic — upserts incomplete reminders into task_store.
+
+    `raw` is normally supplied by the Swift client (EventKit, via
+    `ingest_reminders`). Passing None falls back to reading Reminders.app over
+    AppleScript, which is slow (38-51s) and only reachable on macOS; that path
+    exists for a backend running without the client.
 
     Cognitive-load classification (two-pass):
       Pass 1 — keyword rules: fast, handles unambiguous cases.
       Pass 2 — LLM (Haiku): batch-classifies tasks where keywords gave no signal.
     """
-    raw = await asyncio.to_thread(fetch_reminders)
+    if raw is None:
+        raw = await asyncio.to_thread(fetch_reminders)
     if not raw:
         return {"added": 0, "updated": 0, "skipped": 0, "tasks": []}
 

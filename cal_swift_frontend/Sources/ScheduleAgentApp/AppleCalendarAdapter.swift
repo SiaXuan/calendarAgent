@@ -224,6 +224,32 @@ extension AppleCalendarAdapter {
         return out
     }
 
+    /// Every incomplete reminder, as the backend's task inbox.
+    ///
+    /// Replaces the backend reading Reminders.app over AppleScript, which
+    /// measured 38-51s per call because each reminder cost several Apple Events
+    /// round-trips. EventKit queries the local store directly.
+    ///
+    /// Agent-written reminders are skipped: those are this app's own project
+    /// nodes, already tracked as project tasks. Feeding them back would schedule
+    /// the plan a second time as if it were new inbox work.
+    func incompleteReminders() async -> [DayflowReminderInput] {
+        await fetchReminders().compactMap { r in
+            guard !r.isCompleted else { return nil }
+            guard AgentTag.value(in: r.notes, prefix: AgentTag.reminderPrefix) == nil else { return nil }
+            let title = (r.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            return DayflowReminderInput(
+                identifier: r.calendarItemIdentifier,
+                title: title,
+                notes: r.notes,
+                due: r.dueDateComponents?.date.map(Self.iso),
+                priority: r.priority,
+                listName: r.calendar?.title ?? ""
+            )
+        }
+    }
+
     // MARK: Apply change-sets
 
     /// Apply a today's-time-blocks change-set to the calendar (delete-before-create).

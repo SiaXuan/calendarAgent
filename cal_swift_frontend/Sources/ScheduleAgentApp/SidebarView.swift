@@ -1453,9 +1453,11 @@ struct SidebarView: View {
             do {
                 let calendarEvents = generate ? localCalendarEventsForCurrentDate() : nil
                 let fixedMinutes = generate ? futureCapacityForPlanning() : nil
+                let reminders = generate ? await remindersForCurrentDate() : nil
                 let schedule = try await (generate
                     ? dayflowClient.generateSchedule(date: scheduleDate, calendarEvents: calendarEvents,
-                                                     fixedMinutesByDate: fixedMinutes)
+                                                     fixedMinutesByDate: fixedMinutes,
+                                                     reminders: reminders)
                     : dayflowClient.fetchSchedule(date: scheduleDate))
                 await MainActor.run {
                     state.applyDayflowSchedule(schedule, now: Date())
@@ -1527,6 +1529,14 @@ struct SidebarView: View {
         return calendarAdapter.localCalendarEvents(on: day)
     }
 
+    /// The task inbox: every incomplete reminder, read via EventKit and uploaded
+    /// with the generation request. Keeps the backend off AppleScript, which took
+    /// 38-51s per read. Returns nil without access so the backend falls back.
+    private func remindersForCurrentDate() async -> [DayflowReminderInput]? {
+        guard calendarAdapter.hasEventAccess else { return nil }
+        return await calendarAdapter.incompleteReminders()
+    }
+
     /// Committed minutes per day over the planning horizon, read from the local
     /// calendar — lets the backend auto-plan multi-day project work around real
     /// commitments. nil (no prompt) when access isn't granted yet.
@@ -1543,10 +1553,11 @@ struct SidebarView: View {
             // Upload the local calendar so the backend works around real events.
             let calendarEvents = localCalendarEventsForCurrentDate()
             let fixedMinutes = futureCapacityForPlanning()
+            let reminders = await remindersForCurrentDate()
             do {
                 for try await event in dayflowClient.streamSchedule(
                     date: scheduleDate, calendarEvents: calendarEvents,
-                    fixedMinutesByDate: fixedMinutes) {
+                    fixedMinutesByDate: fixedMinutes, reminders: reminders) {
                     await MainActor.run {
                         switch event {
                         case let .health(energyCurve, healthSummary, energySource):
