@@ -40,7 +40,7 @@ class CalendarEvent(BaseModel):
 class GenerateRequest(BaseModel):
     date: str   # YYYY-MM-DD
     # Local/EventKit path (docs/ARCHITECTURE.md §0): the day's fixed events read
-    # by the frontend. Omit (null) to fall back to the backend reading CalDAV.
+    # by the frontend. Omit (null) to fall back to the last snapshot it sent.
     calendar_events: list[CalendarEvent] | None = None
     # Committed minutes per future day (YYYY-MM-DD → minutes), read from the local
     # calendar over the scheduling horizon. Drives the automatic multi-day planning
@@ -127,7 +127,7 @@ async def stream_schedule_post(payload: GenerateRequest):
     events, but the request body can carry `calendar_events` (the local calendar
     the frontend read via EventKit). GET SSE can't take a body, so the local
     /EventKit generation path uses this one; the backend only falls back to
-    reading CalDAV when `calendar_events` is omitted.
+    the last persisted snapshot when `calendar_events` is omitted.
     """
     try:
         d = date.fromisoformat(payload.date)

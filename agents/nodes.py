@@ -243,8 +243,7 @@ async def fetch_calendar_node(state: dict) -> dict:
     `calendar_events` (raw event dicts the frontend read via EventKit) we derive
     everything from those with pure functions — no network, no cache (the data is
     already request-fresh, and caching per date would leak across requests). When
-    it's absent (None) we fall back to the legacy CalDAV fetch, retired in
-    migration step 5.
+    it's absent (None) we fall back to the last snapshot the client sent.
     """
     target_date: date = state["target_date"]
     prefs = get_current_prefs()

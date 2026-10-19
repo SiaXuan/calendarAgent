@@ -1,11 +1,11 @@
 """
 Calendar Agent — classifies events and extracts free windows from a date's calendar.
-Phase 2: reads real events from CalDAV (iCloud Calendar).
+Events arrive from the Swift client's EventKit read; this module only
+classifies them and derives free windows.
 """
 import asyncio
 from datetime import date, datetime, timedelta
 
-from integrations.caldav_client import fetch_events
 from models.schedule import BlockType, FreeWindow, TimeBlock
 from models.task import CognitiveLoad
 
@@ -33,19 +33,10 @@ def classify_event(event: dict) -> BlockType:
     return BlockType.fixed
 
 
-async def fetch_fixed_blocks(
-    target_date: date,
-    work_start: int = 8,
-    work_end: int = 22,
-) -> tuple[list[TimeBlock], list[FreeWindow]]:
-    """
-    Fetch real CalDAV events, classify them, and return (fixed_blocks, free_windows).
-    Falls back to empty if CalDAV credentials are not configured.
-    """
-    raw_events = await asyncio.to_thread(fetch_events, target_date)
-    fixed_blocks = events_to_fixed_blocks(raw_events, target_date)
-    free_windows = extract_free_windows(fixed_blocks, target_date, work_start, work_end)
-    return fixed_blocks, free_windows
+# fetch_fixed_blocks (read the day's events from CalDAV) removed 2026-10-19
+# along with the CalDAV client. Events arrive from the Swift client's EventKit
+# read instead — see agents/nodes.py::fetch_calendar_node. The classification
+# helpers below still do the work; only the transport is gone.
 
 
 def events_to_fixed_blocks(events: list[dict], target_date: date) -> list[TimeBlock]:

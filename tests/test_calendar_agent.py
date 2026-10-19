@@ -8,7 +8,7 @@ after a calendar sync re-imports them as `fixed` and every task duplicates.
 """
 from agents.calendar_agent import classify_event
 from agents.calendar_writeback import _block_tag
-from integrations.caldav_client import AGENT_DESC_TAG
+from agents.calendar_writeback import AGENT_DESC_TAG
 from models.schedule import BlockType, TimeBlock
 from datetime import datetime
 

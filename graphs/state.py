@@ -27,8 +27,8 @@ class ScheduleState(TypedDict, total=False):
     snapshot: HealthSnapshot | None
     tasks: list[Task]
     # Local/EventKit path (docs/ARCHITECTURE.md §0): raw calendar events the
-    # frontend read via EventKit for this day. None → fall back to reading CalDAV
-    # (legacy, retired in migration step 5); a list (even empty) → authoritative.
+    # frontend read via EventKit for this day. None → fall back to the last
+    # persisted snapshot; a list (even empty) → authoritative.
     calendar_events: list[dict] | None
 
     # ─── Phase A: fan-out branches each fill their own piece ───────────────

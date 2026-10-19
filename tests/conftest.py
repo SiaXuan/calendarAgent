@@ -16,27 +16,12 @@ from models.schedule import BlockType, FreeWindow, TimeBlock
 from models.task import CognitiveLoad, Priority, Subtask, Task, TaskKind
 
 
-# ─── Never touch real iCloud ────────────────────────────────────────────────
-
-@pytest.fixture(autouse=True)
-def _no_caldav(monkeypatch):
-    """Cut every CalDAV path off at the client, for ALL tests.
-
-    This existed only inside test_projects_api.py, so the rest of the suite was
-    hitting real iCloud whenever .env had credentials — which it does on the dev
-    machine. `test_remove_block_takes_it_off_the_schedule` was spending 35s of
-    the suite's 37s in a network round-trip, and worse, it reached
-    `delete_events_with_tag` — a live DELETE against a real calendar account.
-    A test that deletes from your actual calendar is a bug regardless of speed.
-
-    Patching `_make_client` (rather than each caller) means new code paths are
-    covered automatically: an unconfigured client makes reads return [] and
-    writes raise CalDAVNotConfigured, which callers already handle as
-    "local-only mode".
-    """
-    import integrations.caldav_client as c
-    monkeypatch.setattr(c, "_make_client", lambda: None)
-
+# The `_no_caldav` autouse fixture lived here until 2026-10-19. It blocked every
+# CalDAV call so the suite couldn't reach the developer's real iCloud account —
+# one test was spending 35s of the suite's 37s in a live round-trip, and worse,
+# issuing a real DELETE. It is gone because there is nothing left to block: the
+# CalDAV client moved to legacy/ and no live code path performs calendar I/O.
+# Needing such a fixture again would mean the EventKit migration had regressed.
 
 # ─── Reset persistence between tests ────────────────────────────────────────
 

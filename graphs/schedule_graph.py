@@ -83,7 +83,7 @@ def build_schedule_graph():
     # then calendar + rank_tasks fan out in parallel.
     # LangGraph's `stream_mode="updates"` only emits at super-step boundaries,
     # so if health were in the fan-out it would be buffered until the slower
-    # branches (CalDAV) finish — visibly bad UX on /schedule/stream.
+    # branches finish — visibly bad UX on /schedule/stream.
     graph.add_edge(START, "fetch_health")
     graph.add_edge("fetch_health", "fetch_calendar")
     graph.add_edge("fetch_health", "rank_tasks")
@@ -116,7 +116,7 @@ async def run_schedule_graph(
     throttled reminder sync, then invokes the compiled graph.
 
     `calendar_events` (docs/ARCHITECTURE.md §0): raw events the frontend read via
-    EventKit for this day. None → the graph falls back to reading CalDAV (legacy).
+    EventKit for this day. None → the graph uses the last persisted snapshot.
     """
     await sync_reminders_if_due()
 

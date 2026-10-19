@@ -9,7 +9,7 @@ trailing "]" breaks it). Fix: match on the bracket-less prefix.
 from datetime import datetime
 
 from agents.calendar_writeback import _AGENT_TAG_PREFIX, _block_tag
-from integrations.caldav_client import AGENT_DESC_TAG
+from agents.calendar_writeback import AGENT_DESC_TAG
 from models.schedule import BlockType, TimeBlock
 
 

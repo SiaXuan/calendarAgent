@@ -33,12 +33,15 @@ async def test_supplied_events_build_fixed_blocks(clean_stores):
     assert patch["free_windows"]   # gaps around the two meetings
 
 
-async def test_supplied_events_never_touch_caldav(clean_stores, monkeypatch):
-    async def boom(*a, **k):
-        raise AssertionError("CalDAV must not be read when events are supplied")
-    monkeypatch.setattr(calendar_agent, "fetch_fixed_blocks", boom)
+async def test_empty_event_list_is_authoritative(clean_stores):
+    """
+    [] means "nothing is fixed today", not "no data, go look elsewhere".
 
-    # Empty list is still "authoritative: nothing fixed today", not a fallback.
+    This used to also assert that the backend never read CalDAV in this case;
+    that guard is gone with the CalDAV client itself (2026-10-19), but the
+    authoritative-empty behaviour it protected still matters — treating [] as
+    missing data would schedule the day as if the user's calendar were unknown.
+    """
     patch = await fetch_calendar_node({"target_date": D, "calendar_events": []})
     assert patch["fixed_blocks"] == []
     assert len(patch["free_windows"]) == 1   # whole work day free

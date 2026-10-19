@@ -28,6 +28,6 @@ CORS_ORIGINS: list[str] = (
 
 
 # Informational flag — Reminders.app via AppleScript only works on macOS.
-# `integrations/caldav_client.py` already gates the AppleScript path on
+# `integrations/reminders_applescript.py` already gates the AppleScript path on
 # `sys.platform == "darwin"`; this constant is for documentation/awareness.
 APPLESCRIPT_AVAILABLE: bool = IS_LOCAL and sys.platform == "darwin"

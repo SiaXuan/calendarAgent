@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from agents.llm import haiku
-from integrations.caldav_client import fetch_reminders, is_system_list
+from integrations.reminders_applescript import fetch_reminders, is_system_list
 from models.task import CognitiveLoad, Priority, Task
 from storage import save_task_store, task_store
 
