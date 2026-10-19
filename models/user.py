@@ -35,6 +35,15 @@ class UserPreferences(BaseModel):
     auto_generate_on_health_sync: bool = True
     auto_write_to_calendar: bool = False
     custom_mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
+    # Where the user is, for weather. Unset → no forecast; the schedule is still
+    # correct without one, so nothing prompts for it. Set via PATCH /preferences.
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    # Travel time between the user's regular places, as "home->campus": minutes.
+    # A table, not a maps API: the honest question is "how long from home to
+    # campus", the answer barely moves, and the archived Google Maps MCP server's
+    # managed replacement can't route transit anyway.
+    commute_minutes: dict[str, int] = Field(default_factory=dict)
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -46,3 +55,6 @@ class UserPreferencesUpdate(BaseModel):
     auto_generate_on_health_sync: bool | None = None
     auto_write_to_calendar: bool | None = None
     custom_mcp_servers: list[MCPServerConfig] | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    commute_minutes: dict[str, int] | None = None

@@ -80,6 +80,7 @@ def _build_system_prompt(scratch: ScheduleScratch, language, memory_bullets: lis
 - 先用 get_schedule / capacity_check / working_hours_until 了解情况，别凭空估算。
 - 用 move_block(挪开始时间) / resize_block(改时长，开始不变) / remove_block / add_fixed_event 调整。只能动 scheduled/suggested，不许碰 fixed/meal。改时长必须用 resize_block，别用 move。
 - 从邮件等外部来源抽出的会议/面试/笔试等带时间事件，用 add_to_schedule 加进今天日程(notes 里写来源要点)。
+- 安排**户外**任务(跑步、买菜、骑车)前先 get_weather 看有没有雨;两件事在不同地点时用 get_commute_minutes 确认中间留够路上时间。这两个工具没配置时会明说没数据——那就照常排，别编。
 - **保持任务间的先后逻辑**。有些 block 天然有顺序(先"了解题型/制定备考计划"再"做模拟练习"，先"读材料"再"做题"，先准备再执行)。移动时别把后置的排到前置的之前；两个都要挪就整体平移、保持原相对顺序。不确定是否有先后关系就按现有顺序来，别对调。
 - 你**只能管今天**这一天的日程。如果用户要把任务"挪到明天/改天"，你能做的只是用 remove_block 把它从今天移除，并**如实说明**「已从今天移除，明天的安排请到那天再生成」——**绝不要声称已经排到了别的某天**(你没有这个能力)。
 - 请求**模糊或缺信息**时(比如有多个同名 block、不确定挪到哪)，调 ask_user(question) 问用户，别瞎猜。
@@ -303,8 +304,10 @@ async def run_chat_agent(target_date: date, user_message: str) -> AgentChatResul
         energy_curve=current.energy_curve,
     )
     signals: dict = {"clarification": None, "blocked": None}
+    from agents.tools.context_tools import make_context_tools
     from graphs.user_mcp import get_mcp_tools
-    tools = make_schedule_tools(scratch) + _make_signal_tools(signals) + get_mcp_tools()
+    tools = (make_schedule_tools(scratch) + _make_signal_tools(signals)
+             + make_context_tools(target_date) + get_mcp_tools())
     system_prompt = _build_system_prompt(scratch, prefs.language, memory_bullets)
     # Prompt caching (Anthropic): mark the whole system prompt as one ephemeral
     # cache block. Anthropic caches the prefix up to this breakpoint — i.e. tools +
