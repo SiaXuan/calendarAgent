@@ -222,3 +222,59 @@ struct ChangesetNarrowingTests {
         #expect(cs.writeCount == 2)
     }
 }
+
+@Suite("Edit-scoped change-set")
+struct ChangesetWithoutCreationsTests {
+
+    private func spec(_ blockKey: String) -> DayflowEventSpec {
+        DayflowEventSpec(
+            blockKey: blockKey, tagKey: blockKey, tag: "[agent-scheduled:dayflow:\(blockKey)]",
+            title: blockKey, start: "2026-06-15T09:00:00", end: "2026-06-15T10:00:00")
+    }
+
+    @Test("an edit updates what's on the calendar and adds nothing")
+    func keepsUpdatesDropsCreates() {
+        // Being on the calendar IS what synced means: an update matches an
+        // existing event, a create doesn't. Dragging a block must not quietly
+        // push blocks the user never chose to sync.
+        let edit = DayflowEventChangeset(
+            create: [spec("never-synced")],
+            update: [spec("on-calendar")],
+            unchanged: 2
+        ).withoutCreations()
+
+        #expect(edit.create.isEmpty)
+        #expect(edit.update.map(\.blockKey) == ["on-calendar"])
+    }
+
+    @Test("an edit still carries deletes through")
+    func keepsDeletes() {
+        // Removing a card has to reach the calendar, or the event is orphaned.
+        let edit = DayflowEventChangeset(
+            delete: [DayflowTagRef(tagKey: "gone", tag: "t")]
+        ).withoutCreations()
+
+        #expect(edit.delete.map(\.tagKey) == ["gone"])
+    }
+
+    @Test("with nothing synced an edit is a no-op")
+    func nothingSyncedIsNoOp() {
+        let edit = DayflowEventChangeset(
+            create: [spec("a"), spec("b")]
+        ).withoutCreations()
+
+        #expect(edit.writeCount == 0)
+        #expect(edit.delete.isEmpty)
+    }
+
+    @Test("blocks the backend cascaded out of the way are updated too")
+    func cascadedBlocksAreIncluded() {
+        // Moving one block makes the backend nudge the ones it now overlaps.
+        // Narrowing to the dragged block left those events at their old times.
+        let edit = DayflowEventChangeset(
+            update: [spec("dragged"), spec("cascaded-1"), spec("cascaded-2")]
+        ).withoutCreations()
+
+        #expect(Set(edit.update.map(\.blockKey)) == ["dragged", "cascaded-1", "cascaded-2"])
+    }
+}

@@ -216,6 +216,19 @@ extension DayflowEventChangeset {
         )
     }
 
+    /// The part of this change-set that only touches events already on the
+    /// calendar: updates and deletes, no creations.
+    ///
+    /// This is what an *edit* should apply. Being on the calendar is what
+    /// "synced" actually means — an update by definition matches an existing
+    /// event, a create by definition doesn't. So dragging a block pushes the
+    /// edit through for everything already there (including blocks the backend
+    /// cascaded out of the way) without quietly adding blocks the user never
+    /// chose to sync.
+    public func withoutCreations() -> DayflowEventChangeset {
+        DayflowEventChangeset(create: [], update: update, delete: delete, unchanged: unchanged)
+    }
+
     /// How many calendar events this change-set writes.
     public var writeCount: Int { create.count + update.count }
 }

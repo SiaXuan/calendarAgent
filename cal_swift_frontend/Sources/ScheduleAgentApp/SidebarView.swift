@@ -1619,13 +1619,29 @@ struct SidebarView: View {
     ///
     /// Returns the block keys that ended up on the calendar, so callers can mark
     /// them synced without guessing.
+    /// What part of the day's change-set a push should apply.
+    private enum PushScope {
+        /// Everything — the user asked for the whole day (Sync All).
+        case wholeDay
+        /// Just this block — the per-row sync button means "put THIS on my calendar".
+        case singleBlock(String)
+        /// Only what's already on the calendar: updates and deletes, no creates.
+        /// Used after an edit, which should carry through to synced events —
+        /// including ones the backend cascaded — without adding unsynced blocks.
+        case alreadyOnCalendar
+    }
+
     @discardableResult
-    private func pushToCalendar(blockKey: String? = nil) async throws -> [String] {
+    private func pushToCalendar(_ scope: PushScope = .wholeDay) async throws -> [String] {
         guard let day = Self.date(from: scheduleDate) else { return [] }
         let current = calendarAdapter.currentAgentEvents(on: day)
         var changeset = try await dayflowClient.scheduleChangeset(
             date: scheduleDate, currentEvents: current)
-        if let blockKey { changeset = changeset.limited(toBlockKey: blockKey) }
+        switch scope {
+        case .wholeDay: break
+        case .singleBlock(let key): changeset = changeset.limited(toBlockKey: key)
+        case .alreadyOnCalendar: changeset = changeset.withoutCreations()
+        }
         try calendarAdapter.applyEventChangeset(changeset, on: day)
         return (changeset.create + changeset.update).map(\.blockKey)
     }
@@ -1636,7 +1652,7 @@ struct SidebarView: View {
         state.statusMessage = "Syncing schedule to calendar..."
         Task {
             do {
-                let written = try await pushToCalendar()
+                let written = try await pushToCalendar(.wholeDay)
                 await MainActor.run {
                     for key in written { state.markBackendBlockSynced(key) }
                     state.statusMessage = written.isEmpty
@@ -1664,7 +1680,7 @@ struct SidebarView: View {
         state.statusMessage = "Syncing one block to calendar..."
         Task {
             do {
-                let written = try await pushToCalendar(blockKey: blockKey)
+                let written = try await pushToCalendar(.singleBlock(blockKey))
                 await MainActor.run {
                     state.markBackendBlockSynced(blockKey)
                     state.statusMessage = written.isEmpty
@@ -1687,15 +1703,18 @@ struct SidebarView: View {
     /// reports the moved block as an update and the adapter edits the event in
     /// place. No-op for blocks that were never synced.
     private func resyncCalendarIfSynced(_ taskID: UUID) async {
-        let blockKey: String? = await MainActor.run { () -> String? in
-            guard let key = state.backendBlockKey(for: taskID),
-                  state.isBackendBlockSynced(key) else { return nil }
-            return key
-        }
-        guard let blockKey else { return }
+        // Deliberately not narrowed to this block: moving one block makes the
+        // backend cascade the ones it now overlaps, so their events would be
+        // left at the old times. `.alreadyOnCalendar` updates every event that
+        // exists and adds none, so it is a no-op when nothing is synced yet.
         do {
-            try await pushToCalendar(blockKey: blockKey)
-            await MainActor.run { state.statusMessage = "Updated the synced calendar event." }
+            let written = try await pushToCalendar(.alreadyOnCalendar)
+            guard !written.isEmpty else { return }
+            await MainActor.run {
+                state.statusMessage = written.count == 1
+                    ? "Updated the synced calendar event."
+                    : "Updated \(written.count) synced calendar events."
+            }
         } catch {
             await MainActor.run {
                 state.statusMessage = "Calendar update failed: \(error.localizedDescription)"
@@ -1708,13 +1727,7 @@ struct SidebarView: View {
     /// schedule, so the written events would otherwise go stale. One whole-day
     /// change-set covers them all; untouched blocks come back `unchanged`.
     private func resyncAllSyncedBlocks() async {
-        let hasSynced = await MainActor.run {
-            state.todayQueue.contains { task in
-                state.backendBlockKey(for: task.id).map { state.isBackendBlockSynced($0) } ?? false
-            }
-        }
-        guard hasSynced else { return }
-        _ = try? await pushToCalendar()
+        _ = try? await pushToCalendar(.alreadyOnCalendar)
     }
 
     /// Toggle a task's done state. Optimistic (the checkmark flips instantly),
@@ -1791,11 +1804,11 @@ struct SidebarView: View {
                     state.statusMessage = "Removed from today's schedule."
                 }
                 if wasSynced {
-                    // The block is gone from the day, so a whole-day change-set
-                    // now reports its event as a delete. Must NOT be narrowed to
-                    // the block key — narrowing drops deletes, which would leave
-                    // the calendar event orphaned.
-                    _ = try? await pushToCalendar()
+                    // The block is gone from the day, so its event now diffs as a
+                    // delete. Must NOT be narrowed to the block key — narrowing
+                    // drops deletes, which would orphan the event. `.alreadyOnCalendar`
+                    // keeps the delete while not adding blocks that were never synced.
+                    _ = try? await pushToCalendar(.alreadyOnCalendar)
                 }
             } catch {
                 await MainActor.run {
