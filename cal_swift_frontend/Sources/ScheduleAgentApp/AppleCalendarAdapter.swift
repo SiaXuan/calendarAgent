@@ -376,6 +376,27 @@ extension AppleCalendarAdapter {
         }
     }
 
+    /// A source that can actually hold a new calendar of `type`.
+    ///
+    /// `sources.first` isn't good enough: the first source may be one that holds
+    /// only reminders (or only subscribed, read-only calendars), and saving a
+    /// calendar onto it fails with "Calendar has no source". Sources can also
+    /// come back empty right after the access grant, hence the refresh.
+    private func writableSource(for type: EKEntityType) -> EKSource? {
+        if let fromDefault = (type == .event
+            ? store.defaultCalendarForNewEvents?.source
+            : store.defaultCalendarForNewReminders()?.source) {
+            return fromDefault
+        }
+        store.refreshSourcesIfNecessary()
+        // A source that already hosts calendars of this type can host another.
+        // Prefer local: it needs no account and never fails to sync.
+        let hosting = store.sources.filter { !$0.calendars(for: type).isEmpty }
+        return hosting.first { $0.sourceType == .local }
+            ?? hosting.first
+            ?? store.sources.first { $0.sourceType == .local }
+    }
+
     private func eventCalendar() throws -> EKCalendar {
         let title = "Schedule Agent"
         if let existing = store.calendars(for: .event)
@@ -384,9 +405,20 @@ extension AppleCalendarAdapter {
         }
         let calendar = EKCalendar(for: .event, eventStore: store)
         calendar.title = title
-        calendar.source = store.defaultCalendarForNewEvents?.source ?? store.sources.first
-        try store.saveCalendar(calendar, commit: true)
-        return calendar
+        calendar.source = writableSource(for: .event)
+        do {
+            try store.saveCalendar(calendar, commit: true)
+            return calendar
+        } catch {
+            // Can't create a dedicated calendar (no account will host one). Write
+            // into the user's default calendar rather than failing the sync —
+            // the blocks carry their own agent tag, so they stay identifiable.
+            if let fallback = store.defaultCalendarForNewEvents,
+               fallback.allowsContentModifications {
+                return fallback
+            }
+            throw error
+        }
     }
 
     /// A reminder list named `title`, tinted `colorHex`. Reused if it exists
@@ -407,7 +439,7 @@ extension AppleCalendarAdapter {
         let calendar = EKCalendar(for: .reminder, eventStore: store)
         calendar.title = name
         if let color { calendar.cgColor = color }
-        calendar.source = store.defaultCalendarForNewReminders()?.source ?? store.sources.first
+        calendar.source = writableSource(for: .reminder)
         do {
             try store.saveCalendar(calendar, commit: true)
             return calendar

@@ -1,3 +1,4 @@
+import EventKit
 import Foundation
 import ScheduleAgentCore
 
@@ -55,6 +56,8 @@ enum EventKitVerification {
         }
         emit("   ✅ access granted")
 
+        reportSources()
+
         let today = Date()
         await verifyEvents(adapter: adapter, today: today)
         await verifyReminders(adapter: adapter, today: today)
@@ -62,6 +65,43 @@ enum EventKitVerification {
         emit("")
         emit("Done. If steps 2 & 5 showed the item appear in Calendar/Reminders and")
         emit("steps 4 & 7 reported 0 afterwards, the EventKit executor works.")
+    }
+
+    /// What accounts this Mac can host a calendar on.
+    ///
+    /// "Calendar has no source" means saveCalendar got a calendar with no usable
+    /// account behind it — so the useful thing to print is which sources exist
+    /// and what each can actually hold.
+    private static func reportSources() {
+        let store = EKEventStore()
+        store.refreshSourcesIfNecessary()
+        emit("")
+        emit("Calendar sources:")
+        if store.sources.isEmpty {
+            emit("   (none — no calendar account is configured on this Mac)")
+        }
+        for src in store.sources {
+            let events = src.calendars(for: .event).count
+            let writableEvents = src.calendars(for: .event).filter(\.allowsContentModifications).count
+            let reminders = src.calendars(for: .reminder).count
+            emit("   • \(src.title) [\(describe(src.sourceType))] — "
+                 + "events: \(events) (\(writableEvents) writable), reminders: \(reminders)")
+        }
+        let def = store.defaultCalendarForNewEvents
+        emit("   default calendar for new events: \(def?.title ?? "(none)")"
+             + (def.map { " on \($0.source.title)" } ?? ""))
+    }
+
+    private static func describe(_ type: EKSourceType) -> String {
+        switch type {
+        case .local: "local"
+        case .exchange: "exchange"
+        case .calDAV: "caldav/icloud"
+        case .mobileMe: "mobileme"
+        case .subscribed: "subscribed (read-only)"
+        case .birthdays: "birthdays (read-only)"
+        @unknown default: "unknown"
+        }
     }
 
     // MARK: Event round-trip
