@@ -691,6 +691,14 @@ async def set_block_completion(
         task_id = block.task_id
         title = block.title
 
+    # No calendar I/O here. Ticking a block used to call promote_block_to_history
+    # (or write_block_to_calendar to undo it), both CalDAV round-trips to iCloud
+    # — ~20s each on a real account, on the highest-frequency action in the app.
+    # They also couldn't reach the events any more: those are written by the
+    # Swift client into a local EventKit calendar. Completion truth lives in
+    # completion_store; the day's change-set skips done blocks so they are never
+    # re-created, and the event already on the calendar correctly records that
+    # the time was spent.
     calendar: dict | None = None
     if done:
         completion_store[bkey] = CompletionRecord(
@@ -698,14 +706,8 @@ async def set_block_completion(
             scheduled_date=target_date, status=CompletionStatus.done,
             completed_at=datetime.now(),
         )
-        if block is not None:
-            calendar = await cw.promote_block_to_history(
-                target_date, block, datetime.now().isoformat(), project_id)
     else:
         completion_store.pop(bkey, None)
-        if block is not None:
-            # Demote: drop the history event, restore the active event.
-            calendar = await cw.write_block_to_calendar(target_date, block)
 
     save_completion_store()
     if block is not None:
@@ -774,10 +776,14 @@ def completion_heatmap(start: date, end: date) -> dict[str, int]:
 
 async def delete_project(project_id: str, purge_tasks: bool = True) -> dict:
     """
-    Remove a project: delete its calendar events across all days (active +
-    history), drop its tasks/snapshot, and forget its completion records.
+    Remove a project: drop its tasks/snapshot and forget its completion records.
+
+    Calendar events are not touched here — that was delete_project_events over
+    CalDAV, which can't see the local EventKit calendar the client writes to.
+    Removing the project takes its blocks out of the day, so the next whole-day
+    change-set reports those events as deletes.
     """
-    calendar = await cw.delete_project_events(project_id)
+    calendar: dict | None = None
     proj = project_store.get(project_id)
     if purge_tasks and proj:
         for tid in list(project_task_store.keys()):

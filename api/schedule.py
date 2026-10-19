@@ -8,15 +8,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from agents import health_agent
 from agents.calendar_reconcile import reconcile_schedule
-from agents.calendar_writeback import (
-    write_block_to_calendar as _writeback_block,
-    write_schedule_to_calendar as _writeback_schedule,
-)
 from agents.scheduler_agent import find_nearest_slot
 from api.preferences import get_current_prefs
 from graphs.schedule_graph import reflow_after_pin, run_schedule_graph
 from graphs.schedule_stream import stream_schedule_events
-from integrations.caldav_client import fetch_debug_info
 from models.project import CompletionStatus
 from models.schedule import BlockType, DaySchedule
 from storage import (
@@ -82,20 +77,6 @@ async def generate_schedule(payload: GenerateRequest):
         d, _parse_fixed_minutes(payload.fixed_minutes_by_date))
     schedule = await run_schedule_graph(d, calendar_events=events)
     return schedule
-
-
-@router.get("/calendar/debug/{target_date}")
-async def debug_calendar(target_date: str):
-    """
-    Debug endpoint — tests CalDAV connectivity and returns raw events.
-    Does NOT use the orchestrator cache, always fetches live.
-    """
-    try:
-        d = date.fromisoformat(target_date)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
-
-    return await asyncio.to_thread(fetch_debug_info, d)
 
 
 @router.get("/schedule/stream/{target_date}")
@@ -164,31 +145,10 @@ async def get_schedule(target_date: str):
     return schedule
 
 
-@router.post("/schedule/{target_date}/write")
-async def write_schedule_to_calendar(target_date: str):
-    """
-    Write the cached DaySchedule for target_date back to iCloud Calendar.
-    Clears previously-written agent blocks first so re-runs don't duplicate.
-    """
-    try:
-        d = date.fromisoformat(target_date)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
-
-    if schedule_store.get(d) is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No schedule cached for {target_date}. Generate it first.",
-        )
-
-    result = await _writeback_schedule(d)
-    # Total failure (not configured / calendar unreadable / every block failed
-    # with nothing written or deleted) → surface as an error instead of a silent
-    # {written: 0}. Partial failures return 200 with the `failed` list so the
-    # client can show which blocks didn't sync.
-    if not result.get("ok", True) and result.get("written", 0) == 0 and result.get("deleted", 0) == 0:
-        raise HTTPException(status_code=502, detail=result)
-    return result
+# POST /schedule/{date}/write and /blocks/write removed 2026-10-18.
+# Both wrote iCloud over CalDAV. The Swift client stopped calling them when the
+# day moved to the EventKit change-set path below, and they could no longer
+# reach the events anyway — those live in a local calendar CalDAV cannot see.
 
 
 class CurrentEvent(BaseModel):
@@ -231,42 +191,6 @@ async def schedule_changeset(target_date: str, payload: ChangesetRequest):
         [e.model_dump() for e in payload.current_events],
         done_keys=done_keys,
     )
-
-
-class BlockWriteRequest(BaseModel):
-    start: str  # ISO datetime — looked up against schedule_store[date].blocks
-
-
-@router.post("/schedule/{target_date}/blocks/write")
-async def write_single_block(target_date: str, payload: BlockWriteRequest):
-    """
-    Write one block from schedule_store[target_date] to iCloud Calendar.
-    Identified by its start datetime (unique per day). Idempotent: a second
-    call with the same start replaces the previously-written event.
-    """
-    try:
-        d = date.fromisoformat(target_date)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid date format. Use YYYY-MM-DD.")
-
-    schedule = schedule_store.get(d)
-    if schedule is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No schedule cached for {target_date}. Generate it first.",
-        )
-
-    target = next((b for b in schedule.blocks if b.start.isoformat() == payload.start), None)
-    if target is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No block with start={payload.start} in schedule for {target_date}.",
-        )
-
-    result = await _writeback_block(d, target)
-    if not result.get("ok", True) and result.get("written", 0) == 0 and result.get("deleted", 0) == 0:
-        raise HTTPException(status_code=502, detail=result)
-    return result
 
 
 # ─── Pin endpoints (drag-to-move + pomodoro +/-) ────────────────────────────
