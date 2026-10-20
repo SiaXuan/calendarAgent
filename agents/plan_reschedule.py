@@ -16,7 +16,9 @@ Plus a simple whole-plan `shift_weeks` nudge.
 """
 from datetime import date, timedelta
 
-from models.plan_import import CandidateTask, ImportAdjustment
+import calendar
+
+from models.plan_import import CandidateTask, DeadlineChange, ImportAdjustment
 
 
 def _monday_of(d: date) -> date:
@@ -89,3 +91,41 @@ def apply_adjustment(
         else:
             out.append(c)
     return out
+
+
+def _nearest_month_day(month: int, day: int, today: date) -> date:
+    """The occurrence of month/day closest to today, in whichever year that is.
+
+    Nearest rather than next: a syllabus pasted mid-term lists dates already
+    behind us ("9/14" in October is last month, not next September), while a
+    request made in October for "1月15号" means the coming January. Day is
+    clamped to the month's length, so "2月30号" lands on its last day.
+    """
+    def on(year: int) -> date:
+        return date(year, month, min(day, calendar.monthrange(year, month)[1]))
+
+    candidates = [on(today.year - 1), on(today.year), on(today.year + 1)]
+    return min(candidates, key=lambda d: (abs((d - today).days), d < today))
+
+
+def resolve_deadline_change(
+    change: DeadlineChange | None, current: date | None, today: date
+) -> date | None:
+    """The deadline a described change produces, or None if it can't be computed.
+
+    `current` is the task's existing deadline (needed only for shift_days);
+    `today` anchors weekday and month/day requests. None means "no change could
+    be derived" — the caller keeps whatever the task already had.
+    """
+    if change is None:
+        return None
+    if change.month is not None and change.day is not None:
+        return _nearest_month_day(change.month, change.day, today)
+    if change.weekday is not None:
+        if change.weeks_from_now is None:
+            # "周五": the next one, today included.
+            return today + timedelta(days=(change.weekday - today.weekday()) % 7)
+        return _monday_of(today) + timedelta(weeks=change.weeks_from_now, days=change.weekday)
+    if change.shift_days is not None and current is not None:
+        return current + timedelta(days=change.shift_days)
+    return None

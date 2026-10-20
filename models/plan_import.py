@@ -48,6 +48,25 @@ def _coerce_weekday(v):
     return None
 
 
+class DeadlineChange(BaseModel):
+    """How a task's deadline should move, as the user put it in words.
+
+    The model fills this from the conversation; the date itself is computed in
+    agents/plan_reschedule.resolve_deadline_change. Precedence when several are
+    set: month+day, then weekday, then shift_days.
+    """
+    shift_days: int | None = None        # relative to the current deadline: 推迟两天 = 2, 提前一周 = -7
+    weekday: int | None = None           # 0=Mon..6=Sun — "下周五", "周一交"
+    weeks_from_now: int | None = None    # with weekday: 0 = this week, 1 = next week; None = next occurrence
+    month: int | None = Field(default=None, ge=1, le=12)   # with day: "11月3号"
+    day: int | None = Field(default=None, ge=1, le=31)
+
+    @field_validator("weekday", mode="before")
+    @classmethod
+    def _wd(cls, v):
+        return _coerce_weekday(v)
+
+
 class CandidateTask(BaseModel):
     """One task-like item the LLM pulled out of the document, before it becomes a
     real Task. Optional scheduling hints are honoured downstream when present."""
@@ -63,6 +82,9 @@ class CandidateTask(BaseModel):
     source_excerpt: str | None = None        # the doc snippet it came from
     week_index: int | None = None            # 1-based term week (from a schedule table)
     due_weekday: int | None = None           # 0=Mon..6=Sun, the day the work is due
+    # A described change to the deadline, resolved in code. Used by the project
+    # chat instead of having the model write a computed date into explicit_deadline.
+    deadline_change: DeadlineChange | None = None
 
     @field_validator("due_weekday", mode="before")
     @classmethod

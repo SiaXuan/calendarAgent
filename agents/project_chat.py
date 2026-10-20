@@ -7,6 +7,8 @@ and, when asked to change something, returns the revised task list. The
 orchestration (history, applying the revision, persistence) lives in
 agents/project_service.chat_about_plan; this module is just the LLM call.
 """
+import re
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel
@@ -46,8 +48,22 @@ conversation — the plan gets shaped gradually across turns. Reply in {language
   list, checklist, goals...), return the COMPLETE new task list in `tasks` —
   every task that should exist afterwards, not just the delta. Keep a task's
   `title` stable if it's the same item so its progress/reminders survive. Set
-  `explicit_deadline` (YYYY-MM-DD) when a date is known, `estimated_hours` for
-  workload, `source_excerpt` to the relevant bit of the source.
+  `estimated_hours` for workload, `source_excerpt` to the relevant bit of the
+  source.
+- Dates — NEVER compute a date yourself; dates are worked out by the system.
+  * `explicit_deadline` (YYYY-MM-DD): only for a full date, year included, that
+    appears verbatim in an attached document or the user's message.
+  * A date given without a year ("9/14", "11月3号"): `deadline_change` with
+    `month` + `day`.
+  * A change described in words: `deadline_change` —
+    `shift_days` moves it relative to its current date (推迟两天 = 2,
+    提前一周 = -7, 挪到下周 = 7); `weekday` (0=Mon..6=Sun) with `weeks_from_now`
+    (0 = this week, 1 = next week) for "下周五"; `weekday` alone for "周五"
+    meaning the next one.
+  * A task whose date isn't changing: leave `explicit_deadline` and
+    `deadline_change` both empty — its current date is kept.
+- In `reply`, never write a date. Wherever you'd state a task's date, write
+  [[deadline:<the task's exact title>]] and the real date is filled in.
 - NEVER hard-reject. If what the user sent is unclear, off-topic, or you're not
   sure it's schedulable, DON'T force it into tasks — leave `tasks` null and reply
   by saying what you think it is and asking what they'd like to do with it
@@ -61,6 +77,61 @@ conversation — the plan gets shaped gradually across turns. Reply in {language
   `tasks` — a pure progress report doesn't change the plan (leave `tasks` null).
 - Ground everything in the project's source material; don't invent scope.
 """
+
+
+_WEEKDAY_NAMES = {
+    "zh-CN": "一二三四五六日",
+    "zh-TW": "一二三四五六日",
+    "ja": "月火水木金土日",
+}
+_EN_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_EN_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_NO_DATE = {"zh-CN": "（未定日期）", "zh-TW": "（未定日期）", "ja": "（日付未定）", "en": "(no date)"}
+_UNKNOWN = {"zh-CN": "（日期见计划）", "zh-TW": "（日期見計畫）", "ja": "（日付は計画を参照）",
+            "en": "(see the plan)"}
+
+_PLACEHOLDER = re.compile(r"\[\[deadline:(.+?)\]\]")
+
+
+def format_date(d: date, language: Language, today: date | None = None) -> str:
+    """A date the way a reply in `language` would say it; year only when it isn't this one."""
+    lang = getattr(language, "value", language)
+    today = today or date.today()
+    if lang == "en":
+        out = f"{_EN_WEEKDAYS[d.weekday()]}, {_EN_MONTHS[d.month - 1]} {d.day}"
+        return out + (f", {d.year}" if d.year != today.year else "")
+    names = _WEEKDAY_NAMES.get(lang, _WEEKDAY_NAMES["zh-CN"])
+    prefix = f"{d.year}年" if d.year != today.year else ""
+    sep = "（週" if lang == "zh-TW" else ("（" if lang == "ja" else "（周")
+    return f"{prefix}{d.month}月{d.day}日{sep}{names[d.weekday()]}）"
+
+
+def fill_deadline_placeholders(reply: str, tasks, language: Language,
+                               today: date | None = None) -> str:
+    """Replace [[deadline:<title>]] with that task's saved deadline.
+
+    The reply is written before the dates exist — the model describes the
+    change, code computes it — so the model leaves a placeholder and this fills
+    it from the plan as stored. Titles are matched exactly, then through the
+    same normalisation re-import uses, so "1. 作业3" still finds "作业3".
+    """
+    from agents.plan_reconcile import normalize_title
+
+    lang = getattr(language, "value", language)
+    by_title = {t.title: t for t in tasks}
+    by_norm = {normalize_title(t.title): t for t in tasks}
+
+    def sub(m: re.Match) -> str:
+        title = m.group(1).strip()
+        task = by_title.get(title) or by_norm.get(normalize_title(title))
+        if task is None:
+            return _UNKNOWN.get(lang, _UNKNOWN["en"])
+        if task.deadline is None:
+            return _NO_DATE.get(lang, _NO_DATE["en"])
+        return format_date(task.deadline, language, today)
+
+    return _PLACEHOLDER.sub(sub, reply)
 
 
 async def converse(

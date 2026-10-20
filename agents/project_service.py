@@ -270,7 +270,7 @@ def _plan_context(project_id: str) -> str:
     return json.dumps(rows, ensure_ascii=False, indent=2) if rows else "(还没有任务)"
 
 
-def _apply_task_revision(project_id: str, candidates) -> None:
+def _apply_task_revision(project_id: str, candidates, today: date | None = None) -> None:
     """Replace the project's tasks with the chat's revised set, preserving ids so
     completion/reminders survive, then rebuild the plan snapshot.
 
@@ -285,10 +285,17 @@ def _apply_task_revision(project_id: str, candidates) -> None:
     pairing, diff = plan_reconcile.match_candidates(existing, candidates)
     plan_reconcile.migrate_completion_keys(diff.completion_migrations)
 
+    from agents.plan_reschedule import resolve_deadline_change
+
+    today = today or date.today()
     kept: dict[str, Task] = {}
     for i, c in enumerate(candidates):
-        deadline = c.explicit_deadline or c.explicit_date
         t = pairing.get(i)
+        # A change described in words is resolved here against the task's
+        # current deadline; the model never writes the resulting date itself.
+        # With neither field set the existing deadline is left as it is.
+        deadline = (resolve_deadline_change(c.deadline_change, t.deadline if t else None, today)
+                    or c.explicit_deadline or c.explicit_date)
         if t is not None:
             t.title = c.title
             if c.description is not None:
@@ -370,6 +377,12 @@ async def chat_about_plan(
     if result.progress:
         progress_applied = _apply_chat_progress(project_id, result.progress)
 
+    # The reply names dates by placeholder; fill them from the plan as it now
+    # stands, so what the user reads is what was actually saved. Filled before
+    # it's stored: the history is fed back to the model next turn.
+    reply = project_chat.fill_deadline_placeholders(
+        result.reply, project_tasks(project_id), language)
+
     # What to store as the user's turn — the typed text, or a note when it was
     # attachment-only (the doc/image bytes themselves aren't kept in history).
     user_turn = message.strip()
@@ -377,10 +390,10 @@ async def chat_about_plan(
         user_turn = "（发来一张图片）" if image is not None else "（发来一份文档）"
     project_chat_store[project_id] = history + [
         {"role": "user", "content": user_turn},
-        {"role": "assistant", "content": result.reply},
+        {"role": "assistant", "content": reply},
     ]
     save_project_chat_store()
-    return {"reply": result.reply, "plan_changed": changed,
+    return {"reply": reply, "plan_changed": changed,
             "progress_applied": progress_applied}
 
 

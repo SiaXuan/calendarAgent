@@ -150,3 +150,137 @@ def test_chat_revision_forgets_completions_of_dropped_pending_task(clean_stores,
 
     assert "t1" not in storage.project_task_store
     assert "t1::作业1" not in storage.completion_store
+
+
+# ─── dates are computed in code, not written by the model ──────────────────
+
+def _project_with_dated_tasks():
+    from datetime import date
+    pid = client.post("/projects", json={"name": "P"}).json()["id"]
+    storage.project_task_store["t1"] = Task(
+        id="t1", title="作业3", priority=Priority.medium,
+        cognitive_load=CognitiveLoad.deep, estimated_hours=4, project_id=pid,
+        deadline=date(2026, 10, 24))
+    storage.project_task_store["t2"] = Task(
+        id="t2", title="期中复习", priority=Priority.medium,
+        cognitive_load=CognitiveLoad.deep, estimated_hours=6, project_id=pid,
+        deadline=date(2026, 11, 2))
+    return pid
+
+
+def _say(monkeypatch, reply, tasks):
+    monkeypatch.setattr(project_chat, "converse", AsyncMock(
+        return_value=PlanChatResult(reply=reply, tasks=tasks)))
+
+
+def test_relative_shift_is_computed_from_the_current_deadline(clean_stores, monkeypatch):
+    """"推迟两天" arrives as shift_days=2; the date is worked out from the
+    task's stored deadline, not by the model."""
+    from models.plan_import import DeadlineChange
+    from datetime import date
+    pid = _project_with_dated_tasks()
+    _say(monkeypatch, "好，作业3推迟到[[deadline:作业3]]。", [
+        CandidateTask(title="作业3", deadline_change=DeadlineChange(shift_days=2)),
+        CandidateTask(title="期中复习"),
+    ])
+    r = client.post(f"/projects/{pid}/chat", data={"message": "作业3推迟两天"})
+
+    assert storage.project_task_store["t1"].deadline == date(2026, 10, 26)
+    assert "10月26日" in r.json()["reply"]
+    assert "[[" not in r.json()["reply"]
+
+
+def test_unchanged_task_keeps_its_date_when_the_model_omits_it(clean_stores, monkeypatch):
+    """The model returns the complete task list but no longer copies dates for
+    tasks it isn't changing — an omitted date means "keep", not "clear"."""
+    from datetime import date
+    pid = _project_with_dated_tasks()
+    _say(monkeypatch, "改好了。", [
+        CandidateTask(title="作业3"),
+        CandidateTask(title="期中复习"),
+    ])
+    client.post(f"/projects/{pid}/chat", data={"message": "把作业3拆细一点"})
+
+    assert storage.project_task_store["t1"].deadline == date(2026, 10, 24)
+    assert storage.project_task_store["t2"].deadline == date(2026, 11, 2)
+
+
+def test_full_date_quoted_by_the_user_is_still_honoured(clean_stores, monkeypatch):
+    from datetime import date
+    pid = _project_with_dated_tasks()
+    _say(monkeypatch, "改到[[deadline:作业3]]。", [
+        CandidateTask(title="作业3", explicit_deadline=date(2026, 12, 1)),
+        CandidateTask(title="期中复习"),
+    ])
+    r = client.post(f"/projects/{pid}/chat", data={"message": "作业3改到2026-12-01"})
+    assert storage.project_task_store["t1"].deadline == date(2026, 12, 1)
+    assert "12月1日" in r.json()["reply"]
+
+
+def test_stored_history_carries_the_filled_dates(clean_stores, monkeypatch):
+    """The history is fed back to the model next turn, so it must hold real
+    dates, not placeholders."""
+    from models.plan_import import DeadlineChange
+    pid = _project_with_dated_tasks()
+    _say(monkeypatch, "推迟到[[deadline:作业3]]。", [
+        CandidateTask(title="作业3", deadline_change=DeadlineChange(shift_days=2)),
+        CandidateTask(title="期中复习"),
+    ])
+    client.post(f"/projects/{pid}/chat", data={"message": "作业3推迟两天"})
+    last = storage.project_chat_store[pid][-1]["content"]
+    assert "10月26日" in last and "[[" not in last
+
+
+# ─── resolution and formatting ─────────────────────────────────────────────
+
+def test_resolver_cases():
+    from datetime import date
+    from agents.plan_reschedule import resolve_deadline_change as resolve
+    from models.plan_import import DeadlineChange as C
+    today = date(2026, 10, 20)   # a Tuesday
+    assert resolve(C(shift_days=-7), date(2026, 10, 24), today) == date(2026, 10, 17)
+    assert resolve(C(weekday=4, weeks_from_now=1), None, today) == date(2026, 10, 30)
+    assert resolve(C(weekday=4), None, today) == date(2026, 10, 23)
+    assert resolve(C(weekday=1), None, today) == today          # "周二" said on a Tuesday
+    assert resolve(C(month=11, day=3), None, today) == date(2026, 11, 3)
+    assert resolve(C(month=2, day=30), None, today) == date(2027, 2, 28)   # clamped
+    assert resolve(None, date(2026, 10, 24), today) is None
+    assert resolve(C(shift_days=3), None, today) is None       # nothing to shift from
+
+
+def test_month_day_picks_the_nearest_year():
+    """A syllabus pasted mid-term lists dates already behind us: "9/14" in
+    October is last month, not next September."""
+    from datetime import date
+    from agents.plan_reschedule import resolve_deadline_change as resolve
+    from models.plan_import import DeadlineChange as C
+    today = date(2026, 10, 20)
+    assert resolve(C(month=9, day=14), None, today) == date(2026, 9, 14)
+    assert resolve(C(month=1, day=15), None, today) == date(2027, 1, 15)
+
+
+def test_placeholder_formatting_per_language():
+    from datetime import date
+    from agents.project_chat import fill_deadline_placeholders as fill
+    t = Task(id="x", title="作业3", priority=Priority.medium,
+             cognitive_load=CognitiveLoad.deep, estimated_hours=1,
+             deadline=date(2026, 10, 26))
+    today = date(2026, 10, 20)
+    assert fill("[[deadline:作业3]]", [t], Language.zh_CN, today) == "10月26日（周一）"
+    assert fill("[[deadline:作业3]]", [t], Language.zh_TW, today) == "10月26日（週一）"
+    assert fill("[[deadline:作业3]]", [t], Language.ja, today) == "10月26日（月）"
+    assert fill("[[deadline:作业3]]", [t], Language.en, today) == "Mon, Oct 26"
+    # another year shows the year
+    assert fill("[[deadline:作业3]]", [t], Language.en, date(2025, 1, 1)) == "Mon, Oct 26, 2026"
+
+
+def test_placeholder_falls_back_rather_than_leaking():
+    """An unknown title or a task without a date must never leave raw
+    placeholder syntax in front of the user."""
+    from agents.project_chat import fill_deadline_placeholders as fill
+    t = Task(id="x", title="作业3", priority=Priority.medium,
+             cognitive_load=CognitiveLoad.deep, estimated_hours=1)
+    assert fill("[[deadline:作业3]]", [t], Language.zh_CN) == "（未定日期）"
+    assert fill("[[deadline:不存在]]", [t], Language.zh_CN) == "（日期见计划）"
+    # normalised title match: a renumbered heading still resolves
+    assert "未定日期" in fill("[[deadline:1. 作业3]]", [t], Language.zh_CN)
