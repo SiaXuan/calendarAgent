@@ -59,7 +59,39 @@ def test_presets_hold_no_secrets(preset):
     invariant is "env carries exactly the named variables", not "there are
     variables".
     """
-    assert set(preset.build().env) == set(preset.env_required)
+    env = preset.build().env
+    assert set(env) == set(preset.env_required) | set(dict(preset.env_fixed))
+    # Fixed settings are never credentials: none of them overlap what the user
+    # has to supply.
+    assert set(dict(preset.env_fixed)).isdisjoint(preset.env_required)
+
+
+def test_canvas_blocks_writes_at_the_server_too():
+    """
+    Our allowlist is one layer; the server's own gating is the stronger one.
+    On stdio, ALLOWED_WRITE_TOOLS unset means "every write tool registered" —
+    so it has to be pinned to none, and the role narrowed to student.
+    """
+    fixed = dict(CANVAS.env_fixed)
+    assert fixed["ALLOWED_WRITE_TOOLS"] == "none"
+    assert fixed["CANVAS_ROLE"] == "student"
+
+
+def test_canvas_launches_the_real_executable():
+    """The PyPI package is canvas-mcp but the binary is canvas-mcp-server;
+    `uvx canvas-mcp` alone finds nothing to run."""
+    assert CANVAS.args == ("--from", "canvas-mcp", "canvas-mcp-server")
+
+
+def test_google_requests_read_only_scopes():
+    """--read-only makes the server ask Google for gmail.readonly +
+    calendar.readonly only, so nothing can be sent whatever is on the belt."""
+    assert "--read-only" in GOOGLE_WORKSPACE.args
+
+
+def test_google_oauth_callback_avoids_the_backend_port():
+    """The server's OAuth listener defaults to 8000 — this backend's port."""
+    assert dict(GOOGLE_WORKSPACE.env_fixed)["WORKSPACE_MCP_PORT"] != "8000"
 
 
 # ─── readiness ──────────────────────────────────────────────────────────────
@@ -175,3 +207,12 @@ def test_detaching_something_not_attached_is_not_an_error(client, prefs_servers)
     prefs_servers.custom_mcp_servers = []
     r = client.post("/mcp/presets/canvas/detach")
     assert r.status_code == 200 and r.json()["was_attached"] is False
+
+
+def test_google_account_is_bound_in_code_not_left_to_the_model(monkeypatch):
+    """The preset resolves user_google_email from the environment into
+    bound_args, so the model never sees or chooses the account."""
+    for key in GOOGLE_WORKSPACE.env_required:
+        monkeypatch.setenv(key, "x")
+    monkeypatch.setenv("USER_GOOGLE_EMAIL", "me@example.com")
+    assert GOOGLE_WORKSPACE.build().bound_args == {"user_google_email": "me@example.com"}

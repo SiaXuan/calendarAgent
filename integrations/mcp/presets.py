@@ -33,6 +33,14 @@ class MCPPreset:
     command: str
     args: tuple[str, ...]
     notes: str = ""
+    # Non-secret settings baked into the launch, as (name, value) pairs — e.g.
+    # server-side write gating. Kept apart from env_required so "what the user
+    # must supply" stays an accurate list.
+    env_fixed: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    # Tool arguments bound in code from the environment, as (argument, env var)
+    # pairs. Hidden from the model's view of the tools; see
+    # graphs/user_mcp.bind_tool_args.
+    bound_args_from_env: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     # Tools the server performs immediately, with no preview or confirmation.
     # Kept out of the allowlist; listed so the exclusion is a decision on the
     # record rather than an oversight.
@@ -84,8 +92,9 @@ class MCPPreset:
             # venv is on PATH.
             command=self.resolved_command() or self.command,
             args=list(self.args),
-            env={k: os.getenv(k, "") for k in self.env_required},
+            env={**dict(self.env_fixed), **{k: os.getenv(k, "") for k in self.env_required}},
             tool_allowlist=list(self.tool_allowlist),
+            bound_args={arg: os.getenv(var, "") for arg, var in self.bound_args_from_env},
         )
 
 
@@ -96,15 +105,26 @@ CANVAS = MCPPreset(
     summary="课程作业、截止日期、公告、syllabus。截止日期直接变成可排的任务。",
     env_required=("CANVAS_API_TOKEN", "CANVAS_API_URL"),
     command="uvx",
-    args=("canvas-mcp",),
+    # PyPI package is canvas-mcp, but its executable is canvas-mcp-server, so a
+    # bare `uvx canvas-mcp` finds nothing to run.
+    args=("--from", "canvas-mcp", "canvas-mcp-server"),
+    # Server-side gating, on top of our allowlist. CANVAS_ROLE=student registers
+    # only student tools (~47); ALLOWED_WRITE_TOOLS=none removes every tool with
+    # side effects at startup — on stdio the default is "everything". A write
+    # tool that doesn't exist can't be talked into by instructions planted in
+    # course content; a confirmation the agent can redeem itself would not stop it.
+    env_fixed=(("CANVAS_ROLE", "student"), ("ALLOWED_WRITE_TOOLS", "none")),
     # Read-only, and narrowed to what a scheduling agent actually uses. The
     # server ships 100+ tools; a full belt bloats the prompt and degrades tool
     # selection, which is what tool_allowlist exists to prevent.
+    # Names checked against the real server's tool list (2026-10-20).
     tool_allowlist=(
         "get_my_upcoming_assignments",
         "get_my_todo_items",
         "get_my_submission_status",
+        "get_assignment_details",
         "list_my_announcements",
+        "list_courses",
         "get_course_details",
     ),
     unsafe_tools=(
@@ -115,8 +135,8 @@ CANVAS = MCPPreset(
     notes=(
         "CANVAS_API_URL 必须带 /api/v1。token 在 Canvas 的 Account → Settings → "
         "New Access Token 生成；有的学校不开自助发放，要走 IT 工单，也有学校的 "
-        "token 30 天就过期。三个会直接写入、没有预览步骤的工具已排除在 allowlist "
-        "之外（见 unsafe_tools）——要用它们得先补一道确认门。"
+        "token 30 天就过期。server 端已设 ALLOWED_WRITE_TOOLS=none，"
+        "三个会直接写入、没有预览步骤的工具根本不会注册（见 unsafe_tools）。"
     ),
 )
 
@@ -125,25 +145,43 @@ GOOGLE_WORKSPACE = MCPPreset(
     title="Gmail + Google Calendar",
     repo="https://github.com/taylorwilsdon/google_workspace_mcp",
     summary="读邮件找 deadline 和面试邀请，抽出来用 add_to_schedule 排进日程。",
-    env_required=("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"),
+    env_required=("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "USER_GOOGLE_EMAIL"),
     command="uvx",
-    args=("workspace-mcp",),
+    # --read-only makes the server request only gmail.readonly + calendar.readonly
+    # from Google, so nothing can be sent or changed even if a tool slipped onto
+    # the belt. --single-user uses the one cached credential instead of
+    # per-session mapping, which is what a personal backend wants.
+    args=("workspace-mcp", "--tools", "gmail", "calendar",
+          "--read-only", "--tool-tier", "core", "--single-user"),
+    # The OAuth callback listener defaults to port 8000 — the same port as this
+    # backend. OAUTHLIB_INSECURE_TRANSPORT allows the http://localhost callback.
+    env_fixed=(("WORKSPACE_MCP_PORT", "8765"), ("OAUTHLIB_INSECURE_TRANSPORT", "1")),
+    # Every Gmail/Calendar tool requires user_google_email — even with
+    # USER_GOOGLE_EMAIL set server-side, the schema still demands it. Which
+    # account to read is not the model's call, so it's bound in code.
+    bound_args_from_env=(("user_google_email", "USER_GOOGLE_EMAIL"),),
+    # Names checked against the real server's tool list (2026-10-20). An earlier
+    # guess, list_calendar_events, doesn't exist and would have been filtered
+    # out silently.
     tool_allowlist=(
         "search_gmail_messages",
         "get_gmail_message_content",
-        "list_calendar_events",
+        "get_gmail_messages_content_batch",
+        "list_calendars",
+        "get_events",
     ),
     notes=(
-        "要自己在 Google Cloud Console 建 OAuth client：个人 gmail.com 没有组织，"
-        "只能选 External 并把自己加进 test users。两个坑——(1) client 必须勾选 "
-        "'Use this client for an AI-powered agent'，2026-11-11 起没勾的会被所有 "
-        "Google Workspace MCP server 拒绝；(2) 没有 service account 路径，所以"
-        "需要人在场授权，无人值守的后台任务走不通这条路。\n"
-        "官方的 Gmail MCP（gmailmcp.googleapis.com）权限模型更合适"
-        "（只读 + 起草，发不出去），但还在 developer preview，而且自建后端该用"
-        "什么 redirect URI 官方文档没写——先用社区这个，它顺带把 Calendar 也给了。"
+        "Google Cloud Console 里建 OAuth client，类型选 **Desktop app**（本地 stdio "
+        "运行不需要配 redirect URI）。个人 gmail.com 没有组织，consent screen 只能"
+        "选 External，并把自己加进 test users。\n"
+        "首次让 agent 读邮件时，server 会自动在浏览器打开 Google 授权页，回调走 "
+        "localhost:8765；授权后再问一次即可，凭据会缓存，之后不再弹。\n"
+        "Google 2026-11-11 那条「必须勾选 AI-powered agent」的规定只针对 Google "
+        "自己托管的 MCP server；这个社区版走的是普通 Gmail/Calendar REST API，"
+        "不受影响。将来若换官方 Gmail MCP，需要另建一个勾选了该项的 client。"
     ),
 )
+
 
 # Official reference servers. Of the original set only seven are still
 # maintained — twelve (including Google Maps, Slack, GitHub) were moved to

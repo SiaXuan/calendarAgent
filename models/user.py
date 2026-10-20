@@ -25,6 +25,10 @@ class MCPServerConfig(BaseModel):
     url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     tool_allowlist: list[str] = Field(default_factory=list)
+    # Tool arguments fixed by code, never chosen by the model — e.g. which Google
+    # account to read. Removed from the schema the model sees and filled in on
+    # every call, so it can't be mistyped, swapped, or asked about.
+    bound_args: dict[str, str] = Field(default_factory=dict)
 
 
 class UserPreferences(BaseModel):

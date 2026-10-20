@@ -115,3 +115,48 @@ def test_config_defaults():
     c = MCPServerConfig(name="outlook")
     assert c.transport == "stdio"
     assert c.args == [] and c.env == {} and c.tool_allowlist == []
+
+
+# ─── bound arguments ────────────────────────────────────────────────────────
+
+async def test_bound_arg_is_hidden_from_the_model(mcp_servers):
+    """Which account to read isn't the model's decision, so the field must not
+    appear in the schema the model sees."""
+    mcp_servers(_echo_server(bound_args={"account": "me@example.com"}))
+    await user_mcp.load_mcp_tools()
+
+    whoami = next(t for t in user_mcp.get_mcp_tools() if t.name == "whoami")
+    assert "account" not in whoami.args
+    assert "account" not in whoami.args_schema.get("required", [])
+    assert "text" in whoami.args   # the rest of the schema is untouched
+
+
+async def test_bound_arg_reaches_the_server(mcp_servers):
+    mcp_servers(_echo_server(bound_args={"account": "me@example.com"}))
+    await user_mcp.load_mcp_tools()
+
+    whoami = next(t for t in user_mcp.get_mcp_tools() if t.name == "whoami")
+    result = await whoami.ainvoke({"text": "hi"})
+    assert "me@example.com:hi" in str(result)
+
+
+async def test_bound_arg_overrides_whatever_the_model_sends(mcp_servers):
+    """Hiding the field isn't enough on its own: a model can still emit an
+    argument it wasn't shown. The bound value has to win."""
+    mcp_servers(_echo_server(bound_args={"account": "me@example.com"}))
+    await user_mcp.load_mcp_tools()
+
+    whoami = next(t for t in user_mcp.get_mcp_tools() if t.name == "whoami")
+    result = await whoami.ainvoke({"text": "hi", "account": "someone-else@example.com"})
+    assert "me@example.com:hi" in str(result)
+    assert "someone-else" not in str(result)
+
+
+async def test_binding_skips_tools_that_dont_take_the_argument(mcp_servers):
+    """One server-wide binding applies only where the tool has that argument."""
+    mcp_servers(_echo_server(bound_args={"account": "me@example.com"}))
+    await user_mcp.load_mcp_tools()
+
+    add = next(t for t in user_mcp.get_mcp_tools() if t.name == "add")
+    assert await add.ainvoke({"a": 2, "b": 3}) is not None
+    assert set(add.args) == {"a", "b"}

@@ -27,6 +27,13 @@ def add(a: int, b: int) -> int:
 
 
 @mcp.tool()
+def whoami(account: str, text: str) -> str:
+    """Echo with an account argument — stands in for tools like Gmail's, whose
+    user_google_email the backend binds in code rather than letting the model pick."""
+    return f"{account}:{text}"
+
+
+@mcp.tool()
 def excluded_tool() -> str:
     """Exists only so a test can prove tool_allowlist actually filters."""
     return "should not be on the belt when an allowlist excludes it"
