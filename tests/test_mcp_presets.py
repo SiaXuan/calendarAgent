@@ -210,9 +210,44 @@ def test_detaching_something_not_attached_is_not_an_error(client, prefs_servers)
 
 
 def test_google_account_is_bound_in_code_not_left_to_the_model(monkeypatch):
-    """The preset resolves user_google_email from the environment into
-    bound_args, so the model never sees or chooses the account."""
-    for key in GOOGLE_WORKSPACE.env_required:
-        monkeypatch.setenv(key, "x")
+    """user_google_email is bound by the backend, as a reference resolved at
+    launch — the model never sees or chooses the account."""
+    from graphs.user_mcp import expand_env_refs
     monkeypatch.setenv("USER_GOOGLE_EMAIL", "me@example.com")
-    assert GOOGLE_WORKSPACE.build().bound_args == {"user_google_email": "me@example.com"}
+    bound = GOOGLE_WORKSPACE.build().bound_args
+    assert bound == {"user_google_email": "${USER_GOOGLE_EMAIL}"}
+    assert expand_env_refs(bound["user_google_email"]) == "me@example.com"
+
+
+# ─── credentials never leave the environment ───────────────────────────────
+
+@pytest.mark.parametrize("preset", PRESETS.values(), ids=lambda p: p.key)
+def test_built_config_carries_references_not_values(preset, monkeypatch):
+    """
+    The config is persisted to preferences and returned by GET /preferences,
+    so it must not hold credential values — and a stored copy would outlive a
+    token rotated in .env.
+    """
+    for key in preset.env_required:
+        monkeypatch.setenv(key, f"SECRET-{key}")
+    cfg = preset.build()
+    blob = cfg.model_dump_json()
+    assert "SECRET-" not in blob
+    for key in preset.env_required:
+        assert cfg.env[key] == f"${{{key}}}"
+
+
+def test_references_resolve_at_launch(monkeypatch):
+    from graphs.user_mcp import _server_entry
+    monkeypatch.setenv("CANVAS_API_TOKEN", "tok-123")
+    monkeypatch.setenv("CANVAS_API_URL", "https://x.example/api/v1")
+    entry = _server_entry(CANVAS.build())
+    assert entry["env"]["CANVAS_API_TOKEN"] == "tok-123"
+    assert entry["env"]["CANVAS_ROLE"] == "student"   # fixed values pass through
+
+
+def test_preferences_endpoint_never_exposes_a_token(client, monkeypatch, prefs_servers):
+    for key in CANVAS.env_required:
+        monkeypatch.setenv(key, "SUPER-SECRET-TOKEN")
+    client.post("/mcp/presets/canvas/attach")
+    assert "SUPER-SECRET-TOKEN" not in client.get("/preferences").text

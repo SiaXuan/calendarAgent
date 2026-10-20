@@ -7,8 +7,9 @@ missing without this module is the knowledge: which server is the real one
 putting on the belt, and which ones write without asking.
 
 So a preset carries three things: how to launch it, a curated allowlist, and the
-credentials it needs. Nothing here holds a secret — `env_required` names the
-variables, and `build()` reads them from the environment at call time.
+credentials it needs. Nothing here or in the config it builds holds a secret —
+`env_required` names the variables, `build()` writes ${VAR} references, and the
+values are read from the environment only when the server is launched.
 
 Verified 2026-10-19 against the GitHub API; `repo` is there so the next person
 can re-check rather than trust this file.
@@ -82,8 +83,10 @@ class MCPPreset:
     def build(self) -> MCPServerConfig:
         """The config to drop into `custom_mcp_servers`.
 
-        Reads credentials from the environment now, so a preset can sit in this
-        file indefinitely without ever holding one.
+        Credentials go in as ${VAR} references, resolved only when the server is
+        launched (graphs/user_mcp.expand_env_refs). The config is persisted to
+        preferences and returned by GET /preferences, so it must never carry the
+        values themselves — and a stored copy would outlive a rotated token.
         """
         return MCPServerConfig(
             name=self.key,
@@ -92,9 +95,9 @@ class MCPPreset:
             # venv is on PATH.
             command=self.resolved_command() or self.command,
             args=list(self.args),
-            env={**dict(self.env_fixed), **{k: os.getenv(k, "") for k in self.env_required}},
+            env={**dict(self.env_fixed), **{k: f"${{{k}}}" for k in self.env_required}},
             tool_allowlist=list(self.tool_allowlist),
-            bound_args={arg: os.getenv(var, "") for arg, var in self.bound_args_from_env},
+            bound_args={arg: f"${{{var}}}" for arg, var in self.bound_args_from_env},
         )
 
 

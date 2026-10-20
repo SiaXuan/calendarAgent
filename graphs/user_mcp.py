@@ -26,6 +26,7 @@ library the current spec needs. `MultiServerMCPClient(dict_of_servers)` became
 """
 import copy
 import logging
+import os
 import re
 from datetime import datetime
 
@@ -40,6 +41,24 @@ def get_mcp_tools() -> list:
     return list(_mcp_tools)
 
 
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def expand_env_refs(value: str) -> str:
+    """Resolve ${VAR} references against the environment, at launch time.
+
+    Server configs are persisted in preferences and returned by GET
+    /preferences, so they hold references to credentials, never the values. A
+    stored copy would also go stale silently when the user rotates a token in
+    .env.
+    """
+    return _ENV_REF.sub(lambda m: os.getenv(m.group(1), ""), value)
+
+
+def _expand_all(mapping: dict) -> dict:
+    return {k: expand_env_refs(v) if isinstance(v, str) else v for k, v in mapping.items()}
+
+
 def _server_entry(server) -> dict | None:
     """Map an MCPServerConfig to one entry of fastmcp's `mcpServers` config."""
     if server.transport == "stdio":
@@ -50,14 +69,15 @@ def _server_entry(server) -> dict | None:
             "transport": "stdio",
             "command": server.command,
             "args": list(server.args),
-            "env": dict(server.env),
+            "env": _expand_all(server.env),
         }
     if not server.url:
         _log.warning("MCP server %r is %s but has no url; skipping", server.name, server.transport)
         return None
     # Our config says "streamable_http"; fastmcp spells it "streamable-http".
     transport = "streamable-http" if server.transport == "streamable_http" else server.transport
-    return {"transport": transport, "url": server.url, "headers": dict(server.headers)}
+    return {"transport": transport, "url": expand_env_refs(server.url),
+            "headers": _expand_all(server.headers)}
 
 
 def bind_tool_args(tool, bound: dict):
@@ -186,7 +206,8 @@ async def load_mcp_tools() -> None:
         if entry is None:
             continue
         try:
-            tools = await _tools_for(s.name, entry, set(s.tool_allowlist), s.bound_args)
+            tools = await _tools_for(s.name, entry, set(s.tool_allowlist),
+                                     _expand_all(s.bound_args))
         except Exception as exc:
             # One bad server must not cost the others their tools, and must
             # never take down the agent — its own schedule tools still work.
