@@ -265,13 +265,8 @@ async def fetch_calendar_node(state: dict) -> dict:
         }
 
     # ── No frontend calendar supplied → use the last EventKit snapshot the
-    #    frontend persisted; NEVER hit the network. The CalDAV fetch is retired
-    #    (2026-08-31, see ARCHITECTURE §0/§11) — kept in
-    #    integrations/caldav_client.py + calendar_agent.fetch_fixed_blocks for a
-    #    future iOS/web client that can't read EventKit. To re-enable it, swap the
-    #    snapshot lookup below for:
-    #        fixed_blocks, free_windows = await calendar_agent.fetch_fixed_blocks(
-    #            target_date, prefs.work_start, prefs.work_end)
+    #    frontend persisted; never hit the network. The backend does no calendar
+    #    I/O of its own (the retired CalDAV client lives in legacy/caldav/).
     cached = _calendar_cache.get(target_date)
     if cached and time.monotonic() - cached[2] < _CALENDAR_CACHE_TTL_S:
         fixed_blocks, free_windows = cached[0], cached[1]

@@ -71,6 +71,7 @@ LLM 调用日程工具修改当天安排。改动落在日程副本上,循环结
 | `ANTHROPIC_API_KEY` | ✅ 必填 | 拆解任务、聊天调整、导入计划都调 Claude。没有它只剩一个退化的关键词兜底,核心功能用不了。到 <https://console.anthropic.com> 申请 |
 | `LLM_REASON_MODEL` / `LLM_FAST_MODEL` 等 | 可选 | 默认写死在 `agents/llm.py`。若你的 key 访问不到默认模型,或想换版本,再覆盖 |
 | `LANGSMITH_*` | 可选 | 只用于把 trace 发到 LangSmith 调试 |
+| 天气、通勤、Canvas、Gmail 等 | 可选 | 给聊天 agent 多几样能查的信息,只读。见下方「可选接入」 |
 | OpenAI / embedding | ❌ 不用 | 当前记忆是 pre-embedding(置信度 + namespace 过滤) |
 
 前提: 非 Mac 目前没有可用前端——Web UI 已暂时弃用(原因见下方「Web 前端」)。
@@ -82,12 +83,85 @@ LLM 调用日程工具修改当天安排。改动落在日程副本上,循环结
 python3.13 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env
-# 编辑 .env:只需填 ANTHROPIC_API_KEY;CALDAV_* 是 legacy,Swift 主线留空
+# 编辑 .env:只需填 ANTHROPIC_API_KEY;其余都是可选项,见下方「可选接入」
 ```
 
 Swift 原生客户端除了 Swift 工具链(Xcode / command-line tools)之外不需要额外安装,见下方「Swift 前端」。
 
 （Web 前端已暂时弃用,见下方「Web 前端」,无需安装。）
+
+## 可选接入
+
+下面这些都不是必需的。每一项都是给聊天 agent 多一样能查的东西,只读,不会替你发邮件或改数据。操作都针对本机跑着的后端 `localhost:8000`。改了 `.env` 要重启后端才生效:`.env` 只在启动时读,`--reload` 只盯 `.py` 文件。
+
+随时看接了哪些、每一项还缺什么:
+
+```bash
+curl localhost:8000/mcp/presets     # blockers 里列出缺的环境变量或缺的命令
+```
+
+### 天气
+
+用 Open-Meteo,免费,不用 key。告诉后端你在哪:
+
+```bash
+curl -X PATCH localhost:8000/preferences -H 'Content-Type: application/json' \
+  -d '{"latitude": 51.51, "longitude": -0.13}'
+```
+
+agent 安排户外的事(跑步、买菜、骑车)前会先看一眼。
+
+### 通勤时间
+
+常走的几段路各要多少分钟。一条记录两个方向都能查。
+
+```bash
+curl -X PATCH localhost:8000/preferences -H 'Content-Type: application/json' \
+  -d '{"commute_minutes": {"home->campus": 35}}'
+```
+
+### 时区换算、读网页
+
+两个官方 MCP server,不需要任何凭据:一个换算时区,一个把网页(课程网站、招聘页面)抓成文本。
+
+```bash
+curl -X POST localhost:8000/mcp/presets/time/attach
+curl -X POST localhost:8000/mcp/presets/fetch/attach
+```
+
+### Canvas
+
+从学校的 Canvas 读作业、截止日期、公告和课程大纲。用的是 [canvas-mcp](https://github.com/vishalsachdev/canvas-mcp),以学生身份运行,所有写操作的工具都已移除。
+
+1. 在 Canvas 里进 **Account → Settings → Approved Integrations → New Access Token**,生成后马上复制,token 只显示这一次。
+2. 在 `.env` 里填:
+   ```
+   CANVAS_API_TOKEN=<刚复制的 token>
+   CANVAS_API_URL=https://<你学校的 Canvas 地址>/api/v1
+   ```
+   地址就是你登录 Canvas 时浏览器地址栏里那个。末尾必须带 `/api/v1`,必须是 https。
+3. 重启后端,然后 `curl -X POST localhost:8000/mcp/presets/canvas/attach`。
+
+找不到 New Access Token 按钮,说明学校关了自助申请,要找学校 IT 开。也有学校的 token 30 天就过期。
+
+### Gmail 和 Google 日历(只读)
+
+让 agent 能在邮件里找面试邀请和截止日期。用的是 [workspace-mcp](https://github.com/taylorwilsdon/google_workspace_mcp),以只读模式运行,向 Google 申请的只有读权限。
+
+1. 打开 [console.cloud.google.com](https://console.cloud.google.com),新建一个项目(左上角 **选择项目 → 新建项目**)。不需要开「免费试用」,也不用绑卡。
+2. **APIs & Services → Library**:启用 **Gmail API** 和 **Google Calendar API**。
+3. **Google Auth Platform**(即 OAuth consent screen):Audience 选 **External**,填应用名和你的邮箱,在 **Test users** 里加上你的 Gmail 地址。
+4. **Clients → Create client**,类型选 **Desktop app**,复制 Client ID 和 Client secret。
+5. 在 `.env` 里填:
+   ```
+   GOOGLE_OAUTH_CLIENT_ID=<client id>
+   GOOGLE_OAUTH_CLIENT_SECRET=<client secret>
+   USER_GOOGLE_EMAIL=<你的 Gmail 地址>
+   ```
+6. 重启后端,然后 `curl -X POST localhost:8000/mcp/presets/google-workspace/attach`。
+7. 问 agent 一句跟邮件有关的话。第一次会在浏览器弹出 Google 授权页,提示「Google 尚未验证此应用」——自己建的应用都会这样,点「继续」并允许访问,然后再问一次。
+
+consent screen 一直处于 Testing 状态的话,Google 授权 7 天后过期,到时授权页会再弹一次,点一下就行。
 
 ## 日常启动
 
@@ -142,7 +216,7 @@ app 申请日历和提醒的**完全访问**(用途字符串在 `cal_swift_front
 
 **已暂时弃用。** Web UI 在浏览器里跑,读不了本地 EventKit,原先靠后端联网读 iCloud 日历(CalDAV)拿你的真实日程。为消除冷启动时 CalDAV 全量拉取的卡顿(实测一次刷新 ~15–45 秒),后端已**停用 CalDAV 读日历**,改成只接受 Swift 客户端经 EventKit 上传的日历。Web 端因此拿不到你的真实日历、排程会和固定事件撞车,故暂时搁置。
 
-代码已移到 `legacy/web-frontend/`,CalDAV 适配器(`integrations/caldav_client.py`)也保留着;将来要恢复 Web 或做移动端时,把那条读取路径接回即可(见 `agents/nodes.py::fetch_calendar_node` 里注释保留的 CalDAV 分支)。
+代码已移到 `legacy/web-frontend/`,退役的 CalDAV 客户端在 `legacy/caldav/`。后端现在自己不读任何日历,所以将来要恢复 Web 端或做移动端,得先给后端重新接一个日历来源。
 
 ## 跑测试
 
@@ -151,7 +225,7 @@ app 申请日历和提醒的**完全访问**(用途字符串在 `cal_swift_front
 .venv/bin/python -m pytest tests/test_schedule_graph.py -v   # 单个文件
 ```
 
-所有外部调用(Claude、CalDAV、AppleScript 提醒)都被 mock,测试离线跑。`tests/eval/` 里**打真 LLM 的 runner**(`run_eval.py`、`run_decomp_eval.py`)日常用 `--ignore=tests/eval` 排除;其中的 `test_*.py`(如任务拆解的 fallback 冒烟)是纯离线的,跟全量一起跑。
+Claude 和 AppleScript 提醒都被 mock,MCP 相关测试连的是 `tests/fixtures/` 里的本地 stdio server,整套测试不出网,也不碰你真实的偏好文件。`tests/eval/` 里**打真 LLM 的 runner**(`run_eval.py`、`run_decomp_eval.py`)日常用 `--ignore=tests/eval` 排除;其中的 `test_*.py`(如任务拆解的 fallback 冒烟)是纯离线的,跟全量一起跑。
 
 ### Eval:冒烟 vs 完整 LLM
 
@@ -184,14 +258,14 @@ app 申请日历和提醒的**完全访问**(用途字符串在 `cal_swift_front
 - `api/` — FastAPI 路由
 - `models/` — Pydantic 模型(Task、Subtask、TimeBlock、DaySchedule…)
 - `storage.py` — JSON 落盘的内存 store(健康、任务、日程、项目、完成态…)
-- `integrations/caldav_client.py` — iCloud CalDAV 适配器(legacy 兜底;Swift 主线走 EventKit)
+- `integrations/` — 文档解析、天气(Open-Meteo)、Reminders.app 兜底读取、MCP server 预设
 - `legacy/` — 弃用但留着当参考的代码;`web-frontend/` 是搁置的 React/Vite UI
 - `cal_swift_frontend/` — 原生 SwiftUI macOS 客户端(EventKit,主前端)
 - `tests/` — pytest 套件(离线)
 
 ## 阶段状态
 
-当前:**Phase 4(进行中)**——纯本地转向:Swift 客户端经 EventKit 承担全部日历/提醒读写,后端是纯逻辑、只返回 `{create,update,delete}` 变更集(不碰 iCloud/CalDAV)。已有项目层 + 多天规划 + 每日结转 + 完成追踪。后续方向:多源健康数据(Apple Health 等)、用户自带 MCP、论文驱动的健康规则引擎。
+当前:**Phase 4(进行中)**——纯本地转向:Swift 客户端经 EventKit 承担全部日历/提醒读写,后端是纯逻辑、只返回 `{create,update,delete}` 变更集(不碰 iCloud/CalDAV)。已有:项目层、多天规划、每日结转、改版大纲重复导入、复盘热力墙、对话调整可撤销,以及只读的 MCP 接入(Canvas、Gmail/日历、时区、读网页)。还没做:可分发的签名 `.app`、论文驱动的健康规则引擎、多源健康数据(Apple Health 等)。
 
 ## 可选:LangSmith trace
 

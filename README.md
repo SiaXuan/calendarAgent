@@ -173,10 +173,9 @@ measured), the backend now **no longer reads CalDAV** — it only accepts the
 calendar the Swift client uploads via EventKit. The web UI therefore can't see
 your real events and would schedule over your fixed commitments, so it's parked.
 
-The code moved to `legacy/web-frontend/`, and the CalDAV adapter
-(`integrations/caldav_client.py`) is kept; to revive the web or a mobile client,
-wire that read path back in (see the commented-out CalDAV branch in
-`agents/nodes.py::fetch_calendar_node`).
+The code moved to `legacy/web-frontend/`, and the retired CalDAV client to
+`legacy/caldav/`. Reviving the web or a mobile client means giving the backend a
+calendar source again, since it no longer reads one itself.
 
 ## First-time setup
 
@@ -185,15 +184,106 @@ wire that read path back in (see the commented-out CalDAV branch in
 python3.13 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env
-# Edit .env: ANTHROPIC_API_KEY is the only required value.
-# CALDAV_* is legacy — Phase 4 moved calendar/reminder I/O to local EventKit in
-# the Swift client; leave it unset unless you run the older CalDAV path.
+# Edit .env: ANTHROPIC_API_KEY is the only required value. Everything else is
+# optional — see "Optional integrations" below.
 
 # Web frontend is shelved (see "Web frontend" below) — no install needed.
 ```
 
 The native macOS Swift client needs no extra install step beyond a Swift
 toolchain (Xcode / command-line tools) — see the Swift frontend section above.
+
+## Optional integrations
+
+None of these are required. Each one gives the chat agent something it can look
+up — it can read, never send or change anything. Everything below is set against
+the running backend on `localhost:8000`; `.env` changes need a backend restart,
+because `.env` is read only at startup (`--reload` watches `.py` files).
+
+To see what's attached and what each integration is still missing:
+
+```bash
+curl localhost:8000/mcp/presets     # "blockers" lists missing env vars or commands
+```
+
+### Weather
+
+Uses Open-Meteo — free, no key. Tell the backend where you are:
+
+```bash
+curl -X PATCH localhost:8000/preferences -H 'Content-Type: application/json' \
+  -d '{"latitude": 51.51, "longitude": -0.13}'
+```
+
+The agent checks it before placing outdoor tasks (a run, groceries, a bike ride).
+
+### Commute times
+
+A table of your regular trips, in minutes. One entry answers both directions.
+
+```bash
+curl -X PATCH localhost:8000/preferences -H 'Content-Type: application/json' \
+  -d '{"commute_minutes": {"home->campus": 35}}'
+```
+
+### Time zones and web pages
+
+Two official MCP servers that need no credentials: time-zone conversion, and
+fetching a web page (a course site, a job posting) as text.
+
+```bash
+curl -X POST localhost:8000/mcp/presets/time/attach
+curl -X POST localhost:8000/mcp/presets/fetch/attach
+```
+
+### Canvas
+
+Assignments, due dates, announcements and syllabi from your school's Canvas.
+Runs as [canvas-mcp](https://github.com/vishalsachdev/canvas-mcp) in its student
+role with every write tool removed.
+
+1. In Canvas: **Account → Settings → Approved Integrations → New Access Token**.
+   Copy the token right away — it's shown once.
+2. In `.env`:
+   ```
+   CANVAS_API_TOKEN=<the token>
+   CANVAS_API_URL=https://<your school's Canvas address>/api/v1
+   ```
+   The address is whatever your browser shows when you're logged in to Canvas.
+   `/api/v1` is required, and it must be `https`.
+3. Restart the backend, then `curl -X POST localhost:8000/mcp/presets/canvas/attach`.
+
+If there's no New Access Token button, your school has turned off self-service
+tokens — ask its IT. Some schools also expire tokens after 30 days.
+
+### Gmail and Google Calendar (read-only)
+
+Lets the agent find interview invites and deadlines in your mail. Runs as
+[workspace-mcp](https://github.com/taylorwilsdon/google_workspace_mcp) in
+read-only mode, so only read access is ever requested from Google.
+
+1. At [console.cloud.google.com](https://console.cloud.google.com), create a
+   project (**Select project → New project**). You don't need the free trial or
+   a billing account.
+2. **APIs & Services → Library**: enable **Gmail API** and **Google Calendar API**.
+3. **Google Auth Platform** (the OAuth consent screen): Audience **External**,
+   fill in an app name and your email, and add your Gmail address under
+   **Test users**.
+4. **Clients → Create client**, type **Desktop app**. Copy the client ID and secret.
+5. In `.env`:
+   ```
+   GOOGLE_OAUTH_CLIENT_ID=<client id>
+   GOOGLE_OAUTH_CLIENT_SECRET=<client secret>
+   USER_GOOGLE_EMAIL=<your gmail address>
+   ```
+6. Restart the backend, then `curl -X POST localhost:8000/mcp/presets/google-workspace/attach`.
+7. Ask the agent something about your mail. The first time, a Google consent
+   page opens in your browser; it will say Google hasn't verified the app,
+   which is expected for an app you made yourself — choose **Continue**, allow
+   access, then ask again.
+
+While the consent screen stays in Testing status, Google expires the grant
+after 7 days and the consent page comes back; it's the same click.
 
 ## Run the tests
 
@@ -202,7 +292,9 @@ toolchain (Xcode / command-line tools) — see the Swift frontend section above.
 .venv/bin/python -m pytest tests/test_schedule_graph.py -v   # one file
 ```
 
-All external calls (Claude, CalDAV, AppleScript Reminders) are mocked — tests stay offline.
+Claude and AppleScript Reminders are mocked, and MCP tests run against a local
+stdio server in `tests/fixtures/` — the suite never touches the network or your
+real preferences file.
 The real-LLM **runners** in `tests/eval/` (`run_eval.py`, `run_decomp_eval.py`) are excluded
 with `--ignore=tests/eval`; the `test_*.py` there (e.g. the decomposition fallback smoke test)
 are offline and run with the full suite.
@@ -245,8 +337,8 @@ xfail flag) / `error`. Known bad cases (e.g. "one-off errand over-decomposed", s
 - `api/` — FastAPI route handlers
 - `models/` — Pydantic schemas (Task, Subtask, TimeBlock, DaySchedule, …)
 - `storage.py` — JSON-backed in-memory stores (health, tasks, schedules)
-- `integrations/caldav_client.py` — iCloud CalDAV adapter (legacy fallback; Swift path uses EventKit)
-- `legacy/` — parked code kept for reference; `web-frontend/` is the shelved React/Vite UI
+- `integrations/` — document parsing, weather (Open-Meteo), Reminders.app fallback, MCP server presets
+- `legacy/` — parked code kept for reference: `web-frontend/` (shelved React/Vite UI), `caldav/` (retired iCloud client)
 - `cal_swift_frontend/` — native SwiftUI macOS client (EventKit) — primary frontend
 - `tests/` — pytest suite (fully offline; `--ignore=tests/eval` to skip live-LLM eval)
 
@@ -254,9 +346,11 @@ xfail flag) / `error`. Known bad cases (e.g. "one-off errand over-decomposed", s
 
 Current: **Phase 4 (in progress)** — pure-local pivot: the Swift client owns all
 Calendar/Reminders I/O via EventKit, the backend is pure logic returning
-create/update/delete change-sets (no iCloud/CalDAV). Project layer + multi-day
-planning + daily carryover are in place. Still open: re-import reconcile, the
-review/heatmap polish, and a distributable signed `.app`.
+create/update/delete change-sets (no iCloud/CalDAV). In place: the project
+layer, multi-day planning, daily carryover, re-importing a revised syllabus,
+the review heatmap, undo for chat changes, and read-only MCP integrations
+(Canvas, Gmail/Calendar, time zones, web fetch). Still open: a distributable
+signed `.app`, research-driven health rules, and multi-source health data.
 
 ## Optional LangSmith tracing
 
