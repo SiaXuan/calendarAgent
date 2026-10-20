@@ -26,6 +26,8 @@ library the current spec needs. `MultiServerMCPClient(dict_of_servers)` became
 """
 import copy
 import logging
+import re
+from datetime import datetime
 
 _log = logging.getLogger("dayflow")
 
@@ -90,6 +92,59 @@ def bind_tool_args(tool, bound: dict):
     return tool.model_copy(update={"args_schema": schema, "coroutine": call_with_bound_args})
 
 
+# An ISO-8601 timestamp that carries a zone ("…Z" or "…-07:00"). Naive ones are
+# left alone: without a zone there's nothing to convert from.
+_ZONED_TIMESTAMP = re.compile(
+    r"\b(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})(?![\w:])"
+)
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def localize_timestamps(text: str, tz=None) -> str:
+    """Rewrite zoned timestamps in tool output as local wall-clock time.
+
+    Servers report times in UTC (Canvas: "Due: 2026-10-21T06:59:59Z"). Left
+    as-is, the model has to convert to the user's zone itself, and the failure
+    is a whole day: that example is 23:59 on the 20th in Pacific time, not the
+    21st. The conversion is done here instead, so the model only ever reads
+    local times — same principle as every other date in the app.
+    """
+    def sub(m: re.Match) -> str:
+        date_part, time_part, zone = m.groups()
+        if zone == "Z":
+            zone = "+00:00"
+        elif ":" not in zone:
+            zone = f"{zone[:3]}:{zone[3:]}"
+        try:
+            dt = datetime.fromisoformat(f"{date_part}T{time_part}{zone}")
+        except ValueError:
+            return m.group(0)
+        local = dt.astimezone(tz)
+        return f"{local:%Y-%m-%d %H:%M} ({_WEEKDAYS[local.weekday()]}, local time)"
+
+    return _ZONED_TIMESTAMP.sub(sub, text)
+
+
+def _localize_output(tool):
+    """Wrap a tool so every text block it returns has local timestamps."""
+    original = tool.coroutine
+
+    async def call_with_local_times(**arguments):
+        result = await original(**arguments)
+        content, artifact = result if isinstance(result, tuple) else (result, None)
+        if isinstance(content, str):
+            content = localize_timestamps(content)
+        elif isinstance(content, list):
+            content = [
+                {**block, "text": localize_timestamps(block["text"])}
+                if isinstance(block, dict) and isinstance(block.get("text"), str) else block
+                for block in content
+            ]
+        return (content, artifact) if isinstance(result, tuple) else content
+
+    return tool.model_copy(update={"coroutine": call_with_local_times})
+
+
 async def _tools_for(name: str, entry: dict, allowlist: set[str],
                      bound_args: dict | None = None) -> list:
     """Tools from one server, narrowed by its allowlist, with bound args applied."""
@@ -101,7 +156,7 @@ async def _tools_for(name: str, entry: dict, allowlist: set[str],
         tools = [t for t in tools if t.name in allowlist]
     if bound_args:
         tools = [bind_tool_args(t, bound_args) for t in tools]
-    return tools
+    return [_localize_output(t) for t in tools]
 
 
 async def load_mcp_tools() -> None:

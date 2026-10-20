@@ -34,6 +34,12 @@ def whoami(account: str, text: str) -> str:
 
 
 @mcp.tool()
+def due_at() -> str:
+    """Report a deadline the way LMS/mail servers do: an ISO timestamp in UTC."""
+    return "Due: 2026-10-21T06:59:59Z"
+
+
+@mcp.tool()
 def excluded_tool() -> str:
     """Exists only so a test can prove tool_allowlist actually filters."""
     return "should not be on the belt when an allowlist excludes it"

@@ -160,3 +160,44 @@ async def test_binding_skips_tools_that_dont_take_the_argument(mcp_servers):
     add = next(t for t in user_mcp.get_mcp_tools() if t.name == "add")
     assert await add.ainvoke({"a": 2, "b": 3}) is not None
     assert set(add.args) == {"a", "b"}
+
+
+# ─── timestamps reach the model as local time ──────────────────────────────
+
+def test_utc_timestamp_becomes_local_wall_clock():
+    """
+    Canvas reports "Due: 2026-10-21T06:59:59Z". In Pacific time that's 23:59 on
+    the 20th — a model left to convert it itself gets the day wrong.
+    """
+    from zoneinfo import ZoneInfo
+    from graphs.user_mcp import localize_timestamps
+    la = ZoneInfo("America/Los_Angeles")
+    assert localize_timestamps("Due: 2026-10-21T06:59:59Z", la) == \
+        "Due: 2026-10-20 23:59 (Tue, local time)"
+
+
+def test_offset_forms_are_all_converted():
+    from zoneinfo import ZoneInfo
+    from graphs.user_mcp import localize_timestamps
+    utc = ZoneInfo("UTC")
+    out = localize_timestamps(
+        "a 2026-11-03T09:00:00+00:00 b 2026-11-03T04:00:00-0500 c 2026-11-03T09:00Z", utc)
+    assert out.count("2026-11-03 09:00 (Tue, local time)") == 3
+
+
+def test_naive_timestamps_and_lookalikes_are_left_alone():
+    """No zone means nothing to convert from — guessing would be worse."""
+    from zoneinfo import ZoneInfo
+    from graphs.user_mcp import localize_timestamps
+    text = "naive 2026-10-21T06:59:59, date 2026-10-21, id 2026-10-21T06"
+    assert localize_timestamps(text, ZoneInfo("UTC")) == text
+
+
+async def test_mcp_tool_output_is_localized_end_to_end(mcp_servers):
+    """Applied to every loaded tool, so no server can hand the model a raw UTC time."""
+    mcp_servers(_echo_server())
+    await user_mcp.load_mcp_tools()
+    due = next(t for t in user_mcp.get_mcp_tools() if t.name == "due_at")
+    out = str(await due.ainvoke({}))
+    assert "06:59:59Z" not in out
+    assert "local time" in out
