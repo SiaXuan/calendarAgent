@@ -76,7 +76,7 @@ def patch_agent(monkeypatch):
 
 async def test_minor_change_commits(clean_stores, patch_agent):
     _seed([_scheduled("t1", "Work", 9, 10)])
-    patch_agent([("move_block", {"block_id": "b1", "new_start_iso": "2026-06-15T14:00:00"})],
+    patch_agent([("move_block", {"block_id": "b1", "new_start_time": "14:00"})],
                 final="挪好了")
     res = await run_chat_agent(D, "把工作挪到下午2点")
     assert res.terminal_state == "success"
@@ -90,8 +90,8 @@ async def test_minor_change_commits(clean_stores, patch_agent):
 async def test_major_change_returns_proposal_without_commit(clean_stores, patch_agent):
     _seed([_scheduled("t1", "A", 9, 10), _scheduled("t2", "B", 11, 12)])
     patch_agent([
-        ("move_block", {"block_id": "b1", "new_start_iso": "2026-06-15T14:00:00"}),
-        ("move_block", {"block_id": "b2", "new_start_iso": "2026-06-15T16:00:00"}),
+        ("move_block", {"block_id": "b1", "new_start_time": "14:00"}),
+        ("move_block", {"block_id": "b2", "new_start_time": "16:00"}),
     ], final="改动较大")
     res = await run_chat_agent(D, "重排下午")
     assert res.terminal_state == "proposal"
@@ -154,8 +154,8 @@ async def test_recursion_error_falls_back_to_degraded(clean_stores, monkeypatch)
 async def test_confirm_applies_when_version_matches(clean_stores, patch_agent):
     _seed([_scheduled("t1", "A", 9, 10), _scheduled("t2", "B", 11, 12)])
     patch_agent([
-        ("move_block", {"block_id": "b1", "new_start_iso": "2026-06-15T14:00:00"}),
-        ("move_block", {"block_id": "b2", "new_start_iso": "2026-06-15T16:00:00"}),
+        ("move_block", {"block_id": "b1", "new_start_time": "14:00"}),
+        ("move_block", {"block_id": "b2", "new_start_time": "16:00"}),
     ], final="改动较大")
     await run_chat_agent(D, "重排")
     res = confirm_proposal(D)
@@ -169,8 +169,8 @@ async def test_confirm_applies_when_version_matches(clean_stores, patch_agent):
 async def test_confirm_invalidated_when_version_changed(clean_stores, patch_agent):
     _seed([_scheduled("t1", "A", 9, 10), _scheduled("t2", "B", 11, 12)])
     patch_agent([
-        ("move_block", {"block_id": "b1", "new_start_iso": "2026-06-15T14:00:00"}),
-        ("move_block", {"block_id": "b2", "new_start_iso": "2026-06-15T16:00:00"}),
+        ("move_block", {"block_id": "b1", "new_start_time": "14:00"}),
+        ("move_block", {"block_id": "b2", "new_start_time": "16:00"}),
     ], final="x")
     await run_chat_agent(D, "重排")
     # Simulate an external schedule change before confirm
@@ -250,8 +250,8 @@ async def test_confirm_no_proposal_is_degraded(clean_stores):
 async def test_confirm_expired_ttl(clean_stores, patch_agent):
     _seed([_scheduled("t1", "A", 9, 10), _scheduled("t2", "B", 11, 12)])
     patch_agent([
-        ("move_block", {"block_id": "b1", "new_start_iso": "2026-06-15T14:00:00"}),
-        ("move_block", {"block_id": "b2", "new_start_iso": "2026-06-15T16:00:00"}),
+        ("move_block", {"block_id": "b1", "new_start_time": "14:00"}),
+        ("move_block", {"block_id": "b2", "new_start_time": "16:00"}),
     ], final="x")
     await run_chat_agent(D, "重排")
     # Force the proposal's created_at into the past
@@ -267,7 +267,7 @@ async def test_confirm_expired_ttl(clean_stores, patch_agent):
 async def _minor_move(patch_agent, hour=14):
     """One scripted minor move → auto-committed."""
     patch_agent(
-        [("move_block", {"block_id": "b1", "new_start_iso": f"2026-06-15T{hour}:00:00"})],
+        [("move_block", {"block_id": "b1", "new_start_time": f"{hour}:00"})],
         final="挪好了",
     )
     return await run_chat_agent(D, "把工作挪到下午")
@@ -294,8 +294,8 @@ async def test_undo_restores_state_before_applied_proposal(clean_stores, patch_a
     """A major change goes live via Apply, so Apply must be undoable too."""
     _seed([_scheduled("t1", "A", 9, 10), _scheduled("t2", "B", 11, 12)])
     patch_agent([
-        ("move_block", {"block_id": "b1", "new_start_iso": "2026-06-15T14:00:00"}),
-        ("move_block", {"block_id": "b2", "new_start_iso": "2026-06-15T16:00:00"}),
+        ("move_block", {"block_id": "b1", "new_start_time": "14:00"}),
+        ("move_block", {"block_id": "b2", "new_start_time": "16:00"}),
     ], final="改动较大")
     await run_chat_agent(D, "重排")
     confirm_proposal(D)

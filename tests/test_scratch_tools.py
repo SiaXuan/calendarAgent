@@ -94,8 +94,8 @@ def test_add_to_schedule_carries_notes():
     s = _scratch([_scheduled("t1", "Work", 9, 10)])
     tools = {t.name: t for t in make_schedule_tools(s)}
     tools["add_to_schedule"].invoke({
-        "title": "Interview @ Acme", "start_iso": "2026-06-15T15:00:00",
-        "end_iso": "2026-06-15T16:00:00", "notes": "from email 2026-06-14",
+        "title": "Interview @ Acme", "start_time": "15:00",
+        "end_time": "16:00", "notes": "from email 2026-06-14",
     })
     added = [b for b in s.committed_blocks() if b.title == "Interview @ Acme"][0]
     assert added.block_type == BlockType.fixed
@@ -187,7 +187,7 @@ def test_tools_constructed():
 def test_move_tool_mutates_scratch():
     s = _scratch([_scheduled("t1", "Work", 9, 10)])
     tools = {t.name: t for t in make_schedule_tools(s)}
-    out = tools["move_block"].invoke({"block_id": "b1", "new_start_iso": "2026-06-15T14:00:00"})
+    out = tools["move_block"].invoke({"block_id": "b1", "new_start_time": "14:00"})
     assert "14:00" in out
     assert s.get("b1").start == datetime(2026, 6, 15, 14, 0)
 
@@ -195,7 +195,7 @@ def test_move_tool_mutates_scratch():
 def test_move_tool_returns_error_string_on_bad_id():
     s = _scratch([_scheduled("t1", "Work", 9, 10)])
     tools = {t.name: t for t in make_schedule_tools(s)}
-    out = tools["move_block"].invoke({"block_id": "b99", "new_start_iso": "2026-06-15T14:00:00"})
+    out = tools["move_block"].invoke({"block_id": "b99", "new_start_time": "14:00"})
     assert "错误" in out
 
 
@@ -208,3 +208,62 @@ def test_capacity_check_tool_reports_oversubscription():
     tools = {t.name: t for t in make_schedule_tools(s)}
     out = tools["capacity_check"].invoke({})
     assert "超额=True" in out
+
+
+# ─── the date is the scratch's, not the model's ─────────────────────────────
+
+def _one_block_tools():
+    from datetime import date, datetime
+    from agents.scratch import ScheduleScratch
+    from agents.tools.schedule_tools import make_schedule_tools
+    from models.schedule import BlockType, TimeBlock
+    d = date(2026, 6, 15)
+    b = TimeBlock(start=datetime(2026, 6, 15, 9), end=datetime(2026, 6, 15, 10),
+                  block_type=BlockType.scheduled, task_id="t1", title="Work")
+    sc = ScheduleScratch(d, [b], base_version=1)
+    return sc, {t.name: t for t in make_schedule_tools(sc)}
+
+
+def test_time_of_day_lands_on_the_target_date():
+    from datetime import datetime
+    sc, tools = _one_block_tools()
+    tools["move_block"].invoke({"block_id": "b1", "new_start_time": "14:30"})
+    assert sc.committed_blocks()[0].start == datetime(2026, 6, 15, 14, 30)
+
+
+def test_a_date_other_than_the_target_day_is_refused():
+    """
+    Scratch doesn't re-check dates, so a wrong one used to land a block dated
+    another day inside today's schedule — rendering as "14:00" while stored as
+    a different date. The tools take a time of day; a full datetime is only
+    accepted when it names the target day.
+    """
+    from datetime import datetime
+    sc, tools = _one_block_tools()
+    out = tools["move_block"].invoke({"block_id": "b1", "new_start_time": "2025-06-15T14:00:00"})
+    assert "只能安排" in out
+    assert sc.committed_blocks()[0].start == datetime(2026, 6, 15, 9)   # untouched
+
+
+def test_full_datetime_on_the_target_day_is_tolerated():
+    from datetime import datetime
+    sc, tools = _one_block_tools()
+    tools["move_block"].invoke({"block_id": "b1", "new_start_time": "2026-06-15T16:00:00"})
+    assert sc.committed_blocks()[0].start == datetime(2026, 6, 15, 16)
+
+
+def test_event_can_end_at_midnight():
+    sc, tools = _one_block_tools()
+    out = tools["add_fixed_event"].invoke(
+        {"title": "Late shift", "start_time": "22:00", "end_time": "24:00"})
+    assert "错误" not in out
+
+
+def test_external_event_on_another_day_cannot_be_added():
+    """add_to_schedule is for today's events; another day's interview has to be
+    reported to the user, not quietly placed."""
+    sc, tools = _one_block_tools()
+    out = tools["add_to_schedule"].invoke({
+        "title": "Interview", "start_time": "2026-06-16T10:00:00",
+        "end_time": "2026-06-16T11:00:00"})
+    assert "只能安排" in out

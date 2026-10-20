@@ -11,7 +11,7 @@ Tools are STATEFUL: they close over one ScheduleScratch instance per agent run.
 The LLM addresses blocks by their scratch id ("b1"…) shown in `get_schedule()`.
 Mutations return the refreshed projection so the LLM never operates on stale state.
 """
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 
 from langchain_core.tools import StructuredTool
 
@@ -22,21 +22,42 @@ from models.solver import FixedInterval
 
 
 def make_schedule_tools(scratch: ScheduleScratch) -> list:
-    """Return LangChain tools bound to this run's scratch."""
+    """Return LangChain tools bound to this run's scratch.
+
+    Times are taken as a time of day ("14:30"); the date is the scratch's own
+    target date, supplied here. The agent only ever edits that one day, so the
+    date is never the model's to choose — and scratch doesn't re-check it, so a
+    mistyped date would otherwise land a block on another day inside today's
+    schedule.
+    """
+
+    def _at(value: str, *, end_of_day_ok: bool = False) -> datetime:
+        """A time of day on the target date. A full ISO datetime is tolerated
+        only if it names the target date. "24:00" is accepted as an end time."""
+        value = value.strip()
+        if "T" in value or len(value) > 8:
+            dt = datetime.fromisoformat(value)
+            if dt.date() != scratch.target_date:
+                raise ValueError(
+                    f"只能安排 {scratch.target_date.isoformat()} 当天，收到的是 {dt.date().isoformat()}")
+            return dt
+        if end_of_day_ok and value in ("24:00", "24:00:00"):
+            return datetime.combine(scratch.target_date + timedelta(days=1), time())
+        return datetime.combine(scratch.target_date, time.fromisoformat(value))
 
     def get_schedule() -> str:
         """查看当前(草稿)日程。返回每个 block 一行，含其 id(如 b1)、时间、类型。
         修改 block 前先看这个拿到 id。"""
         return scratch.render()
 
-    def move_block(block_id: str, new_start_iso: str) -> str:
-        """把某个 block 移到同一天的新开始时间(时长不变)。
-        block_id 来自 get_schedule(如 'b1')；new_start_iso 形如 '2026-06-15T11:00:00'。
+    def move_block(block_id: str, new_start_time: str) -> str:
+        """把某个 block 移到当天的新开始时刻(时长不变)。
+        block_id 来自 get_schedule(如 'b1')；new_start_time 是时刻，形如 '11:00'。
         只能移 scheduled/suggested 类型；返回更新后的日程。"""
         try:
-            start = datetime.fromisoformat(new_start_iso)
-        except ValueError:
-            return f"错误：new_start_iso 格式不对: {new_start_iso!r}"
+            start = _at(new_start_time)
+        except ValueError as e:
+            return f"错误：new_start_time 不对（{e}）"
         try:
             return scratch.move_block(block_id, start)
         except ValueError as e:
@@ -58,27 +79,28 @@ def make_schedule_tools(scratch: ScheduleScratch) -> list:
         except ValueError as e:
             return f"错误：{e}"
 
-    def add_fixed_event(title: str, start_iso: str, end_iso: str) -> str:
-        """加一个固定事件(如牙医预约)，其他任务会绕开它。
-        start_iso/end_iso 形如 '2026-06-15T15:00:00'。返回更新后的日程。"""
+    def add_fixed_event(title: str, start_time: str, end_time: str) -> str:
+        """在当天加一个固定事件(如牙医预约)，其他任务会绕开它。
+        start_time/end_time 是时刻，形如 '15:00'。返回更新后的日程。"""
         try:
-            start, end = datetime.fromisoformat(start_iso), datetime.fromisoformat(end_iso)
-        except ValueError:
-            return "错误：时间格式不对"
+            start, end = _at(start_time), _at(end_time, end_of_day_ok=True)
+        except ValueError as e:
+            return f"错误：时间不对（{e}）"
         if end <= start:
             return "错误：结束时间必须晚于开始时间"
         return scratch.add_fixed_event(title, start, end)
 
     def add_to_schedule(
-        title: str, start_iso: str, end_iso: str, notes: str | None = None
+        title: str, start_time: str, end_time: str, notes: str | None = None
     ) -> str:
-        """把从邮件/外部来源抽出的会议/面试/笔试等带时间的事件加进当天日程(落为固定事件)。
-        用于「邮件里有面试邀请→加进日程」这类场景；notes 存来源/上下文(如原邮件要点)，
-        同步时会带进日历事件。start_iso/end_iso 形如 '2026-06-15T15:00:00'。返回更新后的日程。"""
+        """把从邮件/外部来源抽出的、发生在当天的会议/面试/笔试等事件加进日程(落为固定事件)。
+        用于「邮件里有今天的面试邀请→加进日程」这类场景；notes 存来源/上下文(如原邮件要点)，
+        同步时会带进日历事件。start_time/end_time 是时刻，形如 '15:00'。
+        不在当天的事件加不了，如实告诉用户。返回更新后的日程。"""
         try:
-            start, end = datetime.fromisoformat(start_iso), datetime.fromisoformat(end_iso)
-        except ValueError:
-            return "错误：时间格式不对"
+            start, end = _at(start_time), _at(end_time, end_of_day_ok=True)
+        except ValueError as e:
+            return f"错误：时间不对（{e}）"
         if end <= start:
             return "错误：结束时间必须晚于开始时间"
         return scratch.add_fixed_event(title, start, end, notes=notes)
