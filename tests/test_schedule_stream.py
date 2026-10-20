@@ -23,7 +23,7 @@ async def test_event_order_is_health_then_fixed_then_schedule_then_done(
         _LLMSubtask(
             parent_id=sample_task.id, title="Block",
             estimated_minutes=60, cognitive_load=CognitiveLoad.deep,
-            task_kind=TaskKind.analytical, suggested_date=sample_date,
+            task_kind=TaskKind.analytical,
         ),
     ]))
 
@@ -53,7 +53,7 @@ async def test_schedule_event_fires_exactly_once(
         _LLMSubtask(
             parent_id=sample_task.id, title="Block",
             estimated_minutes=60, cognitive_load=CognitiveLoad.deep,
-            task_kind=TaskKind.analytical, suggested_date=sample_date,
+            task_kind=TaskKind.analytical,
         ),
     ]))
 
@@ -94,7 +94,7 @@ async def test_schedule_event_payload_shape(
         _LLMSubtask(
             parent_id=sample_task.id, title="Block",
             estimated_minutes=60, cognitive_load=CognitiveLoad.deep,
-            task_kind=TaskKind.analytical, suggested_date=sample_date,
+            task_kind=TaskKind.analytical,
         ),
     ]))
 

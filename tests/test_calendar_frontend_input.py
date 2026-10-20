@@ -75,7 +75,7 @@ async def test_generate_endpoint_uses_supplied_calendar(
         _LLMSubtask(
             parent_id=sample_task.id, title="Deep work",
             estimated_minutes=60, cognitive_load=CognitiveLoad.deep,
-            task_kind=TaskKind.analytical, suggested_date=date(2026, 5, 15),
+            task_kind=TaskKind.analytical,
         ),
     ]))
 
@@ -105,7 +105,7 @@ async def test_post_stream_endpoint_uses_supplied_calendar(
         _LLMSubtask(
             parent_id=sample_task.id, title="Deep work",
             estimated_minutes=60, cognitive_load=CognitiveLoad.deep,
-            task_kind=TaskKind.analytical, suggested_date=date(2026, 5, 15),
+            task_kind=TaskKind.analytical,
         ),
     ]))
 

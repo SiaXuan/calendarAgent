@@ -290,7 +290,7 @@ async def test_apply_adjustment_removes_blocks_after_hour(
         _LLMSubtask(
             parent_id=sample_task.id, title="Work",
             estimated_minutes=30, cognitive_load=CognitiveLoad.deep,
-            task_kind=TaskKind.analytical, suggested_date=sample_date,
+            task_kind=TaskKind.analytical,
         ),
     ]))
 

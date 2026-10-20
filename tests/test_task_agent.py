@@ -39,7 +39,6 @@ async def test_regular_task_calls_llm_with_structured_output(
             estimated_minutes=60,
             cognitive_load=CognitiveLoad.deep,
             task_kind=TaskKind.analytical,
-            suggested_date=sample_date,
         ),
         _LLMSubtask(
             parent_id="task_001",
@@ -47,7 +46,6 @@ async def test_regular_task_calls_llm_with_structured_output(
             estimated_minutes=60,
             cognitive_load=CognitiveLoad.deep,
             task_kind=TaskKind.analytical,
-            suggested_date=sample_date,
         ),
     ]))
 
@@ -162,3 +160,40 @@ async def test_mixed_instant_and_regular(
     user_msg = mock_sonnet._structured.calls[0][1]["content"]
     assert "task_001" in user_msg
     assert "task_instant_001" not in user_msg
+
+
+async def test_decomposed_subtasks_belong_to_the_day_being_generated(
+    mock_sonnet, sample_task, sample_date,
+):
+    """
+    The day a subtask lands on is decided in code, never taken from the model.
+    The cached path already re-stamps target_date; a fresh decomposition used to
+    keep whatever date the model emitted, so the same task behaved differently
+    on its first generation than on every later (cached) one.
+    """
+    mock_sonnet.set_structured_response(_LLMSubtaskList(subtasks=[
+        _LLMSubtask(parent_id="task_001", title="Step", estimated_minutes=60,
+                    cognitive_load=CognitiveLoad.deep, task_kind=TaskKind.analytical),
+    ]))
+    result = await rank_and_decompose([sample_task], sample_date, Language.en)
+    assert result[0].suggested_date == sample_date
+
+
+async def test_llm_accepted_instant_follows_its_parent_deadline(mock_sonnet, sample_date):
+    """Same rule as a keyword-detected instant: due on the parent's deadline —
+    not on whatever date the model picked."""
+    from datetime import timedelta
+    from models.task import Priority, Task
+    errand = Task(id="e1", title="交房租", priority=Priority.medium,
+                  cognitive_load=CognitiveLoad.light, estimated_hours=0.1,
+                  deadline=sample_date + timedelta(days=2), is_instant=None)
+    # estimated_hours <= 0.1 short-circuits as instant; use 0.2 to reach the LLM
+    errand = errand.model_copy(update={"estimated_hours": 0.2})
+    mock_sonnet.set_structured_response(_LLMSubtaskList(subtasks=[
+        _LLMSubtask(parent_id="e1", title="交房租", estimated_minutes=5,
+                    cognitive_load=CognitiveLoad.light, task_kind=TaskKind.admin,
+                    is_instant=True),
+    ]))
+    result = await rank_and_decompose([errand], sample_date, Language.en)
+    assert result[0].is_instant is True
+    assert result[0].suggested_date == sample_date + timedelta(days=2)

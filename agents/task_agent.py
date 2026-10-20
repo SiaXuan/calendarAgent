@@ -37,7 +37,6 @@ class _LLMSubtask(BaseModel):
     estimated_minutes: int
     cognitive_load: CognitiveLoad
     task_kind: TaskKind = TaskKind.analytical
-    suggested_date: date | None = None
     phase_label: str | None = None
     is_instant: bool = False
 
@@ -190,7 +189,7 @@ async def rank_and_decompose(
     `memory_context` (Phase C.3) is a list of confidence-filtered user-pattern
     bullets — schedule_prefs memories above PROD_CONFIDENCE_FLOOR. They get
     appended to the system prompt as a "KNOWN USER PREFERENCES" section so the
-    LLM honours learned habits when picking task_kind / suggested_date.
+    LLM honours learned habits when picking task_kind.
     """
     if not tasks:
         return []
@@ -251,7 +250,7 @@ async def rank_and_decompose(
         system_prompt += (
             "\n\nKNOWN USER PREFERENCES (learned from past accept/dismiss signals):\n"
             f"{bullets}\n"
-            "When picking suggested_date and task_kind, honour these preferences "
+            "When picking task_kind, honour these preferences "
             "unless an explicit constraint (deadline, priority) overrides them."
         )
     user_message = (
@@ -304,7 +303,13 @@ async def rank_and_decompose(
                 cognitive_load=CognitiveLoad.light if instant else item.cognitive_load,
                 task_kind=TaskKind.admin if instant else item.task_kind,
                 estimated_minutes=minutes,
-                suggested_date=item.suggested_date,
+                # The day is decided here, not by the model: an instant follows
+                # its parent's deadline (same rule as the keyword path above),
+                # everything else belongs to the day being generated (same as
+                # the cached path in nodes._decompose_with_cache). Multi-day
+                # spreading is the multiday planner's job, which validates.
+                suggested_date=(deadline_by_id.get(item.parent_id) or target_date)
+                if instant else target_date,
                 deadline=deadline_by_id.get(item.parent_id),
                 phase_label=item.phase_label,
                 is_instant=instant,
